@@ -149,7 +149,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
     }
     await startExecutor();
     await startReviewer();
-    const agents = [{ name: 'payout', owner, area: 'payables', port: reviewerPort, executor: false }];
+    const agents = [{ name: 'payout', owner, area: 'payables', port: reviewerPort, executor: false, invoices: `${invoices}/submit` }];
     if (portfolio) {
       const port = await freePort();
       await start('portfolio', portfolioDir, 'src/server.ts', { PORT: String(port), EXECUTOR: 'on',
