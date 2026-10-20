@@ -16,7 +16,7 @@ keeps them equal:
 <!-- state-directories -->
 `.ops/`, `.invoices/`, `.owner-intents/`, `.strategy/`, `.plans/`, `.evidence/`, `.inbox/`, `.agreements/`, `.notify/`, `.work-orders/`, `.hosted/`, `.agent-connections/`, `.machine-auth/`, and any legacy `.intake/` files
 <!-- /state-directories -->
-plus each instance's settings file. `.invoices/` includes its SQLite journals and the compensation store
+plus each instance's settings file. `.ops/` also holds each executor's `<agent>.submission-evidence.ndjson` (provider answers to failed sends; evidence only, never read to decide a send). `.invoices/` includes its SQLite journals and the compensation store
 (`<agent>.compensation.sqlite`); `.notify/` records which alerts were sent (losing it re-sends them); `.agent-connections/`
 holds agent connections and their access log (see [agent access](agent-access.md)); `.machine-auth/` holds Treasury
 machine credentials; `.hosted/` the hosted agent registry. Stop writers before copying state; never start the destination before stopping the

@@ -1,4 +1,5 @@
 import { configuredArea } from "../area.js";
+import { DIAGNOSTIC_ONLY, readSubmissionEvidence } from "../submission-evidence.js";
 import { z } from "zod";
 import { depositAddress } from "../agent.js";
 import { dashboardHoldings } from "../dashboard-holdings.js";
@@ -121,11 +122,15 @@ export const observationsRoutes = {
    * Money actions without a proven outcome: each blocks every new one until resolved. Those held for
    * the owner's approval are listed by `held`, and invoices prepared but never sent by `invoices`.
    */
-  unresolved: owner.unresolved.use(readOutput("unresolved")).handler(() =>
-    readOps()
-      .filter(blocksDispatch)
-      .map((op) => ({ key: op.idempotencyKey, at: op.at, kind: op.kind, request: op.request, status: op.status ?? null, sent: Boolean(op.correlationId) })),
-  ),
+  unresolved: owner.unresolved.use(readOutput("unresolved")).handler(() => {
+    const recorded = readSubmissionEvidence();
+    return readOps().filter(blocksDispatch).map((op) => {
+      // The provider's answer to the failed submission, when one was recorded (redacted, display only).
+      const evidence = recorded.get(op.idempotencyKey)?.at(-1);
+      return { key: op.idempotencyKey, at: op.at, kind: op.kind, request: op.request, status: op.status ?? null, sent: Boolean(op.correlationId),
+        evidence: evidence ? { at: evidence.at, httpStatus: evidence.httpStatus, code: evidence.code, requestId: evidence.requestId, providerIds: evidence.providerIds, message: evidence.message, note: DIAGNOSTIC_ONLY } : null };
+    });
+  }),
   /** Reads existing operation statuses; sends nothing. */
   recover: os.handler(async () =>
     (await recover()).map(({ op, outcome, status, detail }) => ({ key: op.idempotencyKey, outcome, status: status ?? null, detail: detail ?? null })),

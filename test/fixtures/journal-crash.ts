@@ -1,6 +1,7 @@
 // Real process exits at durable journal boundaries; the provider is an offline stand-in.
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
+import { AgentApiError } from "@near-intents-agent-api/sdk";
 import { authorityFixture, policyView } from "./authority.js";
 import { api } from "../../src/api.js";
 import { dispatch } from "../../src/agent.js";
@@ -19,6 +20,12 @@ fs.fsyncSync = (fd: number) => {
   if (mode === "after_prepare" && last.journalVersion === 2) process.exit(71);
   if (mode === "after_claim" && last.submissionState === "SUBMISSION_ATTEMPTED") process.exit(71);
 };
+// `before_evidence`: the provider refused without a proven outcome, and the process dies before its evidence is written.
+const open = fs.openSync;
+fs.openSync = ((...args: Parameters<typeof fs.openSync>) => {
+  if (mode === "before_evidence" && String(args[0]).endsWith(".submission-evidence.ndjson")) process.exit(71);
+  return open(...args);
+}) as typeof fs.openSync;
 syncBuiltinESMExports();
 Object.assign(api, {
   ...authorityFixture(),
@@ -28,6 +35,8 @@ Object.assign(api, {
     if (operation.submissionState !== "SUBMISSION_ATTEMPTED") throw new Error("No durable claim before provider call");
     fs.appendFileSync("provider.jsonl", JSON.stringify({ key: operation.idempotencyKey }) + "\n");
     if (mode === "after_acceptance") process.exit(71);
+    if (mode === "unproven_refusal" || mode === "before_evidence")
+      throw new AgentApiError(403, { errors: [{ status: "403", code: "policy_usage_unavailable", title: "Policy usage unavailable", meta: { retryable: false } }], meta: { request_id: "req_fixture" } });
     return { correlation_id: "op_test" };
   } }),
   getStatus: async (correlation_id: string) => ({ correlation_id, status: "SUCCESS" }),
@@ -36,6 +45,6 @@ const lock = await acquireMoneyLock();
 try {
   if (mode !== "recover") await dispatch(lock, "payout", {
     method: "transfer", request: { asset: ASSETS.USDC, amount: "1", recipient: "alice.near", confidential: true },
-  });
+  }).catch(error => { if (mode !== "unproven_refusal") throw error; });
   console.log(JSON.stringify(readOps()));
 } finally { await lock.release(); }

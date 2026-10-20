@@ -4,6 +4,7 @@ import { agentId, executes } from "./env.js";
 import { assertCanDispatch, assertMoneyLock, type MoneyLock, withMoneyLock } from "./lock.js";
 import { mandateDigest, type ReviewedPolicy } from "./mandate.js";
 import { AuthorizationHeld, claimSubmission, isHeld, provenRefusal, readOps, record, submittedSwapValues } from "./ops.js";
+import { recordSubmissionEvidence } from "./submission-evidence.js";
 import { authorize, type Case, type Purpose } from "./authorize.js";
 import type { Plan, PlannedAction } from "./plans.js";
 import { loadStrategy } from "./strategy.js";
@@ -158,7 +159,11 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
     }
     const code = provenRefusal(error);
     if (code) record({ idempotencyKey, refused: code });
-    else if (preparedKey) markInvoiceUnknown(preparedKey);
+    else {
+      if (preparedKey) markInvoiceUnknown(preparedKey);
+      // Keeps the provider's answer beside the journal for a later, separately authorized resolution. Resolves nothing.
+      recordSubmissionEvidence(idempotencyKey, error);
+    }
     throw error;
   }
   record({ idempotencyKey, correlation_id: sent.correlation_id, status: "SENT" });

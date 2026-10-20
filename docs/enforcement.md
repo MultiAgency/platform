@@ -248,6 +248,16 @@ but not the idempotency key, so the only link to the recorded attempt would be m
 not do. `pnpm reconcile` does not clear it either. The refusal names such operations, says reconcile cannot resolve them
 and points here (`src/lock.ts`, `test/money-safety.test.ts`).
 
+When the provider answers a claimed send with an error that doesn't prove a refusal, the executor keeps that answer as
+evidence (offline-tested, `test/submission-evidence.test.ts`): HTTP status, error codes, a shortened message with
+credential-like values removed, the provider's `requestId`, and any operation or correlation id the provider included
+(its error document defines none). It goes in `.ops/<agent>.submission-evidence.ndjson`, beside the journal rather than in
+it, and `unresolved` and `pnpm reconcile` show it. It resolves nothing and changes no send, refusal or block. A
+`requestId` identifies the failed request for diagnosis with the provider. Retaining it doesn't establish which provider
+operation the request became, whether anything executed, or permission to clear the operation; the output says so. A lost reply leaves no provider answer and records no evidence.
+Earlier builds never read the file, and their journal reader and `journal:check` are unaffected (checked against the
+deployed bf59054e reader on 2026-10-19), so rolling back across this change keeps every journal readable.
+
 There is no supported review procedure yet. Until the provider's idempotency-key behaviour is observed (the open
 dependency above) or an evidence rule for clearing is decided, the executor stays blocked. Its records must not be edited
 by hand. Reproduced offline on 2026-10-19 with the provider mocked at its API boundary, as a scratch reproduction

@@ -1,11 +1,15 @@
 import { blocksDispatch, isHeld, type Op } from "./ops.js";
 import { ageMinutes, methodOf, openOps, recover } from "./recover.js";
+import { describeEvidence, readSubmissionEvidence } from "./submission-evidence.js";
 
 // `pnpm reconcile` lists money actions without a proven outcome; `--poll` reads their statuses once.
 // Nothing is ever resent: provider deduplication is unverified.
 
-const label = (op: Op) =>
-  `${op.idempotencyKey} (${methodOf(op)}, ${ageMinutes(op)} min old, ${op.status ? `last ${op.status}` : "no response"})`;
+const evidence = readSubmissionEvidence();
+const label = (op: Op) => {
+  const last = evidence.get(op.idempotencyKey)?.at(-1);
+  return `${op.idempotencyKey} (${methodOf(op)}, ${ageMinutes(op)} min old, ${op.status ? `last ${op.status}` : "no response"}${last ? `; ${describeEvidence(last)}` : ""})`;
+};
 const state = (op: Op) => (blocksDispatch(op) ? "unresolved" : isHeld(op) ? "held" : "prepared");
 
 if (!process.argv.includes("--poll")) {
