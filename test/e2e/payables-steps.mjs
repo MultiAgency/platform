@@ -61,7 +61,7 @@ export const programFetch = (input, init = {}) => new Promise((resolve, reject) 
  * `session-recheck` (the session re-read on focus, visibility and a cross-tab signal) by shared-reader.spec.mjs.
  */
 export function payablesGeneration() {
-  const CHANGES = ['review-count', 'compensation-recovery', 'account-scoped-cache', 'session-recheck', 'record-deep-link'];
+  const CHANGES = ['review-count', 'compensation-recovery', 'account-scoped-cache', 'session-recheck', 'record-deep-link', 'report-link'];
   const change = JSON.parse(process.env.PROTO_E2E_OWNER_CHANGES ?? '{}').payables;
   return { CHANGES, change, has: (release, name) => CHANGES.indexOf(name) < CHANGES.indexOf(change) || (release === 'b' && name === change) };
 }

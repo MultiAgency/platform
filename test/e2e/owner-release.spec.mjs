@@ -94,6 +94,18 @@ test('Payables report to payment across independent releases A, B, refused C and
     }
     await page.goto(`${stack.dashboard}/a/payout/`);
   };
+  /** A6's change: each agreement offers its contributor report link, resolved beside the payee entry (the stack gives
+   * production's `…/submit` shape) to a page the payee host serves; earlier releases offer no report link. */
+  const expectReportLink = async (release, agreementId) => {
+    await page.goto(`${stack.dashboard}/a/payout/payees`);
+    await expect(page.getByRole('heading', { name: 'October design support', level: 3 })).toBeVisible();
+    const link = page.getByRole('link', { name: 'Open report form', exact: true });
+    if (has(release, 'report-link')) {
+      await expect(link).toHaveAttribute('href', `${stack.invoices}/report?agreement=${agreementId}`);
+      expect((await people.payeePage.goto(await link.getAttribute('href')))?.status(), 'the payee host serves the report link').toBe(200);
+    } else await expect(link).toHaveCount(0);
+    await page.goto(`${stack.dashboard}/a/payout/`);
+  };
   const chunksOf = text => text.match(/\/static\/(js|css)\/[a-zA-Z0-9_.-]+\.[a-f0-9]{8,}\.(js|css)/g) ?? [];
 
   // 1. Release A serves the owner interface from its own process; the owner signs in once.
@@ -124,6 +136,7 @@ test('Payables report to payment across independent releases A, B, refused C and
   const report = await payee('POST', '/api/compensation', { commandId: globalThis.crypto.randomUUID(), id: requestId, expectedVersion: 0, submit: true,
     report: { agreementId, start: '2026-10-01', end: '2026-10-15', contributions: 'Reviewed onboarding screens', assessment: 'Delivered on schedule', evidence: [] } });
   expect(report.status).toBe(200);
+  await expectReportLink('a', agreementId);
   await page.goto(`${stack.dashboard}/a/payout/`);
   const request = page.getByRole('button').filter({ hasText: PAYEE }).filter({ hasText: 'In review' });
   await expect(request).toBeVisible();
@@ -144,6 +157,7 @@ test('Payables report to payment across independent releases A, B, refused C and
   await skillMatches('b');
   for (const chunk of aChunks) expect(await page.evaluate(async path => (await fetch(path)).status, chunk), chunk).toBe(200);
   await expectDeepLink('b', requestId, 'Reviewed onboarding screens');
+  await expectReportLink('b', agreementId);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Reports & payment requests' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect wallet', exact: true })).toHaveCount(0);
@@ -202,6 +216,7 @@ test('Payables report to payment across independent releases A, B, refused C and
   await expect(page.getByRole('button', { name: 'Connect wallet', exact: true })).toHaveCount(0);
   await expectReviewCount('a');
   await expectDeepLink('a', requestId, 'Reviewed onboarding screens');
+  await expectReportLink('a', agreementId);
 
   // 11. Owner approves the held payout (one wallet signature); approval is not payment.
   await page.getByRole('button', { name: 'Show all requests' }).click();
