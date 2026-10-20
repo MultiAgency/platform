@@ -134,10 +134,11 @@ for (const release of ['a', 'b']) test(`Payables shared readers, release ${relea
   }
 });
 
-/** The Treasury generations; `account-scoped-reads` (A4) re-reads instance and strategy status under each account;
- * `session-revalidation` (A5) re-reads the session when the tab is shown again and offers no permission-dependent
- * control until it is confirmed. */
-const TREASURY_CHANGES = ['unresolved-guidance', 'operations-read-time', 'account-scoped-reads', 'session-revalidation'];
+/** The Treasury generations, in treasury-migration.spec.mjs's order; `account-scoped-reads` (A4) re-reads instance and
+ * strategy status under each account; `session-revalidation` (A5) re-reads the session when the tab is shown again and
+ * offers no permission-dependent control until it is confirmed. Later generations (A6 `guided-run`, A7 `access-wait`) keep
+ * both and are asserted by the migration spec. */
+const TREASURY_CHANGES = ['unresolved-guidance', 'operations-read-time', 'account-scoped-reads', 'session-revalidation', 'guided-run', 'access-wait'];
 const treasuryHas = (release, name) => TREASURY_CHANGES.indexOf(name) < TREASURY_CHANGES.indexOf(changes.treasury) || (release === 'b' && name === changes.treasury);
 
 for (const release of ['a', 'b']) test(`Treasury shared readers, release ${release.toUpperCase()}: permissions and answers follow each account switch, including the return`, async ({ browser }, info) => {
