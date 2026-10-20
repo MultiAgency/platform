@@ -13,8 +13,11 @@ import { outcomeRegion, previewAndExecute, quoteRegion, seedStrategy, signIn } f
 // (`--treasury-change`), and the spec requires it present in B and absent in A; earlier changes are present in both.
 const apps = JSON.parse(process.env.PROTO_E2E_OWNER_APPS ?? '{}');
 // `account-scoped-reads` (A4) and `session-revalidation` (A5) are asserted by shared-reader.spec.mjs; they have no
-// B-only page text here. `guided-run` (A6): /demo#preview opens the guided run at its preview step.
-const CHANGES = ['unresolved-guidance', 'operations-read-time', 'account-scoped-reads', 'session-revalidation', 'guided-run'];
+// B-only page text here. `guided-run` (A6): /demo#preview opens the guided run at its preview step. `access-wait` (A7):
+// only the served bundle is checked here (the guard's message); this journey never creates an agent, so the behaviour is
+// evidenced by Treasury's browser-a7 scenarios hostedSetup_{signout,switch,timeout} and its creation run run-v66Btv.
+const CHANGES = ['unresolved-guidance', 'operations-read-time', 'account-scoped-reads', 'session-revalidation', 'guided-run', 'access-wait'];
+const ACCESS_WAIT_GUARD = 'Another account signed in before the new workspace opened.';
 const change = JSON.parse(process.env.PROTO_E2E_OWNER_CHANGES ?? '{}').treasury;
 /** Whether a release has a change: B has its own, and both have every earlier generation's. */
 const has = (release, name) => CHANGES.indexOf(name) < CHANGES.indexOf(change) || (release === 'b' && name === change);
@@ -60,6 +63,15 @@ test(`Treasury migrated A→B (${change}): journey, B's change in B only, refuse
       }
       expect(owner.applicationRequests.filter(r => MUTATIONS.test(new URL(r.url).pathname)).length, 'opening the guided run sends nothing').toBe(before);
     };
+    /** A7: the access wait's guard message is in the release's served JS, and absent before A7. The code, not its behaviour. */
+    const expectAccessWait = async name => {
+      const root = join(release.root, release.ids[name]);
+      const scripts = readdirSync(join(root, 'static'), { recursive: true }).filter(f => f.endsWith('.js')).map(f => `/static/${f}`);
+      expect(scripts.length).toBeGreaterThan(0);
+      const bodies = await page.evaluate(async paths => Promise.all(paths.map(async path => { const r = await fetch(path, { cache: 'no-store' }); return { path, status: r.status, body: await r.text() }; })), scripts);
+      for (const { path, status } of bodies) expect(status, path).toBe(200);
+      expect(bodies.some(({ body }) => body.includes(ACCESS_WAIT_GUARD)), `access-wait guard served by ${name.toUpperCase()}`).toBe(has(name, 'access-wait'));
+    };
     const expectReadTime = async release => {
       const read = outcome.getByText(/^Operations last read: /);
       if (!has(release, 'operations-read-time')) { await expect(read).toHaveCount(0); return; }
@@ -88,6 +100,7 @@ test(`Treasury migrated A→B (${change}): journey, B's change in B only, refuse
     await page.reload();
     await expect(outcome.getByText('Following the exact plan named in this page’s address.')).toBeVisible();
     await expectReadTime('a');
+    await expectAccessWait('a');
     expect(executions(), 'reload never replays').toBe(1);
     await stop.click();
     await expect.poll(() => new URL(page.url()).searchParams.has('plan')).toBe(false);
@@ -151,6 +164,7 @@ test(`Treasury migrated A→B (${change}): journey, B's change in B only, refuse
     await expectReadTime('b');
     expect(executions(), 'reopening the plan never replays').toBe(executed);
     await expectGuidedRun('b');
+    await expectAccessWait('b');
 
     // Incompatible release C is refused; records are unchanged: provider swaps, and the agent's saved plans, operation
     // journal and owner records (every file under them, byte for byte).
@@ -174,6 +188,7 @@ test(`Treasury migrated A→B (${change}): journey, B's change in B only, refuse
     await expect(outcome).toBeVisible();
     await expectReadTime('a');
     await expectGuidedRun('a');
+    await expectAccessWait('a');
     expect(JSON.stringify(stack.portfolio.swaps)).toBe(swaps);
     expect(portfolioRecords(), 'plans, journal and owner records unchanged across refusal and rollback').toEqual(recordsBefore);
     expect(executions()).toBe(executed);
