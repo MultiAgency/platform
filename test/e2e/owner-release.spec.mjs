@@ -106,6 +106,43 @@ test('Payables report to payment across independent releases A, B, refused C and
     } else await expect(link).toHaveCount(0);
     await page.goto(`${stack.dashboard}/a/payout/`);
   };
+  /**
+   * A7's change (`owner-attention`): the queue names each request's next owner step and counts those needing action,
+   * selecting a request is kept in the address (replacing, so Back leaves the page), the card shows the agreement's scope
+   * and other requests, and the review amount starts from the report's own amount, never the remaining ceiling. Before
+   * A7 none of this text appears and selection leaves the address alone. Reads only.
+   */
+  const needsAction = page.getByText(/^Needs your action: \d+$/);
+  const queueItem = () => page.getByRole('list', { name: 'Requests' }).getByRole('listitem').filter({ hasText: PAYEE });
+  const LANDING_HELD = 'No alerts in this agent\'s payout records. 1 request needs your action below.';
+  const LANDING_CLEAR = 'No payout or setup alerts in the records checked. Review reports & payment requests below.';
+  const expectAttention = async (release, { step, count, landing }) => {
+    if (landing) await page.goto(`${stack.dashboard}/a/payout/`);
+    if (!has(release, 'owner-attention')) { await expect(needsAction).toHaveCount(0); return; }
+    await expect(needsAction).toHaveText(`Needs your action: ${count}`);
+    await expect(queueItem().first()).toContainText(step);
+    if (landing) await expect(page.getByText(landing, { exact: true })).toBeVisible();
+  };
+  /** The report in review on A7: counts, step, the kept selection across reload, scope, other requests and the amount. */
+  const expectReviewAttention = async (requestId, contributions) => {
+    await page.goto(`${stack.dashboard}/a/payout/payees`);
+    await page.goto(`${stack.dashboard}/a/payout/`);
+    await expect(page.getByText('Awaiting your review: 1', { exact: true })).toBeVisible();
+    await expectAttention('b', { step: 'Review the work', count: 1 });
+    await page.getByRole('button').filter({ hasText: PAYEE }).filter({ hasText: 'In review' }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('request')).toBe(requestId);
+    await page.reload();
+    await expect(page.getByRole('button', { name: new RegExp(PAYEE.replaceAll('.', '\\.')), pressed: true }).first()).toBeVisible();
+    await expect(page.getByText(contributions).first()).toBeVisible();
+    await expect(page.getByText('Scope reference', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Design reviews for onboarding', { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Other requests on this agreement', level: 3 })).toBeVisible();
+    await expect(page.getByText('None recorded.', { exact: true }).first()).toBeVisible();
+    // An amount-free report leaves the review amount empty: never the remaining ceiling (40).
+    await expect(page.getByLabel('Compensation · USDC', { exact: true })).toHaveValue('');
+    await page.goBack();
+    await expect.poll(() => new URL(page.url()).pathname, 'Back leaves the page; selections are replaced').not.toBe('/a/payout/');
+  };
   const chunksOf = text => text.match(/\/static\/(js|css)\/[a-zA-Z0-9_.-]+\.[a-f0-9]{8,}\.(js|css)/g) ?? [];
 
   // 1. Release A serves the owner interface from its own process; the owner signs in once.
@@ -127,6 +164,7 @@ test('Payables report to payment across independent releases A, B, refused C and
   for (const [label, value] of [['Agreement title', 'October design support'], ['Contributor NEAR account', PAYEE], ['Signed Google Doc or document URL', 'https://example.test/agreement'],
     ['Signed on', '2026-10-01'], ['Work period starts', '2026-10-01'], ['Work period ends', '2026-10-31'], ['Upper limit · USDC', '40'], ['Already approved outside this system · USDC', '0']])
     await page.getByLabel(label, { exact: true }).fill(value);
+  await page.getByLabel('Scope reference', { exact: true }).fill('Design reviews for onboarding');
   await page.getByRole('button', { name: 'Record signed terms', exact: true }).click();
   await expect(page.getByText('40 of 40 USDC remaining')).toBeVisible();
 
@@ -140,9 +178,18 @@ test('Payables report to payment across independent releases A, B, refused C and
   await page.goto(`${stack.dashboard}/a/payout/`);
   const request = page.getByRole('button').filter({ hasText: PAYEE }).filter({ hasText: 'In review' });
   await expect(request).toBeVisible();
+  await expectAttention('a', { step: 'Review the work', count: 1 });
+  // A7 shown while the report is in review (then back to A for the review itself).
+  if (has('b', 'owner-attention')) {
+    release.activate('b');
+    await expectReviewAttention(requestId, 'Reviewed onboarding screens');
+    release.activate('a');
+    await page.goto(`${stack.dashboard}/a/payout/`);
+  }
 
   // 4. Review decides compensation only; nothing is paid.
   await request.click();
+  if (!has('a', 'owner-attention')) expect(new URL(page.url()).searchParams.has('request'), 'before A7 selection leaves the address alone').toBe(false);
   await page.getByLabel('Compensation · USDC', { exact: true }).fill('25');
   await page.getByLabel('Review feedback', { exact: true }).fill('Accepted: reviews delivered.');
   await page.getByRole('button', { name: 'Approve', exact: true }).click();
@@ -174,6 +221,11 @@ test('Payables report to payment across independent releases A, B, refused C and
   await prepareIsolated('b').click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Prepare payout', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Authorize work order', exact: true })).toBeVisible();
+  await expectAttention('b', { step: 'Authorize the order agent', count: 1 });
+  if (has('b', 'owner-attention')) {
+    await expect(page.getByText('Isolated order: its own agent, grant and funding.').first()).toBeVisible();
+    await expect(page.getByText('Paid through')).toHaveCount(0);
+  }
 
   // 7. Owner authorizes the order agent and its grant (wallet signatures), then funds it exactly (simulated deposit).
   const signed = signatures();
@@ -195,6 +247,7 @@ test('Payables report to payment across independent releases A, B, refused C and
   expect(stack.simulated.transfers).toHaveLength(1);
   await page.getByRole('button', { name: 'Refresh work order' }).click();
   await expect(page.getByText('Recorded payment: Held for owner approval; not paid.')).toBeVisible();
+  await expectAttention('b', { step: 'Approve the held payout', count: 1, landing: LANDING_HELD });
 
   // 9. Incompatible release C is refused before any HTML; records are unchanged.
   const before = { records: stack.records(), transfers: JSON.stringify(stack.simulated.transfers) };
@@ -233,6 +286,11 @@ test('Payables report to payment across independent releases A, B, refused C and
   await expect(page.getByText('Recorded payment: paid')).toBeVisible();
   expect(stack.simulated.transfers).toHaveLength(1);
   expect(stack.simulated.transfers[0]).toMatchObject({ agent, body: { recipient: PAYEE, amount: '25000000' } });
+  await expectAttention('a', { step: 'Paid', count: 0, landing: LANDING_CLEAR });
+  if (has('b', 'owner-attention')) {
+    release.activate('b');
+    await expectAttention('b', { step: 'Paid', count: 0, landing: LANDING_CLEAR });
+  }
 
   // 13. Throughout: Proto never restarted, nothing signed twice, and no Portfolio-only capability was requested.
   expect(stack.protoPids(), 'E2E_NO_PROTO_RESTART').toEqual(proto);

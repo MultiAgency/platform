@@ -225,8 +225,11 @@ test('standalone contributor report and work-order requests retain identities ac
   await expect.poll(async()=>(await rpc('workOrders/list')).length).toBe(1);
   expect(stack.simulated.transfers).toHaveLength(0);
   await payee.goto(stack.invoices+'/report');
-  await payee.getByRole('button',{name:'New report',exact:true}).click();
-  await payee.getByLabel('Contributions',{exact:true}).fill('Extracted contributor frontend');
+  // From Invoices J the form opens directly when the payee has no requests yet; I asked for "New report" first.
+  const newReport = payee.getByRole('button',{name:'New report',exact:true}), contributions = payee.getByLabel('Contributions',{exact:true});
+  await expect(newReport.or(contributions).first()).toBeVisible();
+  if (await newReport.isVisible()) await newReport.click();
+  await contributions.fill('Extracted contributor frontend');
   await payee.getByLabel('Assessment',{exact:true}).fill('Validated locally');
   await payee.getByRole('button',{name:'Submit',exact:true}).click();
   await expect(payee.getByText('Compensation in review',{exact:true})).toBeVisible();
@@ -234,8 +237,11 @@ test('standalone contributor report and work-order requests retain identities ac
   expect(submitted.payee).toBe(PAYEE);
   await rpc('compensation/review',{commandId:uuid(),id:submitted.id,expectedVersion:submitted.version,decision:'approved',approvedAmount:'2000000',feedback:'Reviewed the extracted app'});
   await payee.reload();
-  await payee.getByRole('button',{name:/Standalone report/}).click();
-  await expect(payee.getByText('2 USDC',{exact:true})).toBeVisible();
+  // From J a submitted request stays selected in the address (?request=) across a reload; I listed it to be opened.
+  const row = payee.getByRole('button',{name:/Standalone report/}), approved = payee.getByText('2 USDC',{exact:true});
+  await expect(row.or(approved).first()).toBeVisible();
+  if (await row.isVisible()) await row.click();
+  await expect(approved).toBeVisible();
   expect(stack.simulated.transfers).toHaveLength(0);
   expect((await rpc('compensation/list')).requests[0].id).toBe(submitted.id);
 });
