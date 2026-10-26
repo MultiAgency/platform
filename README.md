@@ -1,6 +1,7 @@
 # MultiAgency shared infrastructure
 
-This repository provides shared owner onboarding, isolated agent execution, host-bound access,
+This repository is the one owner of the gateway, executor and money path; `treasury`, `payables` and
+`invoices` depend on it only through `@multiagency/sdk`. It provides shared owner onboarding, isolated agent execution, host-bound access,
 and payee intake for MultiAgency prototypes. Regular NEAR wallet owners and authorized Sputnik
 DAO members can reserve their own Treasury or Payables setup; owner policy and grant signatures
 remain separate. The public showcase reads no private records.

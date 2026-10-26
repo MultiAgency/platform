@@ -24,6 +24,14 @@ The supplied Agent Connect experiment catalog and [scope audit](agent-connect-au
 these ideas; domain names do not define scope or establish completion. Existing evidence stages
 remain in the canonical inventory. Steward remains hidden and experimental.
 
+## Backend owner (decision, issue #1)
+
+**This repository (`MultiAgency/sdk`, formerly `proto`) owns the gateway, executor and money path.**
+`treasury` and `payables` are frontends: they depend on it only through `@multiagency/sdk` and the
+gateway API, and do not carry `src/gateway` or the send path. `test/send-path.test.ts` (the one-send-site
+test) lives here and nowhere else. Until the copies are removed from `treasury` and `payables`, a fix
+to the money path is made here first and is not considered shipped for them.
+
 ## Source ownership
 
 - `/agencies/proto`: integration, shared gateway, agency workspace, compatibility and release tests.
