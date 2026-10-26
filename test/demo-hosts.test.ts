@@ -10,6 +10,7 @@ import { demoCrossSite, demoHost, demoSession, invoiceRoute } from "../src/gatew
 import { generateKey, Near, type PrivateKey } from "near-kit";
 import { issueChallenge, verifySignIn } from "../src/signin.js";
 import { loadConfig } from "../src/gateway/config.js";
+import { checkedDiscovery } from "./fixtures/discovery.js";
 const req = (host: string, extra = {}, method = "GET") => ({ headers: { host, ...extra }, method }) as IncomingMessage;
 const hosts = {
   "proto.multiagency.ai": { demo: "showcase" as const, agents: ["treasury", "payout"] },
@@ -64,7 +65,7 @@ test("real gateway isolates host APIs, preserves Proto, and refuses writes witho
     const r = request({ hostname: "127.0.0.1", port, path, method, headers: { host, ...headers } }, res => { let text = ""; res.on("data", x => text += x).on("end", () => resolve({ status: res.statusCode!, headers: res.headers, text })); }); r.on("error", reject); r.end(body);
   });
   for (const host of Object.keys(hosts)) {
-    const answer = await call(host, "/gw/me"); assert.equal(answer.status, 200); assert.deepEqual(JSON.parse(answer.text).agents, []);
+    const answer = await call(host, "/gw/me"); assert.equal(answer.status, 200); assert.deepEqual(checkedDiscovery(JSON.parse(answer.text)).agents, []);
     // Every host names the hosts serving each app area, so pages link to the full app on this deployment.
     assert.deepEqual(JSON.parse(answer.text).apps, { treasury: "treasury.multiagency.ai", payables: "payables.multiagency.ai" });
     const challenge = await call(host, "/gw/challenge"); assert.equal(JSON.parse(challenge.text).recipient, host);
@@ -77,7 +78,7 @@ test("real gateway isolates host APIs, preserves Proto, and refuses writes witho
   assert.equal((await call("evil.test", "/health")).status, 200);
   const cookie = demoSession(secret, "treasury.multiagency.ai").open("alice.near").split(";")[0]!;
   const me = await call("treasury.multiagency.ai", "/gw/me", "GET", { cookie });
-  assert.deepEqual(Object.keys(JSON.parse(me.text).viewer.access), ["treasury"]);
+  assert.deepEqual(Object.keys(checkedDiscovery(JSON.parse(me.text)).viewer!.access), ["treasury"]);
   const copied = await call("payables.multiagency.ai", "/gw/me", "GET", { cookie }); assert.equal(JSON.parse(copied.text).viewer, null);
   for (const [host, path, origin, status] of [
     ["treasury.multiagency.ai", "/a/payout/rpc/payout", "https://treasury.multiagency.ai", 404],

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { InferRouterInputs, InferRouterOutputs } from "@orpc/server";
+import { ORPCError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import type { z } from "zod";
 import type { Router } from "../src/router.js";
@@ -69,9 +70,27 @@ test("recovery cases are distinguishable by kind, without parsing messages", asy
 test("gateway denials are session or forbidden by status, even as plain JSON or HTML", async () => {
   let status = 401;
   const { client } = serve({}, () => new Response(status === 401 ? '{"error":"Sign in first","access":"session"}' : "<html>no</html>", { status }));
-  assert.deepEqual(await client.call("overview"), { ok: false, kind: "session", status: 401, error: "Sign in first" });
+  assert.deepEqual(await client.call("overview"), { ok: false, kind: "session", status: 401, error: "Sign in first", scope: "session", source: "gateway" });
   status = 403;
-  assert.deepEqual(await client.call("deposit"), { ok: false, kind: "forbidden", status: 403, error: "This account may not do that." });
+  assert.deepEqual(await client.call("deposit"), { ok: false, kind: "forbidden", status: 403, error: "This account may not do that.", source: "gateway" });
+});
+
+test("a gateway denial carries the scope it declares, and none when it declares none", async () => {
+  let body: unknown;
+  const { client } = serve({ overview: os.handler(() => { throw new ORPCError("FORBIDDEN", { message: "Agent server refusal" }); }) },
+    request => body === undefined ? undefined : Response.json(body, { status: 403 }));
+  for (const scope of ["agent", "procedure"] as const) {
+    body = { error: "Denied", access: scope };
+    assert.deepEqual(await client.call("activity"), { ok: false, kind: "forbidden", status: 403, error: "Denied", scope, source: "gateway" });
+  }
+  // A machine route or older gateway declares no scope, and an unknown value is not guessed at.
+  for (const answer of [{ error: "Credential does not authorize this agent" }, { error: "Denied", access: "everything" }]) {
+    body = answer;
+    assert.deepEqual(await client.call("activity"), { ok: false, kind: "forbidden", status: 403, error: answer.error, source: "gateway" });
+  }
+  // An agent server's own encoded refusal is not a gateway denial.
+  body = undefined;
+  assert.deepEqual(await client.call("overview"), { ok: false, kind: "forbidden", status: 403, error: "Agent server refusal", source: "agent" });
 });
 
 test("a transport failure after a mutation is unknown with its identity; after a read it is unavailable", async () => {
@@ -127,18 +146,20 @@ test("an aborted read is unavailable; an aborted mutation or stream is unknown w
 
 
 test("non-oRPC answers (proxy HTML, foreign JSON, error responses, cut streams) are lost, never refused, and never retried", async () => {
-  // oRPC beta.44 rejects these with MalformedResponseError (not an ORPCError): the outcome of a mutation is unknown.
-  const answers: Record<string, () => Response> = {
-    html: () => new Response("<html><body>502 Bad Gateway</body></html>", { status: 502, headers: { "content-type": "text/html" } }),
-    foreign: () => Response.json({ error: "upstream" }, { status: 500 }),
-    errored: () => Response.error(),
-    redirected: () => new Response(null, { status: 302, headers: { location: "/elsewhere" } }),
+  // None is an encoded oRPC error, so none is an ORPCError (the client keeps only a plain answer's status): after a
+  // mutation the outcome is unknown.
+  const answers: Record<string, [() => Response, number | undefined]> = {
+    html: [() => new Response("<html><body>502 Bad Gateway</body></html>", { status: 502, headers: { "content-type": "text/html" } }), 502],
+    foreign: [() => Response.json({ error: "upstream" }, { status: 500 }), 500],
+    errored: [() => Response.error(), undefined],
+    redirected: [() => new Response(null, { status: 302, headers: { location: "/elsewhere" } }), 302],
   };
-  for (const [name, answer] of Object.entries(answers)) {
+  for (const [name, [answer, httpStatus]] of Object.entries(answers)) {
     let requests = 0;
     const client = ownerClient({ base: "/a/payout", fetch: async () => { requests++; return answer(); } });
-    assert.deepEqual(await client.call("workOrders/file", { id: "w" }), { ok: false, kind: "unknown", procedure: "workOrders/file", identity: { id: "w" } }, name);
-    assert.deepEqual(await client.call("held"), { ok: false, kind: "unavailable" }, name);
+    const seen = httpStatus === undefined ? {} : { httpStatus };
+    assert.deepEqual(await client.call("workOrders/file", { id: "w" }), { ok: false, kind: "unknown", procedure: "workOrders/file", identity: { id: "w" }, ...seen }, name);
+    assert.deepEqual(await client.call("held"), { ok: false, kind: "unavailable", ...seen }, name);
     assert.equal(requests, 2, `${name}: one request per call, no retry`);
   }
   // A stream cut after a valid event, without its closing event: unknown, one request, no reconnect.
@@ -164,4 +185,82 @@ test("a provider failure that does not prove non-execution leaves a mutation unk
   let next = await events.next(); while (!next.done) next = await events.next();
   assert.deepEqual(next.value, { ok: false, kind: "unknown", procedure: "sweep", identity: { execute: true } });
   assert.equal((await client.call("held") as { kind: string }).kind, "provider", "a read has no effect to hide");
+});
+
+// Compile time: Recovery B's diagnostic evidence is declared, so a typed consumer reads its fields without a cast.
+type UnresolvedEvidence = NonNullable<z.output<(typeof ownerOutputs)["unresolved"]>[number]["evidence"]>;
+const evidenceTyped: [UnresolvedEvidence["requestId"], UnresolvedEvidence["httpStatus"], UnresolvedEvidence["providerIds"]] extends [string | null, number, Record<string, string>] ? true : false = true;
+void evidenceTyped;
+
+test("unresolved evidence is optional and diagnostic: older answers parse, malformed evidence never hides the operation", async () => {
+  const op = { key: "rebalance:4b39", at: "2026-10-19T00:00:00Z", kind: "rebalance", request: {}, status: null, sent: false };
+  const evidence = { at: "2026-10-19T00:00:01Z", httpStatus: 400, code: "policy_usage_unavailable", requestId: "req_1", providerIds: {}, message: "x", note: "Diagnostic only" };
+  const read = async (rows: unknown[]) => {
+    const { client } = serve({ unresolved: os.handler(() => rows) });
+    const answer = await client.call("unresolved");
+    assert.equal(answer.ok, true, JSON.stringify(answer));
+    return (answer as { value: Record<string, unknown>[] }).value;
+  };
+  // An answer from a server before Recovery B: no evidence key at all.
+  assert.deepEqual(await read([op]), [op]);
+  assert.deepEqual(await read([{ ...op, evidence: null }]), [{ ...op, evidence: null }]);
+  assert.deepEqual(await read([{ ...op, evidence }]), [{ ...op, evidence }]);
+  // Malformed evidence is replaced by null: the operation, which blocks sends, stays listed with every authoritative field.
+  for (const malformed of [{ ...evidence, httpStatus: "400" }, { ...evidence, providerIds: { correlation_id: 7 } }, "provider said no", 42])
+    assert.deepEqual(await read([{ ...op, evidence: malformed }]), [{ ...op, evidence: null }], JSON.stringify(malformed));
+  // The authoritative fields stay strict: a malformed operation is an unavailable read, never a silently shortened list.
+  const { client } = serve({ unresolved: os.handler(() => [{ ...op, sent: "no" }]) });
+  assert.deepEqual(await client.call("unresolved"), { ok: false, kind: "unavailable" });
+});
+
+test("an absolute base reaches a scoped non-browser route through the caller's fetch, which alone adds credentials", async () => {
+  const sent: { url: string; authorization: string | null; cookie: string | null }[] = [];
+  const handler = new RPCHandler({ overview: os.handler(() => { throw new PublicError("stop"); }), activity: os.handler(() => []) } as never);
+  const machine = ownerClient({ base: "https://treasury.example/machine/v1/a/treasury", fetch: async (input, init) => {
+    const request = new Request(input, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), authorization: "Bearer tmc_fixture" } });
+    sent.push({ url: request.url, authorization: request.headers.get("authorization"), cookie: request.headers.get("cookie") });
+    return (await handler.handle(request, { prefix: "/machine/v1/a/treasury/rpc" })).response ?? new Response("", { status: 404 });
+  } });
+  assert.deepEqual(await machine.call("activity"), { ok: true, value: [] });
+  assert.equal((await machine.call("overview") as { kind: string }).kind, "refused");
+  assert.deepEqual(sent.map(s => s.url), ["https://treasury.example/machine/v1/a/treasury/rpc/activity", "https://treasury.example/machine/v1/a/treasury/rpc/overview"]);
+  assert.ok(sent.every(s => s.authorization === "Bearer tmc_fixture" && s.cookie === null));
+  // Without a caller fetch that adds one, the client sends no credential of its own.
+  const bare: Headers[] = [];
+  await ownerClient({ base: "https://treasury.example/machine/v1/a/treasury", fetch: async (_input, init) => { bare.push(new Headers(init?.headers)); return Response.json({}, { status: 401 }); } }).call("activity");
+  assert.equal(bare[0]?.get("authorization"), null);
+});
+
+test("a plain (unencoded) answer keeps its HTTP status as a diagnostic, without becoming a refusal; an encoded refusal keeps its status and code", async () => {
+  for (const status of [404, 405, 429, 502]) {
+    const client = ownerClient({ base: "/a/t", fetch: async () => Response.json({ error: "Not found" }, { status }) });
+    // The handler may never have run (a missing route), but nothing in the answer proves it: the outcome stays unknown.
+    assert.deepEqual(await client.call("externalPlan", { swaps: [] }), { ok: false, kind: "unknown", procedure: "externalPlan", identity: { swaps: [] }, httpStatus: status });
+    assert.deepEqual(await client.call("activity"), { ok: false, kind: "unavailable", httpStatus: status });
+  }
+  const { client } = serve({ recover: throwing(new PublicError("Reviewed.")), pay: throwing(new ORPCError("NOT_FOUND", { message: "No such payee" })) });
+  assert.deepEqual(await client.call("recover"), { ok: false, kind: "refused", error: "Reviewed.", status: 400, rpcCode: "BAD_REQUEST" });
+  const pay = { recipient: "a.near", asset: "nep141:usdc", amount: "1", confidential: true, expectedPolicy: { revision: 1, digest: "sha256:" + "0".repeat(64) } };
+  assert.deepEqual(await client.call("pay", pay), { ok: false, kind: "refused", error: "No such payee", status: 404, rpcCode: "NOT_FOUND" });
+});
+
+test("oRPC's 400 fallback for unmapped codes can't read as a refusal; every code Proto throws has its own status", async () => {
+  const { COMMON_ERROR_STATUS_MAP } = await import("@orpc/client");
+  // An app code the server's status map lacks is sent as 400 (oRPC beta.45+). The client classifies by code, so after an
+  // action it stays unknown: a 400 never stands in for a refusal by itself.
+  const { client } = serve({ cancelPreparedInvoice: os.input(undefined as never).handler(() => { throw new ORPCError("LEDGER_WRITE_FAILED" as never, { message: "x" }); }) });
+  const identity = { id: "a".repeat(32) };
+  assert.deepEqual(await client.call("cancelPreparedInvoice", identity), { ok: false, kind: "unknown", procedure: "cancelPreparedInvoice", identity });
+  // Every ORPCError code constructed in src/ is in the map, so none falls back to 400.
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const codes = new Set<string>();
+  // The whole first argument, so a code chosen by a ternary is read too; one the scan can't read fails the test.
+  for (const file of readdirSync("src", { recursive: true, encoding: "utf8" }).filter(f => /\.[cm]?[jt]sx?$/.test(f)))
+    for (const [, argument] of readFileSync(`src/${file}`, "utf8").matchAll(/new ORPCError\(\s*([^,)]+)[,)]/g)) {
+      const literals = [...argument!.matchAll(/["'`]([A-Z_]+)["'`]/g)].map(([, code]) => code!);
+      assert.ok(literals.length, `src/${file}: ORPCError code is not a literal: ${argument}`);
+      for (const code of literals) codes.add(code);
+    }
+  assert.ok(codes.size > 0);
+  assert.deepEqual([...codes].filter(code => !(code in COMMON_ERROR_STATUS_MAP)), [], "codes without an explicit HTTP status");
 });

@@ -1,12 +1,12 @@
 # domain_map.yaml
 # Library: @multiagency/sdk
-# Version: 0.1.0
+# Version: 0.2.0
 # Date: 2026-10-18
 # Status: draft
 library:
   name: '@multiagency/sdk'
-  version: '0.1.0'
-  repository: 'MultiAgency/agentic-treasury-private'
+  version: '0.2.0'
+  repository: 'MultiAgency/platform'
   description: 'Typed owner and payee clients, schemas and the shared release server for MultiAgency agents behind the gateway.'
   primary_framework: 'framework-agnostic'
 domains:

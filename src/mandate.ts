@@ -29,6 +29,9 @@ export const canonical = (value: unknown): string => {
 const asSet = <T>(list: readonly T[]) => [...list].sort((a, b) => (canonical(a) < canonical(b) ? -1 : canonical(a) > canonical(b) ? 1 : 0));
 
 export function canonicalPolicy(policy: Policy): string {
+  // Provider SDK 0.5.3 replaced `sign` with `native`. A policy that still carries the legacy block keeps its normalized
+  // digest; `native` is hashed as observed, as it always was through the spread below, so recorded digests don't move.
+  const legacySign = (policy as Policy & { sign?: { recipients: readonly string[] } }).sign;
   return canonical({
     ...policy,
     actions: asSet(policy.actions),
@@ -37,7 +40,7 @@ export function canonicalPolicy(policy: Policy): string {
     ...(policy.schedule && {
       schedule: { ...policy.schedule, windows: asSet(policy.schedule.windows.map((w) => ({ ...w, days: asSet(w.days) }))) },
     }),
-    ...(policy.sign && { sign: { ...policy.sign, recipients: asSet(policy.sign.recipients) } }),
+    ...(legacySign && { sign: { ...legacySign, recipients: asSet(legacySign.recipients) } }),
   });
 }
 

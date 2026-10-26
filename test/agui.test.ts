@@ -393,3 +393,11 @@ test("conflicting submission identities never attach later outcomes", () => {
     assert.ok(value.gaps.some(g => g.code === "association_conflict"));
   }
 });
+
+test("recordings exported under AG-UI 1.0.2 stay readable after the package moved to 1.0.3", () => {
+  const value = log();
+  assert.equal(value.aguiVersion, "1.0.3");
+  const earlier = parseRecording(JSON.stringify({ ...value, aguiVersion: "1.0.2" }));
+  assert.equal(earlier.aguiVersion, "1.0.2");
+  assert.throws(() => parseRecording(JSON.stringify({ ...value, aguiVersion: "1.0.1" })));
+});

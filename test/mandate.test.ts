@@ -52,3 +52,15 @@ test("the canonical form has no whitespace and sorted keys", () => {
   assert.doesNotMatch(text, /\s/);
   assert.deepEqual(Object.keys(JSON.parse(text)), Object.keys(treasuryPolicy).sort());
 });
+
+// Provider SDK 0.5.3 replaced the policy's `sign` block with `native`. Digests already recorded must not move: a policy
+// still carrying the legacy `sign` block keeps its normalized digest, and `native` is hashed as observed (in provider
+// order, as before). Both vectors were computed with the pre-upgrade implementation.
+test("digests recorded before provider SDK 0.7 stay the same: legacy `sign` and observed `native`", () => {
+  const legacy = (recipients: string[]) => ({ ...treasuryPolicy, sign: { recipients } }) as unknown as Policy;
+  assert.equal(mandateDigest(legacy(["b.near", "a.near"])), "sha256:aea138e62a59e8436c52c715df4ef96031e4ef4bc35c7f5162c81f0077182f51");
+  assert.equal(mandateDigest(legacy(["a.near", "b.near"])), "sha256:aea138e62a59e8436c52c715df4ef96031e4ef4bc35c7f5162c81f0077182f51");
+  const native: Policy = { ...treasuryPolicy, native: { near: { sign_message: ["b.near", "a.near"], transfer: false, call: [] },
+    evm: { sign_typed_data: [], sign_message: false, sign_transaction: false }, solana: { sign_message: false, sign_transaction: false } } };
+  assert.equal(mandateDigest(native), "sha256:471573bae0fdef942e28580b2d518ed9fddeb22da082b5d3dce3178fe45ad51a");
+});

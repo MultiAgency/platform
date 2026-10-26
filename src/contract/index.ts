@@ -18,6 +18,7 @@ export * from "./inputs.js";
 export { ASSETS } from "./assets.js";
 export { intentsAccount, isNearcomAddress, validIntentsAccount } from "./intents-account.js";
 export { mayCall, type Access } from "./permissions.js";
+export * from "./gateway.js";
 export * from "./proposals.js";
 export * from "./run-progress-schema.js";
 export { RecordingSchema, MAX_RECORDING_BYTES, AGUI_VERSION, AGUI_PROTOCOL_VERSION, type Recording, type RunLogEvent } from "./run-log-schema.js";

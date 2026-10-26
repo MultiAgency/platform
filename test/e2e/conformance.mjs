@@ -10,7 +10,7 @@ import { READS } from '../../src/contract/permissions.ts';
 // and must parse against the published schema without losing or changing anything (no stripped fields).
 const serializer = new RPCJsonSerializer();
 // The RPC wire is `{ json, meta }`; an empty body is a procedure that returned nothing.
-const decode = text => text === '' ? undefined : serializer.deserialize(JSON.parse(text));
+const decode = text => text === '' ? undefined : serializer.deserializeJson(JSON.parse(text));
 /** One value per message: a `data:` block without an event name (or `event: message`); `close`/`done` are not events. */
 const blocks = text => text.split('\n\n').map(block => ({ event: block.match(/^event: (.+)$/m)?.[1] ?? 'message', data: block.match(/^data: (.*)$/m)?.[1] }));
 const events = text => blocks(text).flatMap(({ event, data }) => event === 'message' && data ? [decode(data)] : []);

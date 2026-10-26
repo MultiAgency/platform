@@ -97,10 +97,13 @@ test("activation refuses incomplete, altered, conflicting or escaping releases; 
   try { assert.equal((await fetch(origin + "/")).status, 503); } finally { await close(); }
 });
 
-test("the release server runs as its own process with only HOST, PORT and RELEASES_ROOT", async () => {
+// Run directly, and through a symlink as npm links the `proto-release-server` bin.
+for (const via of ["path", "bin link"]) test(`the release server runs as its own process with only HOST, PORT and RELEASES_ROOT (${via})`, async () => {
   const root = freshRoot();
   activate(root, stage(root, build({ "contract.json": contract({ product: "p", entries: { "/": "index.html" } }), "index.html": "ok" })));
-  const child = spawn(process.execPath, [fileURLToPath(new URL("../src/contract/release-server.mjs", import.meta.url))],
+  let entry = fileURLToPath(new URL("../src/contract/release-server.mjs", import.meta.url));
+  if (via === "bin link") { const link = join(scratch, `bin-${n++}`); symlinkSync(entry, link); entry = link; }
+  const child = spawn(process.execPath, [entry],
     { cwd: tmpdir(), env: { HOST: "127.0.0.1", PORT: "0", RELEASES_ROOT: root }, stdio: ["ignore", "pipe", "inherit"] });
   try {
     const origin = await new Promise<string>((resolve, reject) => { let out = ""; child.stdout.on("data", c => { out += c; const m = out.match(/ready on (http:\S+)/); if (m) resolve(m[1]!); }); child.once("exit", code => reject(new Error(`exited ${code}`))); });

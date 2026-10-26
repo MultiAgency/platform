@@ -37,7 +37,7 @@ afterEach(() => mock.restoreAll());
 
 test("only recognized, consistent, non-retryable provider errors prove refusal", () => {
   const error = (status: number, code: string, retryable = false) => new AgentApiError(status, {
-    errors: [{ status: String(status), code, title: code, meta: { retryable } }],
+    errors: [{ status: String(status), code, layer: "request", title: code, meta: { retryable } }],
     meta: {},
   });
   for (const code of ["policy_denied", "spend_budget_exceeded"]) {
@@ -54,11 +54,11 @@ test("only recognized, consistent, non-retryable provider errors prove refusal",
   for (const [status, code] of [[429, "deposit_quota_exceeded"], [409, "deposit_expired"], [409, "agent_deleted"], [500, "internal_error"], [502, "bad_gateway"]] as const)
     assert.equal(provenRefusal(error(status, code)), undefined, `${status} ${code}`);
   assert.equal(provenRefusal(new AgentApiError(409, { errors: [
-    { status: "409", code: "policy_denied", title: "Denied" },
-    { status: "409", code: "unknown_error", title: "Unknown" },
+    { status: "409", code: "policy_denied", layer: "policy", title: "Denied" },
+    { status: "409", code: "unknown_error", layer: "provider", title: "Unknown" },
   ], meta: {} })), undefined);
   assert.equal(provenRefusal(new AgentApiError(409, { errors: [
-    { status: "403", code: "policy_denied", title: "Denied" },
+    { status: "403", code: "policy_denied", layer: "policy", title: "Denied" },
   ], meta: {} })), undefined);
 });
 
@@ -67,7 +67,7 @@ test("a proven first-submission refusal resolves only that operation", async () 
   record({ at: new Date().toISOString(), idempotencyKey: "fixture:held", kind: "fixture", method: action.method, request: { ...action.request, amount: "999" } });
   record({ idempotencyKey: "fixture:held", correlation_id: "held-correlation", status: "PENDING_APPROVAL" });
   answer = async () => { throw new AgentApiError(409, {
-    errors: [{ status: "409", code: "policy_denied", title: "Policy denied" }], meta: {},
+    errors: [{ status: "409", code: "policy_denied", layer: "policy", title: "Policy denied" }], meta: {},
   }); };
   const lock = await acquireMoneyLock();
   try { await assert.rejects(dispatch(lock, "fixture", action), AgentApiError); } finally { await lock.release(); }
@@ -166,7 +166,7 @@ test("replay also refuses a lost lock without sending", async () => {
 
 test("a payout's retryable API failure is not presented as a policy refusal", async () => {
   answer = async () => { throw new AgentApiError(503, {
-    errors: [{ status: "503", code: "unavailable", title: "Unavailable", meta: { retryable: true } }], meta: {},
+    errors: [{ status: "503", code: "unavailable", layer: "provider", title: "Unavailable", meta: { retryable: true } }], meta: {},
   }); };
   await assert.rejects(pay({ asset: ASSETS.USDC, amount: "1", recipient: "fixture.near", confidential: true }), AgentApiError);
   assert.equal(calls.length, 1);

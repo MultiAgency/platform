@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, mock, test } from "node:test";
 import { createRouterClient } from "@orpc/server";
@@ -11,6 +11,7 @@ import { mandateDigest } from "../src/mandate.js";
 import { opsLog, readOps } from "../src/ops.js";
 import { ASSETS, payoutPolicy } from "../src/policy.js";
 import { router } from "../src/router.js";
+import { unresolvedEvidence, unresolvedOutput } from "../src/contract/owner-outputs.js";
 import { evidenceLog, readSubmissionEvidence } from "../src/submission-evidence.js";
 import { authorityFixture, policyView } from "./fixtures/authority.js";
 import { freshDirectory, offline } from "./fixtures/harness.js";
@@ -21,7 +22,7 @@ const request = { asset: ASSETS.USDC, amount: "1", recipient: "fixture.near", co
 const policy = policyView(payoutPolicy(["fixture.near"]));
 const expected = { revision: policy.revision, digest: mandateDigest(policy.policy) };
 const providerError = (status: number, code: string, extra: { detail?: string; requestId?: string; meta?: Record<string, unknown> } = {}) =>
-  new AgentApiError(status, { errors: [{ status: String(status), code, title: code.replaceAll("_", " "), ...(extra.detail && { detail: extra.detail }),
+  new AgentApiError(status, { errors: [{ status: String(status), code, layer: "policy", title: code.replaceAll("_", " "), ...(extra.detail && { detail: extra.detail }),
     meta: { retryable: false, ...extra.meta } as never }], meta: { request_id: extra.requestId ?? "req_fixture" } });
 let answer: () => Promise<{ correlation_id: string }>;
 let sends = 0;
@@ -89,6 +90,23 @@ test("unresolved shows the latest evidence; operations without evidence show nul
   assert.deepEqual({ ...(entry.evidence as object), at: undefined },
     { at: undefined, httpStatus: 403, code: "policy_usage_unavailable", requestId: "req_shown", providerIds: {}, message: "policy usage unavailable",
       note: "Diagnostic only: this doesn't establish provider correlation or execution, or permission to clear the operation." });
+  // Every field the server sends is declared in the published contract (a loose schema would otherwise pass it unchecked).
+  const row = unresolvedOutput.element;
+  assert.deepEqual(Object.keys(entry).filter(key => !(key in row.shape)), [], "undeclared unresolved fields");
+  const declared = unresolvedEvidence.shape;
+  assert.deepEqual(Object.keys(entry.evidence as object).filter(key => !(key in declared)), [], "undeclared evidence fields");
+});
+
+test("a malformed evidence line shows null evidence and never hides the unresolved operation", async () => {
+  answer = async () => { throw providerError(403, "policy_usage_unavailable"); };
+  await assert.rejects(pay(request, expected));
+  const key = readOps()[0]!.idempotencyKey;
+  // A later line that parses as JSON but isn't evidence (hand-edited or from an incompatible build) is the latest one.
+  appendFileSync(evidenceLog(), JSON.stringify({ idempotencyKey: key, at: "2026-10-20T00:00:00Z", code: "x", httpStatus: "403", providerIds: [] }) + "\n");
+  const [entry, ...rest] = await createRouterClient(router).unresolved();
+  assert.equal(rest.length, 0);
+  assert.equal(entry!.key, key);
+  assert.equal(entry!.evidence, null);
 });
 
 const TSX = fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url));

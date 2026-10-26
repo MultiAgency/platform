@@ -4,7 +4,7 @@ import { ownerClient, type OwnerProcedure } from "../../src/contract/owner-clien
 import { router } from "../../src/router.js";
 
 const serializer = new RPCJsonSerializer();
-const decode = (text: string) => text === "" ? undefined : serializer.deserialize(JSON.parse(text));
+const decode = (text: string) => text === "" ? undefined : serializer.deserializeJson(JSON.parse(text));
 /** One value per SSE message (a `data:` block without an event name, or `event: message`). */
 const events = (text: string) => text.split("\n\n").flatMap(block => {
   const event = block.match(/^event: (.+)$/m)?.[1] ?? "message", data = block.match(/^data: (.*)$/m)?.[1];

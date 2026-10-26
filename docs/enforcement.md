@@ -217,6 +217,25 @@ We retain the existing provider controls and local checks; this review introduce
 
 ## Recovery limitation
 
+**Provider SDK 0.7.1 (locked in `pnpm-lock.yaml` 2026-10-26): documented refusals not adopted.** The upgrade changes no
+classification rule. `src/ops.ts` already treats `policy_denied` and `spend_budget_exceeded` (4xx) and `route_unavailable`,
+`quote_unavailable` and `spend_price_unavailable` (5xx) as proven refusals, each only at its listed status class. Per
+the SDK's CHANGELOG.md at 0.7.1 (docs, not observed): from 0.7.0, `policy_limit_exceeded`,
+`policy_action_limit_exceeded` and `policy_usage_unavailable` on a request that runs now, and `provider_refused`, send
+nothing; from 0.6.2, transfer `invalid_address` sends nothing and `near_rpc_unavailable` (retryable, so never a proven
+refusal here) sends nothing. They aren't added, so after a claimed submission they still leave the operation unresolved.
+If the provider now answers a listed code at another status class, that answer also stays unresolved. Adding them needs
+observed provider behaviour and a separate rule decision. `policy_denied` was mainnet-observed as a refusal (2026-10-11 and 2026-10-13,
+[mainnet log](mainnet-log.md)) but 0.7.1's types no longer name it; they name `policy_action_denied`,
+`policy_destination_denied`, `policy_asset_denied` and `policy_schedule_denied`, which aren't listed, so a refusal under
+those codes leaves the operation unresolved. `quote_unavailable`, which the changelog removes, stays in
+`PROVEN_5XX` because the deployed provider version isn't established. The pre-send balance check (`src/agent.ts`) still
+reads the confidential balance rather than 0.7's `available` figure (balance minus queued or timelocked work), so it can
+pass a send the provider then refuses with `insufficient_balance`. The ledger's `details.amount_out` is documented as
+present only on `SUCCESS` (or a partial `REFUNDED`), so pending swap rows show none. The unresolved treasury
+operation recorded with `policy_usage_unavailable` evidence is unaffected: a changelog doesn't establish what happened to
+that submission.
+
 In current local source, `src/ops.ts` treats `SUCCESS`, `REFUNDED` and `FAILED` as terminal;
 `src/recover.ts` records the status without checking separate non-execution evidence. Invoice
 accounting also treats those statuses as terminal (`src/invoice-store.ts`). This relies on provider

@@ -150,10 +150,12 @@ The initial cases cover:
   a held payout from the created agent only, owner approval (still not paid), and simulated settlement.
   Filing again after payment sends nothing. A third case rejects the held payout: nothing settles and
   filing again sends nothing new. Owner steps use the gateway RPC with a locally signed NEP-413 payload.
-- New-prototype example (`minimal-prototype.spec.mjs`): `examples/minimal-prototype/` served as the
-  `showcase` host's `frontendDist` signs in through the gateway, reads `overview`, and pauses and
-  resumes the agent through owner-signed `agent_freeze`/`agent_unfreeze` (two wallet signatures, two
-  submissions). Signed-out scoped calls are refused with 401; no transfer occurs.
+- New-prototype example (`minimal-prototype.spec.mjs`): `examples/minimal-prototype/`, built with rsbuild against
+  `@multiagency/sdk` and served as the `showcase` host's `frontendDist`, signs in through the gateway, reads `overview`,
+  and pauses and resumes the agent through owner-signed `agent_freeze`/`agent_unfreeze` (two wallet signatures, two
+  submissions). Signed-out scoped calls are refused with 401; no transfer occurs. A second case loses the preparation's
+  reply (no signature is asked for), then a submission's reply with record reads failing until a reload: the reloaded
+  page follows the kept `correlationId` to the recorded outcome, with one signature and one submission.
 
 The tests compare browser output with read-only SQLite queries, durable owner-intent records and an
 independent simulator request log. Restarts here are controlled process restarts after a lost response,

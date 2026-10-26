@@ -36,7 +36,7 @@ Object.assign(api, {
     fs.appendFileSync("provider.jsonl", JSON.stringify({ key: operation.idempotencyKey }) + "\n");
     if (mode === "after_acceptance") process.exit(71);
     if (mode === "unproven_refusal" || mode === "before_evidence")
-      throw new AgentApiError(403, { errors: [{ status: "403", code: "policy_usage_unavailable", title: "Policy usage unavailable", meta: { retryable: false } }], meta: { request_id: "req_fixture" } });
+      throw new AgentApiError(403, { errors: [{ status: "403", code: "policy_usage_unavailable", layer: "policy", title: "Policy usage unavailable", meta: { retryable: false } }], meta: { request_id: "req_fixture" } });
     return { correlation_id: "op_test" };
   } }),
   getStatus: async (correlation_id: string) => ({ correlation_id, status: "SUCCESS" }),

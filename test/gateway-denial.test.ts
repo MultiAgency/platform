@@ -9,6 +9,7 @@ import { mayCall } from "../src/gateway/allowlist.js";
 import { router } from "../src/router.js";
 import { sessionToken } from "../src/signin.js";
 import { temporaryDirectories } from "./fixtures/harness.js";
+import { gatewayDenialScope } from "../src/contract/gateway.js";
 
 const scratch = temporaryDirectories();
 
@@ -200,9 +201,10 @@ test("DAO proposal, approval, execution and management permissions stay distinct
 });
 
 test("denials distinguish lost sessions, agent access and procedure permission", async () => {
-  assert.equal((await (await call("overview")).json()).access, "session");
-  assert.equal((await (await call("overview", "member.near", "wallet")).json()).access, "agent");
-  assert.equal((await (await call("pay", "member.near")).json()).access, "procedure");
+  // Read through the published helper, as owner apps do.
+  assert.equal(gatewayDenialScope(await (await call("overview")).json()), "session");
+  assert.equal(gatewayDenialScope(await (await call("overview", "member.near", "wallet")).json()), "agent");
+  assert.equal(gatewayDenialScope(await (await call("pay", "member.near")).json()), "procedure");
 });
 
 test("run-log exports enforce per-agent membership and cannot inherit public caching", async () => {

@@ -260,9 +260,29 @@ export const activityOutput = z.array(z.looseObject({
   policyDigest: z.string().nullable().optional(),
   planId: z.string().optional(),
 }));
-/** rpc/observations.ts unresolved. */
+/**
+ * What the provider answered when a claimed submission failed without a proven outcome (submission-evidence.ts). Diagnostic
+ * only: it never resolves, links or clears the operation, and nothing may treat it as an outcome.
+ */
+export const unresolvedEvidence = z.looseObject({
+  at: z.string(),
+  httpStatus: z.number(),
+  code: z.string(),
+  /** The provider's id for the failed request, to quote to the provider. Not an operation or correlation id. */
+  requestId: z.string().nullable(),
+  /** Ids the provider's error happened to include. Unverified: never a correlation for `paymentStatus` or recovery. */
+  providerIds: z.record(z.string(), z.string()),
+  message: z.string(),
+  /** States that the evidence establishes no correlation, execution or permission to clear the operation. */
+  note: z.string(),
+});
+/**
+ * rpc/observations.ts unresolved. The operation fields are authoritative and strict. `evidence` is absent from servers
+ * before Recovery B, null without a recorded answer, and null when malformed: a bad diagnostic never hides the operation.
+ */
 export const unresolvedOutput = z.array(z.looseObject({
   key: z.string(), at: z.string(), kind: z.string(), request: record, status: z.string().nullable(), sent: z.boolean(),
+  evidence: unresolvedEvidence.nullable().optional().catch(null),
 }));
 /** payouts.ts held: local held operations, and the API's (kind "remote") not recorded here. */
 export const heldOutput = z.array(z.looseObject({

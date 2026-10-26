@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { supplierEnvironment, supplierCookie } from "../src/gateway/hosted-supplier.js";
 import { demoSession } from "../src/gateway/demo-hosts.js";
 import { sessionToken } from "../src/signin.js";
+import { checkedDiscovery } from "./fixtures/discovery.js";
 
 const localFetch = (url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) => new Promise<Response>((resolve, reject) => {
   const req = request(new URL(url), init, res => {
@@ -65,11 +66,11 @@ for (const sharedHosts of [false, true]) test(`${sharedHosts ? "shared hosts" : 
     ...(body !== undefined && { body: JSON.stringify(body) }),
   });
   await start();
-  const publicView = await (await call("/gw/me")).json();
+  const publicView = checkedDiscovery(await (await call("/gw/me")).json());
   assert.deepEqual(publicView.agents, []);
   assert.equal(publicView.viewer, null);
-  const fresh = await (await call("/gw/me", "alice.near")).json();
-  assert.equal(fresh.viewer.account, "alice.near");
+  const fresh = checkedDiscovery(await (await call("/gw/me", "alice.near")).json());
+  assert.equal(fresh.viewer!.account, "alice.near");
   assert.deepEqual(fresh.agents, []);
   const input = { owner: "alice.near", kind: "wallet", area: "treasury" };
   assert.equal((await call("/gw/agents", undefined, input)).status, 401);
@@ -81,8 +82,8 @@ for (const sharedHosts of [false, true]) test(`${sharedHosts ? "shared hosts" : 
   assert.deepEqual(await (await call("/gw/agents", "alice.near", input)).json(), { name });
   let ready = false;
   for (let i = 0; i < 150; i++) {
-    const view = await (await call("/gw/me", "alice.near")).json();
-    if (view.viewer.access[name]) { ready = true; assert.equal(view.agents[0].invoices, null); break; }
+    const view = checkedDiscovery(await (await call("/gw/me", "alice.near")).json());
+    if (view.viewer!.access[name]) { ready = true; assert.equal(view.agents[0]!.invoices, null); break; }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.ok(ready, `real isolated child answers ownership checks: ${diagnostics}`);
@@ -112,9 +113,9 @@ for (const sharedHosts of [false, true]) test(`${sharedHosts ? "shared hosts" : 
   assert.equal(daoSetup?.dao.funded, false, "unfunded DAO owner account remains an explicit prerequisite");
   if (sharedHosts) {
     assert.equal((await call("/gw/agents", "alice.near", input, undefined, "payables.test")).status, 403);
-    const paymentHost = await (await call("/gw/me", "alice.near", undefined, undefined, "payables.test")).json();
-    assert.equal(paymentHost.viewer.access[name], undefined, "Treasury instance stays outside the payment host");
-    assert.ok(paymentHost.viewer.access[daoName], "the same owner-created payout instance is available on its assigned hosts");
+    const paymentHost = checkedDiscovery(await (await call("/gw/me", "alice.near", undefined, undefined, "payables.test")).json());
+    assert.equal(paymentHost.viewer!.access[name], undefined, "Treasury instance stays outside the payment host");
+    assert.ok(paymentHost.viewer!.access[daoName], "the same owner-created payout instance is available on its assigned hosts");
     assert.deepEqual(await (await call("/gw/agents", "alice.near", daoInput, undefined, "payables.test")).json(), { name: daoName });
     assert.deepEqual((await (await call("/gw/me", "bob.near", undefined, undefined, "payables.test")).json()).agents, []);
   }

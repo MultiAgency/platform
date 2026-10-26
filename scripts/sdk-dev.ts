@@ -12,7 +12,7 @@ const staging = join(root, "packages/sdk"), tsconfig = join(root, "packages/sdk.
 stage(staging, tsconfig);
 console.log(`@multiagency/sdk staged at ${staging}`);
 if (!process.argv.includes("--once")) {
-  for (const path of [join(root, "src/contract/skills"), join(root, "docs/sdk-changes.md")])
+  for (const path of [join(root, "src/contract/skills"), join(root, "docs/sdk-changes.md"), join(root, "src/contract/README.md")])
     watch(path, { recursive: true }, () => { copyGuidance(staging); console.log("skills and change notes recopied"); });
   spawn(join(root, "node_modules/.bin/tsc"), ["-p", tsconfig, "--watch", "--preserveWatchOutput"], { stdio: "inherit" }).on("exit", code => process.exit(code ?? 0));
 }

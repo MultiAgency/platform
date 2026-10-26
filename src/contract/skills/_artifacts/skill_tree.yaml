@@ -1,4 +1,4 @@
-library: { name: '@multiagency/sdk', version: '0.1.0' }
+library: { name: '@multiagency/sdk', version: '0.2.0' }
 generated_from:
   domain_map: skills/_artifacts/domain_map.yaml
   skill_spec: skills/_artifacts/skill_spec.md
@@ -8,16 +8,16 @@ skills:
     slug: 'getting-started'
     domain: 'access'
     path: skills/getting-started/SKILL.md
-    sources: ['MultiAgency/agentic-treasury-private:src/contract/index.ts', 'MultiAgency/agentic-treasury-private:src/contract/payee-entry.ts', 'MultiAgency/agentic-treasury-private:docs/agent-access.md']
+    sources: ['MultiAgency/platform:src/contract/index.ts', 'MultiAgency/platform:src/contract/payee-entry.ts', 'MultiAgency/platform:docs/agent-access.md']
   - name: 'Owner workflows'
     slug: 'owner-workflows'
     domain: 'owner'
     path: skills/owner-workflows/SKILL.md
     requires: ['getting-started']
-    sources: ['MultiAgency/agentic-treasury-private:src/contract/owner-client.ts', 'MultiAgency/agentic-treasury-private:src/contract/owner-contract.ts', 'MultiAgency/agentic-treasury-private:src/contract/owner-outputs.ts']
+    sources: ['MultiAgency/platform:src/contract/owner-client.ts', 'MultiAgency/platform:src/contract/owner-contract.ts', 'MultiAgency/platform:src/contract/owner-outputs.ts']
   - name: 'Payee workflows'
     slug: 'payee-workflows'
     domain: 'payee'
     path: skills/payee-workflows/SKILL.md
     requires: ['getting-started']
-    sources: ['MultiAgency/agentic-treasury-private:src/contract/client.ts', 'MultiAgency/agentic-treasury-private:src/contract/agent-connection.ts', 'MultiAgency/agentic-treasury-private:src/compensation-contract.ts', 'MultiAgency/agentic-treasury-private:docs/agent-access.md']
+    sources: ['MultiAgency/platform:src/contract/client.ts', 'MultiAgency/platform:src/contract/agent-connection.ts', 'MultiAgency/platform:src/compensation-contract.ts', 'MultiAgency/platform:docs/agent-access.md']

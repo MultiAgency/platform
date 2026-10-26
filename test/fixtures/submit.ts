@@ -14,7 +14,7 @@ import { reconcileOwnerIntents, submit } from "../../src/owner-intents.js";
 import { walletSignature } from "./wallet-signature.js";
 
 const refusal = new AgentApiError(400, {
-  errors: [{ status: "400", code: "invalid_signature", title: "Invalid signature", meta: { retryable: false } }],
+  errors: [{ status: "400", code: "invalid_signature", layer: "request", title: "Invalid signature", meta: { retryable: false } }],
   meta: {},
 });
 const answers = {

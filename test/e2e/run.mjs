@@ -40,7 +40,7 @@ for (const product of ['payables', 'treasury']) {
   if (change) ownerChanges[product] = change;
 }
 const consumerIndex = args.indexOf('--treasury-skill');
-let consumer;
+let consumer, consumerDigest = null, consumerDependencies = null;
 if (consumerIndex !== -1) {
   const input = args[consumerIndex + 1];
   if (!input || input.startsWith('--')) throw new Error('--treasury-skill requires a directory');
@@ -51,9 +51,15 @@ if (consumerIndex !== -1) {
     mkdirSync(resolve(join(consumer, name), '..'), { recursive: true });
     cpSync(join(resolve(input), name), join(consumer, name));
   }
+  // The helper runs on its own pinned dependencies, as an external agent installs them, not on Proto's: a helper on an
+  // older oRPC client is then tested against this server. The install happens here, before the offline test run.
   const required = JSON.parse(readFileSync(join(consumer, 'scripts/package.json'))).dependencies['@orpc/client'];
-  const installed = JSON.parse(readFileSync(join(root, 'node_modules/@orpc/client/package.json'))).version;
+  consumerDigest = digest(consumer); // the skill's own files, before its dependencies are installed beside them
+  const installing = spawnSync('npm', ['install', '--no-audit', '--no-fund', '--ignore-scripts', '--prefer-offline'], { cwd: join(consumer, 'scripts'), encoding: 'utf8' });
+  if (installing.status !== 0) throw new Error(`Treasury helper dependencies did not install:\n${installing.stdout}${installing.stderr}`);
+  const installed = JSON.parse(readFileSync(join(consumer, 'scripts/node_modules/@orpc/client/package.json'))).version;
   if (required !== installed) throw new Error(`Treasury helper requires @orpc/client ${required}, installed ${installed}`);
+  consumerDependencies = { orpcClient: installed, lockSha256: createHash('sha256').update(readFileSync(join(consumer, 'scripts/package-lock.json'))).digest('hex') };
   args.splice(consumerIndex, 2);
 }
 
@@ -86,7 +92,7 @@ if (!prebuilt) {
 const dependencies = dependencyTree(root);
 const frozen = existsSync(join(root, 'SNAPSHOT.json')) ? JSON.parse(readFileSync(join(root, 'SNAPSHOT.json'), 'utf8')).dependencyTree : undefined;
 if (frozen && frozen !== dependencies) throw new Error(`The installed dependency tree (${dependencies}) differs from the one this snapshot was frozen with (${frozen}); reinstall that tree or freeze again.`);
-writeFileSync(join(artifacts, 'manifest.json'), JSON.stringify({ node: process.version, dependencyTree: dependencies, invoicesFrontend: invoicesDist ? digest(invoicesDist) : null, invoicesFrontendNext: invoicesNext ? digest(invoicesNext) : null, treasurySkill: consumer ? digest(consumer) : null, ownerApps: Object.fromEntries(Object.entries(ownerApps).map(([product, dirs]) => [product, Object.fromEntries(Object.entries(dirs).map(([name, dir]) => [name, digest(dir)]))])), ownerChanges, source: digest(join(snapshot, 'src')),
+writeFileSync(join(artifacts, 'manifest.json'), JSON.stringify({ node: process.version, dependencyTree: dependencies, invoicesFrontend: invoicesDist ? digest(invoicesDist) : null, invoicesFrontendNext: invoicesNext ? digest(invoicesNext) : null, treasurySkill: consumerDigest, treasurySkillDependencies: consumerDependencies, ownerApps: Object.fromEntries(Object.entries(ownerApps).map(([product, dirs]) => [product, Object.fromEntries(Object.entries(dirs).map(([name, dir]) => [name, digest(dir)]))])), ownerChanges, source: digest(join(snapshot, 'src')),
   frontend: digest(join(snapshot, 'web/src')), evidence: digest(join(snapshot, 'evidence')), assets: digest(join(snapshot, 'web/dist')), tests: digest(join(snapshot, 'test/e2e')),
   playwright: JSON.parse(readFileSync(join(root, 'node_modules/@playwright/test/package.json'))).version,
   lockfile: createHash('sha256').update(readFileSync(join(snapshot, 'pnpm-lock.yaml'))).digest('hex'), scope: 'offline application E2E; simulated provider, chain, and wallet' }, null, 2));

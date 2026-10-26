@@ -130,7 +130,8 @@ export function releaseServer(root) {
   });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// The real path: npm's bin link is a symlink, and import.meta.url names its target.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const root = process.env.RELEASES_ROOT, [command = 'serve', argument] = process.argv.slice(2);
   if (!root) throw new Error('RELEASES_ROOT is required');
   if (command === 'stage') console.log(stage(root, resolve(argument)));

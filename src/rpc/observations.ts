@@ -23,6 +23,7 @@ import { agreed } from "../invoices.js";
 import { os, owner } from "./base.js";
 import { readOutput } from "./read-output.js";
 import { run, account } from "../contract/inputs.js";
+import { unresolvedEvidence } from "../contract/owner-outputs.js";
 
 /** The agent's ops log, one row per action, newest first: the request as sent, the mandate (policy revision and digest) and plan it ran under, and how it settled or was refused. */
 const activity = () =>
@@ -125,10 +126,13 @@ export const observationsRoutes = {
   unresolved: owner.unresolved.use(readOutput("unresolved")).handler(() => {
     const recorded = readSubmissionEvidence();
     return readOps().filter(blocksDispatch).map((op) => {
-      // The provider's answer to the failed submission, when one was recorded (redacted, display only).
+      // The provider's answer to the failed submission, when one was recorded (redacted, display only). A latest line
+      // that doesn't match the published shape shows as null: the operation itself is listed either way.
       const evidence = recorded.get(op.idempotencyKey)?.at(-1);
+      const shown = evidence && unresolvedEvidence.safeParse({ at: evidence.at, httpStatus: evidence.httpStatus, code: evidence.code,
+        requestId: evidence.requestId, providerIds: evidence.providerIds, message: evidence.message, note: DIAGNOSTIC_ONLY });
       return { key: op.idempotencyKey, at: op.at, kind: op.kind, request: op.request, status: op.status ?? null, sent: Boolean(op.correlationId),
-        evidence: evidence ? { at: evidence.at, httpStatus: evidence.httpStatus, code: evidence.code, requestId: evidence.requestId, providerIds: evidence.providerIds, message: evidence.message, note: DIAGNOSTIC_ONLY } : null };
+        evidence: shown?.success ? shown.data : null };
     });
   }),
   /** Reads existing operation statuses; sends nothing. */

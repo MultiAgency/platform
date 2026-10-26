@@ -4,7 +4,9 @@ import { z } from "zod";
 import { StepNameSchema, SubmissionSchema } from "./run-progress-schema.js";
 
 /** Private, observational format. No field in this module may authorize an operation. */
-export const AGUI_VERSION = "1.0.2";
+export const AGUI_VERSION = "1.0.3";
+/** Earlier package versions whose recordings stay readable: their events still parse with the current schemas. */
+const READABLE_AGUI_VERSIONS = ["1.0.2", AGUI_VERSION] as const;
 export const AGUI_PROTOCOL_VERSION = PROTOCOL_VERSION;
 export const MAX_RECORDING_BYTES = 2_000_000;
 export const text = z.string().max(4096);
@@ -75,12 +77,12 @@ const EventSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("RUN_ERROR"), message: text, code: z.enum(["tick_failed", "progress_incomplete"]),
     timestamp: base.timestamp, metadata: provenance.extend({ tickResult: result }) }),
 ]).superRefine((event, ctx) => {
-  if (!EventSchemas.safeParse(event).success) ctx.addIssue({ code: "custom", message: "Invalid AG-UI 1.0.2 event" });
+  if (!EventSchemas.safeParse(event).success) ctx.addIssue({ code: "custom", message: `Invalid AG-UI ${AGUI_VERSION} event` });
 });
 export type RunLogEvent = z.infer<typeof EventSchema>;
 
 export const RecordingSchema = z.strictObject({
-  schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]), aguiVersion: z.literal(AGUI_VERSION), agentId: id, tickId: id, exportedAt: iso,
+  schemaVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]), aguiVersion: z.enum(READABLE_AGUI_VERSIONS), agentId: id, tickId: id, exportedAt: iso,
   completion: z.enum(["recorded-end", "no-recorded-end"]), context: StartSchema, display: DisplaySchema,
   gaps: z.array(GapSchema).max(25_000), events: z.array(EventSchema).min(1).max(2000),
   laterObservations: z.array(z.strictObject({ correlationId: id, source: z.literal("journal"), record: JournalRecordSchema })).max(20_000),

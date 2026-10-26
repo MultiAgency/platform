@@ -9,6 +9,7 @@ node_modules/
 .invoices/
 .inbox/
 web/dist/
+examples/minimal-prototype/dist/
 .plans/
 .playwright-mcp/
 .test-artifacts/

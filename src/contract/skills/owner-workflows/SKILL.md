@@ -9,13 +9,13 @@ metadata:
   purpose: 'Owner reads, owner-signed actions and money streams with ownerClient, with recovery by result kind and retained identities.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.1.0'
+  library_version: '0.2.0'
 requires:
   - getting-started
 sources:
-  - 'MultiAgency/agentic-treasury-private:src/contract/owner-client.ts'
-  - 'MultiAgency/agentic-treasury-private:src/contract/owner-contract.ts'
-  - 'MultiAgency/agentic-treasury-private:src/contract/owner-outputs.ts'
+  - 'MultiAgency/platform:src/contract/owner-client.ts'
+  - 'MultiAgency/platform:src/contract/owner-contract.ts'
+  - 'MultiAgency/platform:src/contract/owner-outputs.ts'
 ---
 
 # Owner workflows with ownerClient
@@ -97,10 +97,54 @@ A failure before the first event keeps its kind (`busy`, `unresolved`, `refused`
 event is `unknown` with `{ planId }`: part of the plan may have run. Read `activity` and `unresolved`; never execute the
 plan again.
 
+## Outside a browser: Treasury's machine route
+
+A Treasury wallet owner can issue a machine credential (`tmc_…`) from the owner's access screen. It works only at
+`https://<issued host>/machine/v1/a/<agent>/rpc/*`, only for its scopes (read, prepare, execute-plan, sweep), and never
+authenticates `/a/<agent>/rpc`, Payables owner procedures or a DAO's owner actions. The client adds no credential itself:
+give it an absolute base and a `fetch` that adds the bearer.
+
+```ts
+import { ownerClient } from "@multiagency/sdk";
+
+// `origin` is the issued HTTPS host, `agent` the agent's name, `token` the credential; keep the token out of logs.
+export function machineClient(origin: string, agent: string, token: string) {
+  const host = new URL(origin);
+  if (host.protocol !== "https:" || host.username || host.password || host.pathname !== "/" || host.search || host.hash)
+    throw new Error("Use the issued HTTPS origin, without credentials, path, query or fragment");
+  return ownerClient({ base: `https://${host.host}/machine/v1/a/${agent}`, fetch: (input, init) => fetch(input, { ...init,
+    headers: { ...Object.fromEntries(new Headers(init?.headers)), authorization: `Bearer ${token}` }, credentials: "omit", redirect: "error" }) });
+}
+```
+
+Result: `await machineClient(origin, "treasury", token).call("overview")` answers like the browser client. A procedure
+outside the credential's scopes, or an expired or revoked credential, answers `forbidden` or `session`. Results, streams
+and recovery are the same as above: a lost `executePlan` or `sweep` is `unknown`, and nothing is sent again.
+
+## Recover an action that returned no identity
+
+`unknown` echoes the input as `identity`. That is a recovery identity only when the input carries one: `correlationId`
+(`owner/submit`, `workOrders/submit`), `planId` (`executePlan`), a work order or invoice `id`, or a compensation
+`commandId`. `pay`, `sweep` and `autopilot/tick` take none, and the server's operation key never reaches the caller when
+the answer is lost. No read can then link the attempt to one record.
+
+- Read `unresolved`. While it lists an operation, every new money action is refused, so nothing can be sent twice
+  meanwhile.
+- Read `held`: a payout waiting for the owner's approval is open there, not in `unresolved`.
+- Read `activity` for what settled or was refused since the attempt. A row with the same recipient and amount is not
+  proof that it is yours.
+- Before acting again, have a person decide from those records; never resend automatically.
+
+An `unresolved` row may carry `evidence`: the provider's answer when a claimed submission failed without a proven
+outcome. It is diagnostic only. Its `requestId` identifies the failed request to quote to the provider, and
+`providerIds` are unverified. Neither is a `correlationId`, neither may be passed to `paymentStatus`, and evidence never
+resolves or clears the operation. `evidence` is absent from older servers and null when none was recorded or it was
+unreadable.
+
 ## Common mistakes
 
 - **Resending after `unknown`** (CRITICAL): the provider may already have accepted it. Read `owner/status`,
-  `unresolved` or `activity` by the kept identity instead.
+  `unresolved` or `activity` by the kept identity instead, or, for an action without one, as described above.
 - **Branching on `error` text** (HIGH): messages change; `kind` and `code` are the contract.
 - **Treating `forbidden` as an outage** (HIGH): it is this account's access. A DAO member without propose permission
   cannot prepare owner actions; the owner's signature always comes from the wallet or a DAO vote.

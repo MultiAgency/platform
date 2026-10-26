@@ -1,6 +1,6 @@
 /**
- * `@multiagency/sdk/payee`: the payee side of the contract. It depends on zod alone (no oRPC or
- * AG-UI), so an app that never calls owner procedures installs none of the owner peers.
+ * `@multiagency/sdk/payee`: the payee side of the contract. It imports zod alone; the owner entry's oRPC and AG-UI
+ * dependencies are installed but never loaded by this entry.
  */
 export { contractPackage } from "./package-version.js";
 export { payeeContract, compatiblePayeeFrontend, compatibleRelease } from "../payee-contract.js";
