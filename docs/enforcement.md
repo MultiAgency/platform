@@ -215,6 +215,19 @@ We retain the existing provider controls and local checks; this review introduce
 | Deposit conversion | **Scope question, not a known spending bypass.** Public API docs explicitly say deposits need an API key, no grant or owner signature, and do not spend treasury funds. Whether the agreement restricts conversion targets, and whether that is enforced, remains open. |
 | Shield under a non-empty `only` list | **Observed working on an isolated agent.** Under a destination list copied byte-for-byte from the treasury's (revision 11), a shield of its public wNEAR succeeded and charged no USD budget (2026-10-13T03:27Z, an isolated test agent; [log](mainnet-log.md#isolated-test-agent-shield-and-monthly-cap-2026-10-13t0327z)). For the treasury agent’s subsequent sweep observation, see the [canonical Treasury requirements and evidence](treasury.md#02-agentic-treasury-management). That observation does not independently establish enforcement under every destination configuration. No `policy_confidential_whitelist_conflict` exists in any public source. |
 
+## Open spending-limit cases
+
+Each open case is either closed here or tied to a question for the provider. Nothing below is claimed as proven
+beyond what the Status table says. The provider questions are not yet raised with the provider; raising them is
+drafted in [provider-questions.md](provider-questions.md) and tracked in issue #6.
+
+| Case | State | What closes it |
+|---|---|---|
+| Two money actions in flight on one host | **Closed locally.** `test/spend-concurrency.test.ts` runs 16 simultaneous attempts (exactly one gets the money lock), concurrent workers (no two sends in flight, distinct idempotency keys) and a burst after an unproven outcome (all refused); `test/lock.test.ts` covers crash, staleness and unresolved operations. | Done. This does not cover a second host or a bypassed executor. |
+| Atomic USD-budget charging under concurrent dispatch | **Provider question ([Q1](provider-questions.md#q1-is-usd-budget-charging-atomic-with-admission)).** One concurrent trial held (Status table). The provider does the charging; a local test against a stand-in would only test the stand-in. | Provider: confirm the charge is atomic with admission across grants, instances and after a crash (E5–E9). |
+| Strict cumulative per-asset caps under concurrency | **Provider question ([Q2](provider-questions.md#q2-are-cumulative-per-asset-caps-strict-under-concurrency)).** Upstream tests show one of two simultaneous spends passes; not observed on the deployed route. | Provider: confirm deployed behavior across grants and instances (E2–E4). |
+| Output-asset enforcement | **Closed locally, provider limitation recorded.** `outputAssetRefusal` (`src/policy.ts`) refuses it; the provider documents `assets` as spend-only. | Provider: whether output-asset admission is planned ([Q3](provider-questions.md#q3-will-output-asset-limits-ever-be-enforced-at-admission), E1). The local rule stays either way. |
+
 ## Recovery limitation
 
 In current local source, `src/ops.ts` treats `SUCCESS`, `REFUNDED` and `FAILED` as terminal;
