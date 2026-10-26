@@ -57,9 +57,9 @@ export function stage(staging: string, tsconfig: string) {
   for (const [key, schema] of Object.entries(schemas)) writeFileSync(join(staging, "schemas", `${key}.json`), JSON.stringify(z.toJSONSchema(schema, { unrepresentable: "any" }), null, 2) + "\n");
 
   const dependencies = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).dependencies as Record<string, string>;
-  writeFileSync(join(staging, "package.json"), JSON.stringify({ name, version, type: "module", license: "UNLICENSED", private: true,
+  writeFileSync(join(staging, "package.json"), JSON.stringify({ name, version, type: "module", license: "UNLICENSED",
     description: "MultiAgency SDK: payee, compensation and owner-app schemas, typed payee and owner clients, and the shared release asset server.",
-    keywords: ["tanstack-intent"], repository: { type: "git", url: "git+https://github.com/MultiAgency/agentic-treasury-private.git" },
+    keywords: ["tanstack-intent"], repository: { type: "git", url: "git+https://github.com/MultiAgency/sdk.git" }, publishConfig: { access: "public", provenance: true },
     exports: { ".": { types: "./dist/contract/index.d.ts", default: "./dist/contract/index.js" },
       "./payee": { types: "./dist/contract/payee-entry.d.ts", default: "./dist/contract/payee-entry.js" },
       "./schemas/*": "./schemas/*", "./release-server": "./bin/release-server.mjs" }, bin: { "proto-release-server": "./bin/release-server.mjs" },

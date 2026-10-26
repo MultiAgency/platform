@@ -1,0 +1,35 @@
+# Publishes @multiagency/sdk to npm with provenance when a tag `sdk-v<version>` is pushed.
+# The tag must match src/contract/package-version.ts. Requires the NPM_TOKEN repository secret.
+name: publish-sdk
+on:
+  push:
+    tags: ["sdk-v*"]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - name: Tag matches package version
+        run: |
+          version=$(node -e 'const s=require("fs").readFileSync("src/contract/package-version.ts","utf8");console.log(/version: "([^"]+)"/.exec(s)[1])')
+          test "sdk-v$version" = "$GITHUB_REF_NAME"
+      - run: pnpm contract:pack
+      - run: pnpm contract:skills
+      - name: Publish the packed tarball
+        run: npm publish --provenance --access public .test-artifacts/contract/multiagency-sdk-*.tgz
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-release
+          path: .test-artifacts/contract/*
