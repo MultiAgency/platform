@@ -56,7 +56,7 @@ the platform only. Which existing workflows already reuse each piece is in [the 
    What changed in each version, and what the apps must do: [SDK changes](sdk-changes.md), shipped in the package as `CHANGES.md`.
    **Development** links the SDK instead of a tarball: in Proto, `pnpm sdk:dev` stages `packages/sdk` and keeps its
    `dist`, skills and change notes current (`--once` stages without watching); an app depends on
-   `"@multiagency/sdk": "link:/Users/jlwaugh/agencies/dao/proto/packages/sdk"`. Each release candidate pins one packed
+   `"@multiagency/sdk": "link:<path to this repository>/packages/sdk"`. Each release candidate pins one packed
    tarball instead (`pnpm contract:pack`, by path and sha256), and the full E2E runs against it.
    It ships its agent guidance as TanStack Intent skills (`getting-started`, `owner-workflows`, `payee-workflows`): in an app
    that installs the tarball, `npx @tanstack/intent@0.5.5 list` finds them and `npx @tanstack/intent@0.5.5 load

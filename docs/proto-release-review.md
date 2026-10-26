@@ -22,7 +22,7 @@ extraction used the existing local dependencies without changing candidate bytes
 Treasury release `e2c237bf-7d8b-4c4e-9e5d-b43030e14117` passed both-host
 owner sign-in, existing-agent access and two retained private-record checks, with
 original state and executor assignment preserved. Evidence:
-[Treasury acceptance](/Users/jlwaugh/agencies/treasury/docs/treasury-release-acceptance.md).
+[Treasury acceptance](https://github.com/MultiAgency/treasury/blob/main/docs/treasury-release-acceptance.md).
 
 Payables release `360625c3-2589-4d80-be89-f8ecad0186db` passed both-host
 sign-in and authenticated reload. Its execution receipt records zero registrations
@@ -130,5 +130,5 @@ Remaining gates are an authorized Proto window, its fresh baseline and recoverab
 backup, effective build/configuration verification, and hosted acceptance. Payables'
 empty-workspace limit remains explicit; no existing-record continuity claim is made.
 
-Guidance: [use-railway](/Users/jlwaugh/.codex/skills/use-railway/SKILL.md),
+Guidance: the Railway deployment notes used for this release,
 the frozen r2 review, and this repository's AGENTS.md state/executor requirements.
