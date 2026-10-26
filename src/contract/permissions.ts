@@ -12,6 +12,7 @@ export const READS = new Set([
   "setup",
   "instance",
   "overview",
+  "summary",
   "policyHistory",
   "treasury/get",
   "activity",

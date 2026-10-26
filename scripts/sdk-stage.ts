@@ -53,7 +53,7 @@ export function stage(staging: string, tsconfig: string) {
     workOrderRequestResult: contract.workOrderRequestResult, payeeCompensationView: contract.payeeCompensationView, requestRecord: contract.requestRecord,
     ownerCompensationView: contract.ownerCompensationView, compensationSend: contract.compensationSend, errorBody: contract.errorBody,
     agentConnection: contract.agentConnection, agentConnectionIssue: contract.agentConnectionIssue, agentConnectionStarted: contract.agentConnectionStarted,
-    agentConnectionList: contract.agentConnectionList };
+    agentConnectionList: contract.agentConnectionList, treasurySummary: contract.summaryOutput };
   for (const [key, schema] of Object.entries(schemas)) writeFileSync(join(staging, "schemas", `${key}.json`), JSON.stringify(z.toJSONSchema(schema, { unrepresentable: "any" }), null, 2) + "\n");
 
   const dependencies = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).dependencies as Record<string, string>;

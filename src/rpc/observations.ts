@@ -12,6 +12,7 @@ import { ledger, ledgerCsv, reconcileBooks } from "../ledger.js";
 import { agreedPayees, notInForce } from "../authorize.js";
 import { mandateDigest } from "../mandate.js";
 import { adoptStagedGrant, isLive, liveGrant } from "../grants.js";
+import { bindingWindow } from "../budget-window.js";
 import { blocksDispatch, readOps } from "../ops.js";
 import { recover } from "../recover.js";
 import { ASSETS } from "../policy.js";
@@ -97,6 +98,30 @@ export const observationsRoutes = {
       agreed: policy.policy ? [...agreedPayees(policy.policy)] : [],
       grants,
     };
+  }),
+  /**
+   * The dashboard's one small read: balances, budget headroom, held payouts and unresolved operations. Moves no money.
+   * A section that cannot be read is reported `unknown`, so a failure never looks like an empty or zero balance.
+   */
+  summary: os.use(readOutput("summary")).handler(async () => {
+    const id = agentId();
+    const section = async <T>(read: () => Promise<T> | T) => {
+      try { return { status: "ok" as const, data: await read() }; }
+      catch { return { status: "unknown" as const, reason: "This part could not be read right now." }; }
+    };
+    const [balances, policy, heldNow] = await Promise.all([
+      section(async () => { const { managed: book, unmanaged } = await dashboardHoldings(); return { book, unmanaged }; }),
+      section(async () => (await api.getPolicy(id)).usage.budget),
+      section(() => held({ complete: true })),
+    ]);
+    const budget = policy.status === "ok"
+      ? { status: "ok" as const, data: {
+        windows: (["daily", "weekly", "monthly"] as const).map((period) => ({ period, limitUsd: policy.data[period].limit_usd, remainingUsd: policy.data[period].remaining_usd, resetsAt: policy.data[period].resets_at })),
+        binding: bindingWindow(policy.data)?.period ?? null } }
+      : policy;
+    const open = await section(() => readOps().filter(blocksDispatch)
+      .map((op) => ({ key: op.idempotencyKey, at: op.at, kind: op.kind, request: op.request, status: op.status ?? null, sent: Boolean(op.correlationId) })));
+    return { agentId: id, at: new Date().toISOString(), balances, budget, held: heldNow, unresolved: open };
   }),
   /** Every revision of the owner's mandate, newest first, each with the digest anyone can recompute. */
   policyHistory: os.use(readOutput("policyHistory")).handler(async () => {

@@ -5,7 +5,7 @@
  */
 export const ownerCapabilities = {
   "gateway-session-v1": { routes: ["/gw/challenge", "/gw/session", "/gw/logout", "/gw/me", "/gw/agents", "/a/<agent>/access"], procedures: [] },
-  "agent-observe-v1": { routes: [], procedures: ["setup", "instance", "overview", "policyHistory", "activity", "unresolved", "held", "autopilot/get", "inbox/list", "inbox/dismiss"] },
+  "agent-observe-v1": { routes: [], procedures: ["setup", "instance", "overview", "summary", "policyHistory", "activity", "unresolved", "held", "autopilot/get", "inbox/list", "inbox/dismiss"] },
   /** A safety control: stopping a running schedule stays reachable on every host that can run one. */
   "agent-schedule-stop-v1": { routes: [], procedures: ["autopilot/stop"] },
   "agent-funding-v1": { routes: [], procedures: ["deposit"] },

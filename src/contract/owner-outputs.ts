@@ -240,6 +240,26 @@ export const overviewOutput = z.looseObject({
   agreed: z.array(z.string()),
   grants: z.array(grantView),
 });
+/**
+ * rpc/observations.ts summary: one read of balances, budget headroom, held payouts and unresolved operations.
+ * Each section is read on its own; one that could not be read is `unknown` with a reason, never zero or empty.
+ */
+const summarySection = <T extends z.ZodType>(data: T) => z.discriminatedUnion("status", [
+  z.looseObject({ status: z.literal("ok"), data }),
+  z.looseObject({ status: z.literal("unknown"), reason: z.string() }),
+]);
+export const summaryOutput = z.looseObject({
+  agentId: z.string(),
+  at: z.string(),
+  balances: summarySection(z.looseObject({ book: z.array(managedHolding), unmanaged: z.array(unmanagedHolding) })),
+  /** Each window's limit and what is left (null limit: unlimited); `binding` is the one that refuses first. */
+  budget: summarySection(z.looseObject({
+    windows: z.array(z.looseObject({ period: z.enum(["daily", "weekly", "monthly"]), limitUsd: z.string().nullable(), remainingUsd: z.string().nullable(), resetsAt: z.string().nullable() })),
+    binding: z.enum(["daily", "weekly", "monthly"]).nullable(),
+  })),
+  held: summarySection(z.array(z.looseObject({ at: z.string(), kind: z.string(), request: record, correlationId: z.string(), approvalId: z.string() }))),
+  unresolved: summarySection(z.array(z.looseObject({ key: z.string(), at: z.string(), kind: z.string(), request: record, status: z.string().nullable(), sent: z.boolean() }))),
+});
 /** rpc/observations.ts policyHistory. */
 export const policyHistoryOutput = z.array(z.looseObject({
   revision: z.number().nullable(),
@@ -653,6 +673,7 @@ export const ownerOutputs = {
   "setup": setupOutput,
   "instance": instanceOutput,
   "overview": overviewOutput,
+  "summary": summaryOutput,
   "policyHistory": policyHistoryOutput,
   "activity": activityOutput,
   "unresolved": unresolvedOutput,

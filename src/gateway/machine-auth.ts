@@ -29,7 +29,7 @@ const publicRecord = <T extends Credential>({ secretHash: _hash, ...record }: T)
 const hash = (value: string) => createHash("sha256").update(value).digest();
 
 /** Deliberately narrower than dashboard reads: no staged-grant adoption or owner-action work. */
-const READ = new Set(["instance", "overview", "policyHistory", "strategy/get", "autopilot/get", "activity", "unresolved", "autopilot/evidence", "autopilot/log", "ledger", "ledgerCsv"]);
+const READ = new Set(["instance", "overview", "summary", "policyHistory", "strategy/get", "autopilot/get", "activity", "unresolved", "autopilot/evidence", "autopilot/log", "ledger", "ledgerCsv"]);
 const PREPARE = new Set(["rebalance", "externalPlan"]);
 export function machineMayCall(scopes: readonly MachineScope[], access: Access, path: string) {
   return mayCall(access, path) && ((scopes.includes("read") && READ.has(path)) || (scopes.includes("prepare") && PREPARE.has(path)) ||
