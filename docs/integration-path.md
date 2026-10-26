@@ -16,6 +16,22 @@ the platform only. Which existing workflows already reuse each piece is in [the 
 | Agent registry, executor assignment and host routing (`dashboard.json`) | Its `contract.json` declaring what it needs | Choosing hosts or agents from a request |
 | The isolated stack and simulator for local proof | Its own tests and recipes | Live funds, credentials or production state |
 
+## How the dashboard connects (decision, issue #3)
+
+The dashboard (`dev.multiagency.ai`) is a separate origin and reaches the gateway through the **machine interface**:
+bearer credentials (`/gw/machine-credentials/<agent>`, then `POST /machine/v1/a/<agent>/rpc/<procedure>`; see
+[agent access](agent-access.md)), called from the dashboard's **server**. It is not a new host kind and it is not
+embedded behind an existing host. The `read` scope includes `summary`, the one call that returns balances,
+budget headroom, held payouts and unresolved operations.
+
+- Cookies are never shared across origins and CORS is not relaxed: a request with an `Origin` or `Cookie` header
+  is refused on `/machine/`, so a browser cannot use a credential. `test/machine-routes.test.ts` covers the
+  dashboard origin refused and the bearer call allowed.
+- The owner issues the credential with wallet sign-in on the host, with a label, scopes and a lifetime of up to 24 hours.
+- Limit: only a wallet-owned agent can issue machine credentials. A Sputnik-DAO-owned agent cannot yet, because no
+  verified DAO approval for delegation is implemented ([agent access](agent-access.md)). The dashboard's
+  DAO treasury needs that before this path serves it.
+
 ## Steps
 
 1. **Choose a host and the agents it may reach.** A host entry in `dashboard.json` names its

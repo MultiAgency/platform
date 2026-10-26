@@ -50,6 +50,8 @@ test("shared access routes bind host/owner/agent, sanitize forwarding and retain
   assert.equal((forwarded[0]!.headers as any)["x-gateway-owner"], undefined);
   for (const procedure of ["rebalance", "executePlan", "sweep", "owner/prepare", "autopilot/tick"]) assert.equal((await call(port, rpc + procedure, "POST", token, {})).status, 403);
   assert.equal((await call(port, rpc + "overview", "POST", token, {}, { cookie: "x=y" })).status, 403);
+  // A browser at the dashboard origin is refused; the dashboard's server calls with the bearer token and no Origin.
+  assert.equal((await call(port, rpc + "overview", "POST", token, {}, { origin: "https://dev.multiagency.ai" })).status, 403);
   host = "two.test";
   assert.equal((await call(port, endpoint)).body.credentials.length, 0);
   assert.equal((await call(port, `${endpoint}/${id}`, "DELETE")).status, 404);
