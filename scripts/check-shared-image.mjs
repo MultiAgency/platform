@@ -25,7 +25,7 @@ for (const site of Object.values(config.hosts)) site.agents = [];
 const data = mkdtempSync('/tmp/shared-image-');
 const state = join(data, 'state'); mkdirSync(state);
 // The canonical state directories (docs/operations.md); test/state-directories.test.ts keeps this list equal to it.
-const kept = ['.ops', '.invoices', '.owner-intents', '.strategy', '.plans', '.evidence', '.inbox', '.agreements', '.notify', '.work-orders', '.hosted', '.agent-connections', '.machine-auth'];
+const kept = ['.ops', '.invoices', '.owner-intents', '.strategy', '.plans', '.evidence', '.inbox', '.agreements', '.notify', '.work-orders', '.hosted', '.agent-connections', '.machine-auth', '.app-access'];
 for (const dir of kept) { mkdirSync(join(state, dir)); writeFileSync(join(state, dir, 'preserve'), `retained ${dir}`); }
 writeFileSync(join(state, '.hosted/registry.json'), '{"version":1,"entries":[]}');
 writeFileSync(join(state, '.env.dao'), 'retained treasury settings');

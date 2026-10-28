@@ -46,3 +46,14 @@ test("contributor timeout after acceptance preserves ambiguity and never replays
   assert.equal(answer.status, 502); assert.match(await answer.text(), /may have been accepted.*original record/);
   assert.equal(accepted, 1);
 });
+
+test("invoice proxy strips client-sent gateway headers, as every route to an agent does", async t => {
+  const seen: Record<string, unknown>[] = [];
+  const backend = createServer((req, res) => { seen.push(req.headers); req.resume(); req.on("end", () => res.writeHead(200).end("{}")); });
+  const backendPort = await listen(backend);
+  const transport = ((_target: URL, options: object, callback: Parameters<typeof request>[2]) => request({ ...options, hostname: "127.0.0.1", port: backendPort }, callback)) as unknown as typeof httpsRequest;
+  const gateway = createServer((req, res) => forwardInvoice(req, res, "https://fixed-backend.invalid", req.url!, transport));
+  const port = await listen(gateway); t.after(() => { backend.close(); gateway.close(); });
+  await fetch(`http://127.0.0.1:${port}/api/session`, { headers: { "x-gateway-actor": "app:staging:org_1", "X-Gateway-Other": "1" } });
+  assert.deepEqual(Object.keys(seen[0]!).filter(name => name.startsWith("x-gateway")), []);
+});

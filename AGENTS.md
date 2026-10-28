@@ -22,9 +22,9 @@ policy, grant, purpose, authorization, operation, unresolved, held payout, refus
 
 ## The money path
 Files: `src/agent.ts` (dispatch), `authorize.ts`, `lock.ts`, `ops.ts`, `plans.ts`, `treasury.ts`, `autopilot.ts`,
-`invoices.ts`, `invoice-store.ts`, `payouts.ts`, `payment-approval.ts`, `owner-intents.ts`,
+`invoices.ts`, `invoice-store.ts`, `payouts.ts`, `payout-requests.ts`, `recipients.ts`, `payment-approval.ts`, `owner-intents.ts`,
 `owner-requests.ts`, `owner.ts`, `recover.ts`, `reconcile.ts`. Invariants every change keeps:
-- **One send site.** Every submission (dashboard, CLI, invoice, autopilot) goes through `dispatch`:
+- **One send site.** Every submission (dashboard, CLI, invoice, payout request, autopilot) goes through `dispatch`:
   under the money lock, no unresolved operation, write-ahead record, then send.
   `test/send-path.test.ts` enforces it.
 - **Fail safe.** An unknown outcome stays unresolved and blocks new sends; it never authorizes
@@ -80,6 +80,6 @@ Every sentence in README, DEMO.md and docs states exactly what was shown, and ho
 - `CONTEXT.md` updated when a concept is added or renamed.
 - README/DEMO/docs claims match the change (see Calibrated claims).
 - State-format changes ship with a migration that requires a stopped executor and preserves every state directory
-  (canonical list in `docs/operations.md`): `.ops/`, `.invoices/`, `.owner-intents/`, `.strategy/`, `.plans/`, `.evidence/`, `.inbox/`, `.agreements/`, `.notify/`, `.work-orders/`, `.hosted/`, `.agent-connections/`, `.machine-auth/`.
+  (canonical list in `docs/operations.md`): `.ops/`, `.invoices/`, `.owner-intents/`, `.strategy/`, `.plans/`, `.evidence/`, `.inbox/`, `.agreements/`, `.notify/`, `.work-orders/`, `.hosted/`, `.agent-connections/`, `.machine-auth/`, `.app-access/`.
   Additive optional records that need no conversion of existing state (such as run progress) need
   compatibility tests and preservation instructions, not a directory-creation migration.

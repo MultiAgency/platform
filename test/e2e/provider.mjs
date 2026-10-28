@@ -35,8 +35,14 @@ export const listen = server => new Promise((resolve, reject) => {
 const json = (res, value, status = 200) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value));
 const bodyOf = async req => { let body = ''; for await (const chunk of req) body += chunk; return body ? JSON.parse(body) : null; };
 
-/** `account` owns the configured agent; `payees` are its agreed destinations; `accounts` only exist on chain. */
-export async function provider(directory, { treasury = false, account = OWNER, payees = [PAYEE], accounts = [], dao = false, payoutFunding = 100000000n } = {}) {
+/** Policy fields the provider enforces, so an edit to any of them is signed on chain (provider skills `references/policy.md`). */
+const PROVIDER_FIELDS = ['frozen', 'actions', 'confidential', 'owner_approval', 'assets', 'limits', 'max_actions_per_hour'];
+/**
+ * `account` owns the configured agent; `payees` are its agreed destinations; `accounts` only exist on chain.
+ * `onChainPolicyEdits`: a policy update that changes a provider-enforced field comes back as a NEP-366 delegate carrying
+ * an opaque payload, per the provider's docs (not observed here); by default every owner intent is NEP-413.
+ */
+export async function provider(directory, { treasury = false, account = OWNER, payees = [PAYEE], accounts = [], dao = false, payoutFunding = 100000000n, onChainPolicyEdits = false } = {}) {
   const id = randomBytes(32).toString('hex');
   const credential = createGrantCredential();
   const owner = { type: 'near', account_id: account, public_key: PUBLIC_KEY };
@@ -194,7 +200,10 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         if (body.type === 'policy_update') {
           const target = agents.get(body.agent_id);
           if (!target || body.expected_revision !== (target.revision ?? 1) || !body.policy) throw new Error('Unexpected policy update');
-          const generated = { correlation_id: randomUUID(), type: 'policy_update', signer: target.owner, expires_at: expires, intent: nep413(),
+          const onChain = onChainPolicyEdits && PROVIDER_FIELDS.some(field => JSON.stringify(body.policy[field]) !== JSON.stringify(target.policy[field]));
+          const delegate = { standard: 'nep366', payload: { receiverId: 'outlayer.near', actions: [{ type: 'FunctionCall', params: { methodName: 'store_wallet_policy',
+            args: { wallet_pubkey: PUBLIC_KEY, encrypted_data: randomBytes(64).toString('base64') }, gas: '30000000000000', deposit: '0' } }] } };
+          const generated = { correlation_id: randomUUID(), type: 'policy_update', signer: target.owner, expires_at: expires, intent: onChain ? delegate : nep413(),
             preview: { summary: 'Change the local agent policy', previous_revision: target.revision ?? 1, revision: (target.revision ?? 1) + 1, policy: body.policy } };
           intents.push({ ...generated, agent: target, policyUpdate: body }); return json(res, generated);
         }

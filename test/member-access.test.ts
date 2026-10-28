@@ -16,7 +16,7 @@ function paths(node: object, prefix = ""): string[] {
 }
 
 /** What every admitted member may read. */
-const READS = ["compensation/list", "instance", "setup", "overview", "policyHistory", "treasury/get", "activity", "unresolved", "held", "autopilot/get", "autopilot/evidence",
+const READS = ["compensation/list", "instance", "setup", "overview", "policyHistory", "treasury/get", "activity", "unresolved", "held", "payouts/status", "autopilot/get", "autopilot/evidence",
   "autopilot/log", "strategy/get", "inbox/list", "ledger", "ledgerCsv", "reconcileBooks", "owner/status", "owner/pending", "owner/actions", "paymentHistory", "agreements/list", "paymentStatus", "invoices",
   "workOrders/list", "workOrders/get", "workOrders/status", "demoGuide/compose"];
 /**
@@ -25,7 +25,7 @@ const READS = ["compensation/list", "instance", "setup", "overview", "policyHist
  */
 const PROPOSES = ["owner/prepare", "agreements/propose", "agreements/offer", "rebalance", "externalPlan", "steward/propose", "deposit", "treasury/fund",
   "workOrders/create", "workOrders/prepare", "workOrders/deposit"];
-const EXECUTES = ["compensation/prepare", "compensation/send", "compensation/review", "workOrders/file", "pay", "sweep", "executePlan", "autopilot/tick", "autopilot/enable"];
+const EXECUTES = ["compensation/prepare", "compensation/send", "compensation/review", "workOrders/file", "pay", "payouts/request", "sweep", "executePlan", "autopilot/tick", "autopilot/enable"];
 const MANAGES = ["compensation/agreement", "strategy/save", "treasury/link", "treasury/unlink", "treasury/setConfidential", "agreements/decline"];
 const MAINTAINS = ["autopilot/stop", "recover", "inbox/dismiss", "cancelPreparedInvoice"];
 

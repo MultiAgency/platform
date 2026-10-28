@@ -9,6 +9,10 @@ import { join } from "node:path";
 import { supplierEnvironment, supplierCookie } from "../src/gateway/hosted-supplier.js";
 import { demoSession } from "../src/gateway/demo-hosts.js";
 import { sessionToken } from "../src/signin.js";
+import { randomBytes } from "node:crypto";
+import { generateKey, Near, type PrivateKey } from "near-kit";
+import { setupMessage } from "../src/contract/app-consent.js";
+import { AppCredentials } from "../src/gateway/app-access.js";
 import { checkedDiscovery } from "./fixtures/discovery.js";
 
 const localFetch = (url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) => new Promise<Response>((resolve, reject) => {
@@ -23,13 +27,16 @@ for (const sharedHosts of [false, true]) test(`${sharedHosts ? "shared hosts" : 
   const root = process.cwd();
   const dir = mkdtempSync(join(tmpdir(), "hosted-gateway-"));
   const secret = "offline-self-service-session-secret-123456789";
+  const ownerKey = generateKey();
   const rpc = createServer((req, res) => {
     let body = "";
     req.on("data", chunk => body += chunk).on("end", () => {
       const { id, params } = JSON.parse(body);
       const view = (value: unknown) => ({ result: { result: [...Buffer.from(JSON.stringify(value))], logs: [], block_height: 1, block_hash: "11111111111111111111111111111111" } });
       const policy = { proposal_bond: "0", roles: [{ name: "council", kind: { Group: ["alice.near"] }, permissions: ["call:AddProposal"], vote_policy: {} }], default_vote_policy: { threshold: [1, 2] } };
-      const answer = params.account_id === "team.sputnik-dao.near" ? view(policy) : params.account_id === "v1.signer" ? view("ed25519:11111111111111111111111111111111")
+      const key = { nonce: 1, permission: "FullAccess", block_height: 1, block_hash: "11111111111111111111111111111111" };
+      const answer = params.request_type === "view_access_key" && params.account_id === "carol.near" && params.public_key === ownerKey.publicKey.toString() ? { result: key }
+        : params.account_id === "team.sputnik-dao.near" ? view(policy) : params.account_id === "v1.signer" ? view("ed25519:11111111111111111111111111111111")
         : { error: { name: "HANDLER_ERROR", cause: { name: "UNKNOWN_ACCOUNT", info: { requested_account_id: params.account_id } }, code: -32000, message: "Server error" } };
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id, ...answer }));
     });
@@ -96,6 +103,37 @@ for (const sharedHosts of [false, true]) test(`${sharedHosts ? "shared hosts" : 
   } });
   assert.equal(forged.status, 400);
   assert.match(await forged.text(), /bound to its selected owner/);
+  // App setup through the real gateway: the owner's signed setup text reserves the hosted agent under the same
+  // self-service and host rules, and the setup consent reaches the new agent while it isn't created.
+  const tokens = Object.fromEntries(["fixture.test", "payables.test"].map(host =>
+    [host, new AppCredentials(join(dir, ".app-access")).issue({ deployment: "staging", host, label: "staging", days: 30 }).token]));
+  const dashboard = (path: string, host: string, body?: unknown) => localFetch(`http://127.0.0.1:${port}${path}`, {
+    method: body === undefined ? "GET" : "POST", headers: { host, authorization: `Bearer ${tokens[host]}`, "content-type": "application/json" },
+    ...(body !== undefined && { body: JSON.stringify(body) }) });
+  const signedSetup = async (host: string, area: "treasury" | "payables") => {
+    const message = setupMessage({ host, deployment: "staging", organization: "org_1", owner: "carol.near", area, expiresAt: new Date(Date.now() + 30 * 60_000).toISOString() });
+    const nonce = randomBytes(32);
+    const signature = await new Near({ network: "mainnet", privateKey: ownerKey.secretKey as PrivateKey, defaultSignerId: "carol.near" }).signMessage({ message, recipient: host, nonce });
+    return { message, nonce: nonce.toString("base64"), publicKey: signature.publicKey, signature: signature.signature };
+  };
+  const setup = await dashboard("/apps/v1/setup", "fixture.test", await signedSetup("fixture.test", "payables"));
+  assert.equal(setup.status, 201, `${await setup.clone().text()} ${diagnostics}`);
+  const { agent: carolAgent, consent: setupConsentRecord } = await setup.json() as { agent: string; consent: { agentId: string; scopes: string[] } };
+  assert.match(carolAgent, /^own-[0-9a-f]{24}$/);
+  const carolEntry = (JSON.parse(readFileSync(join(dir, ".hosted", "apps.json"), "utf8")).entries as { name: string; deployment?: string; organization?: string }[]).find(e => e.name === carolAgent);
+  assert.deepEqual([carolEntry?.deployment, carolEntry?.organization], ["staging", "org_1"], "the app's setup reserves an Organization's own agent");
+  assert.deepEqual([setupConsentRecord.agentId, setupConsentRecord.scopes], ["unborn", ["owner"]]);
+  let created: unknown;
+  for (let i = 0; i < 150; i++) {
+    const identity = await dashboard(`/apps/v1/agents/${carolAgent}`, "fixture.test");
+    if (identity.status === 200) { created = (await identity.json()).created; break; }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal(created, false, `the new hosted agent answers, not created yet: ${diagnostics}`);
+  if (sharedHosts) {
+    const wrongArea = await dashboard("/apps/v1/setup", "payables.test", await signedSetup("payables.test", "treasury"));
+    assert.deepEqual([wrongArea.status, (await wrongArea.json()).error], [409, "This area is not available on this host"]);
+  }
   const daoInput = { owner: "team.sputnik-dao.near", kind: "dao", area: "payables" };
   assert.equal((await call("/gw/agents", "bob.near", daoInput)).status, 403);
   const daoResponse = await call("/gw/agents", "alice.near", daoInput);

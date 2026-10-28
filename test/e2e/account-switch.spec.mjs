@@ -11,6 +11,15 @@ import { quoteRegion, seedStrategy, signIn } from './treasury-journey.mjs';
 // (SECOND, no agent of its own; the host allows self-service sessions) signs in under the owner's open tab, as a
 // sign-in in another tab would. After the app learns of the switch, nothing of the owner's may render or be answered.
 const apps = JSON.parse(process.env.PROTO_E2E_OWNER_APPS ?? '{}');
+/** When a request was sent (epoch ms): a read already in flight when the session changed is answered under the old one. */
+const sentAt = response => response.request().timing().startTime;
+/** Clicks sign-out and answers when the gateway answered it: a read sent after that must find no session. */
+async function signOutAnswered(page, click) {
+  const answered = page.waitForResponse(response => new URL(response.url()).pathname === '/gw/logout');
+  await click();
+  const timing = (await answered).request().timing();
+  return timing.startTime + timing.responseEnd;
+}
 const { change, has, CHANGES } = payablesGeneration();
 
 for (const release of ['a', 'b']) test(`Payables release ${release.toUpperCase()} (${change}): an account switch and a sign-out leave none of the previous account's records`, async ({ browser }, info) => {
@@ -25,7 +34,7 @@ for (const release of ['a', 'b']) test(`Payables release ${release.toUpperCase()
     const page = await owner.context.newPage(), other = await owner.context.newPage();
     // Every owner-RPC answer this page receives, with the time it arrived.
     const answers = [];
-    page.on('response', response => { const path = new URL(response.url()).pathname; if (/^\/a\/payout\/rpc\//.test(path)) answers.push({ at: Date.now(), path, status: response.status(), method: response.request().method() }); });
+    page.on('response', response => { const path = new URL(response.url()).pathname; if (/^\/a\/payout\/rpc\//.test(path)) answers.push({ at: Date.now(), sent: sentAt(response), path, status: response.status(), method: response.request().method() }); });
     await page.goto(`${stack.dashboard}/a/payout/`);
     await page.getByRole('button', { name: 'Connect wallet', exact: true }).first().click();
     await expect(page.getByRole('heading', { name: 'Reports & payment requests' })).toBeVisible();
@@ -74,10 +83,9 @@ for (const release of ['a', 'b']) test(`Payables release ${release.toUpperCase()
     await page.goto(`${stack.dashboard}/a/payout/`);
     await expect(page.getByRole('heading', { name: 'Reports & payment requests' })).toBeVisible();
     await expect(ownersRequest.first()).toBeVisible();
-    const signedOut = Date.now();
-    await page.getByRole('button', { name: 'Sign out' }).click();
+    const signedOut = await signOutAnswered(page, () => page.getByRole('button', { name: 'Sign out' }).click());
     await page.waitForTimeout(3_000);
-    observed.signOut = { stillRendered: await ownersRequest.count(), answeredAfterSignOut: answers.filter(a => a.at >= signedOut && a.status === 200).map(a => a.path) };
+    observed.signOut = { stillRendered: await ownersRequest.count(), answeredAfterSignOut: answers.filter(a => a.sent >= signedOut && a.status === 200).map(a => a.path) };
     await expect(ownersRequest, 'E2E_SIGN_OUT_CLEARS').toHaveCount(0);
     expect(observed.signOut.answeredAfterSignOut, 'no owner read is answered after sign-out').toEqual([]);
   } finally {
@@ -99,7 +107,7 @@ for (const release of ['a', 'b']) test(`Treasury migrated release ${release.toUp
     seedStrategy(stack, 3000);
     const page = await owner.context.newPage(), other = await owner.context.newPage();
     const answers = [];
-    page.on('response', response => { const path = new URL(response.url()).pathname; if (/^\/a\/portfolio\/rpc\//.test(path)) answers.push({ at: Date.now(), path, status: response.status() }); });
+    page.on('response', response => { const path = new URL(response.url()).pathname; if (/^\/a\/portfolio\/rpc\//.test(path)) answers.push({ at: Date.now(), sent: sentAt(response), path, status: response.status() }); });
     await signIn(page, stack);
     // The owner's record on screen: the saved strategy's targets.
     const ownersStrategy = quoteRegion(page).getByText(/30% wNEAR \/ 70% USDC/);
@@ -111,19 +119,18 @@ for (const release of ['a', 'b']) test(`Treasury migrated release ${release.toUp
     await page.waitForTimeout(3_000);
     observed.switch = { stillRendered: await ownersStrategy.count(), afterSwitch: answers.filter(a => a.at >= switched).map(a => `${a.status} ${a.path}`) };
     await expect(ownersStrategy, 'E2E_NO_PREVIOUS_ACCOUNT_RECORDS').toHaveCount(0);
-    expect(answers.filter(a => a.at >= switched && a.status === 200).map(a => a.path), 'no owner read is answered under the new account').toEqual([]);
+    expect(answers.filter(a => a.sent >= switched && a.status === 200).map(a => a.path), 'no owner read sent under the new account is answered').toEqual([]);
     expect(stack.portfolio.swaps, 'nothing sent').toHaveLength(0);
     await signInAs(other, PAYEE, sign);
     await page.goto(`${stack.dashboard}/a/portfolio/`);
     await expect(ownersStrategy).toBeVisible({ timeout: 30_000 });
-    const signedOut = Date.now();
     // Treasury's sign-out is the wallet menu's "Disconnect" (it posts /gw/logout for a signed-in viewer).
     await page.getByRole('button', { name: /^Wallet: / }).click();
-    await page.getByRole('menuitem', { name: 'Disconnect' }).click({ timeout: 15_000 });
+    const signedOut = await signOutAnswered(page, () => page.getByRole('menuitem', { name: 'Disconnect' }).click({ timeout: 15_000 }));
     await page.waitForTimeout(3_000);
-    observed.signOut = { stillRendered: await ownersStrategy.count(), afterSignOut: answers.filter(a => a.at >= signedOut).map(a => `${a.status} ${a.path}`) };
+    observed.signOut = { stillRendered: await ownersStrategy.count(), afterSignOut: answers.filter(a => a.sent >= signedOut).map(a => `${a.status} ${a.path}`) };
     await expect(ownersStrategy, 'E2E_SIGN_OUT_CLEARS').toHaveCount(0);
-    expect(answers.filter(a => a.at >= signedOut && a.status === 200).map(a => a.path), 'no owner read is answered after sign-out').toEqual([]);
+    expect(answers.filter(a => a.sent >= signedOut && a.status === 200).map(a => a.path), 'no owner read sent after sign-out is answered').toEqual([]);
   } finally {
     writeFileSync(info.outputPath('observed.json'), JSON.stringify({ product: 'treasury', release, change: treasuryChange, ...observed }, null, 2));
     await owner.context.close(); await stack.close();

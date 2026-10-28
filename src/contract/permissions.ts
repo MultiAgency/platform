@@ -30,6 +30,7 @@ export const READS = new Set([
   "owner/actions",
   "paymentHistory",
   "paymentStatus",
+  "payouts/status",
   "agreements/list",
   "invoices",
   "compensation/list",
@@ -47,7 +48,7 @@ export const OWNER_PROPOSALS = new Set([
   "workOrders/prepare",
 ]);
 const PREPARE = new Set([...OWNER_PROPOSALS, "rebalance", "externalPlan", "steward/propose", "deposit", "treasury/fund", "workOrders/deposit"]);
-const EXECUTE = new Set(["workOrders/file", "compensation/prepare", "compensation/send", "compensation/review", "pay", "sweep", "executePlan", "autopilot/tick", "autopilot/enable"]);
+const EXECUTE = new Set(["workOrders/file", "compensation/prepare", "compensation/send", "compensation/review", "pay", "payouts/request", "sweep", "executePlan", "autopilot/tick", "autopilot/enable"]);
 const MANAGE = new Set(["compensation/agreement", "strategy/save", "treasury/link", "treasury/unlink", "treasury/setConfidential", "agreements/decline"]);
 const MAINTAIN = new Set(["autopilot/stop", "recover", "inbox/dismiss", "cancelPreparedInvoice"]);
 

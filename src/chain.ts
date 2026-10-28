@@ -136,9 +136,9 @@ export async function daoPayees(accountId: string) {
  * mainnet RPC, 2026-10-13, an unfunded implicit account included). A failed read throws: near-kit's own
  * `accountExists` answers false to any error.
  */
-export async function accountExists(accountId: string) {
+export async function accountExists(accountId: string, options?: { finality: "final" }) {
   try {
-    await near.getAccount(accountId);
+    await near.getAccount(accountId, options);
     return true;
   } catch (error) {
     if (error instanceof AccountDoesNotExistError) return false;

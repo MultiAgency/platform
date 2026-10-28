@@ -66,6 +66,25 @@ export const ownerAction = z.discriminatedUnion("type", [
 ]);
 
 export const ownerPrepareInput = z.object({ action: ownerAction, signer: z.enum(["wallet", "dao"]) });
+/**
+ * A payout an app or owner asks for under its own `requestId`, stored before calling: the same request is sent at
+ * most once, and `payouts/status` answers it by `requestId`. A new attempt is a new `requestId`, after a refusal.
+ */
+export const payoutRequestId = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
+export const payoutRequestInput = z.object({
+  requestId: payoutRequestId,
+  /** The token paid, as the provider names it (for example `nep141:…`). The agent's signed policy decides which are allowed. */
+  asset: z.string().min(1).max(256),
+  /**
+   * How it reaches the payee: `intents`, a confidential transfer inside NEAR Intents to an agreed payee, or `{ chain }`,
+   * a withdrawal to that chain. Today only confidential USDC through `intents` is paid; anything else is refused.
+   */
+  delivery: z.union([z.literal("intents"), z.object({ chain: z.string().min(1).max(64) })]),
+  recipient: transferAccount,
+  amount: units,
+  expectedPolicy: reviewedPolicy,
+});
+export const payoutStatusInput = z.object({ requestId: payoutRequestId });
 export const ownerSubmitInput = z.object({ correlationId: z.string(), signedData: z.record(z.string(), z.unknown()) });
 export const ownerStatusInput = z.object({ correlationId: z.string() });
 export const executePlanInput = z.object({ planId: z.uuid() });

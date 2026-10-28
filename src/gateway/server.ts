@@ -4,6 +4,7 @@ import { serveOwnerFrontend } from "./owner-frontend.js";
 import { providedCapabilities } from "../contract/owner-capabilities.js";
 import { resolveMachineManagement } from "./machine-authority.js";
 import { machineRoutes } from "./machine-routes.js";
+import { appRoutes } from "./app-routes.js";
 import { payeeBase, supplierCookie, supplierEnvironment, payeeRoute } from "./hosted-supplier.js";
 import { demoHost, demoCrossSite, demoSession, invoiceRoute, assignedToHost } from "./demo-hosts.js";
 import { forwardRpc } from "./rpc-proxy.js";
@@ -149,9 +150,13 @@ const server = createServer(async (req, res) => {
 
     if (pathname === "/health") return json(res, 200, { ok: true });
 
-    if (!site && (pathname.startsWith("/machine/") || pathname.startsWith("/gw/machine-credentials/") || pathname === "/gw/access-session")
+    if (!site && (pathname.startsWith("/machine/") || pathname.startsWith("/apps/") || pathname.startsWith("/gw/machine-credentials/") || pathname === "/gw/access-session")
       && req.headers.host?.toLowerCase() !== signingHost.toLowerCase()) return json(res, 421, { error: "Use the configured host for agent access" });
     if (await machineRoutes(req, res, pathname, signingHost, selected, () => auth.account(req), () => stopping)) return;
+    if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, config.selfService ? { setup: async ({ owner, area, deployment, organization }) => {
+      if (site && !site.hostedAreas?.includes(area)) throw new Error("This area is not available on this host");
+      return reserveHosted({ owner, kind: "wallet", area }, { deployment, organization });
+    } } : {})) return;
 
     if (pathname === "/gw/challenge" && req.method === "GET") return json(res, ...challengeAnswer(signingHost, mayChallenge(clientAddress(req))));
     if (pathname === "/gw/session" && req.method === "POST") {
@@ -193,9 +198,7 @@ const server = createServer(async (req, res) => {
       try { authorizeSetup(account, parsed.data.kind, await ownerOf(parsed.data.owner)); }
       catch { return json(res, 403, { error: "Owner access could not be verified. Use your own wallet or a DAO where you can propose owner actions." }); }
       if (stopping) return json(res, 503, { error: "Gateway is stopping. No reservation was made." });
-      const reserved = hosted.reserve(parsed.data);
-      if (!agents.some(a => a.name === reserved.name)) { agents.push(reserved); start(reserved); }
-      return json(res, 200, { name: reserved.name });
+      return json(res, 200, { name: reserveHosted(parsed.data).name });
     }
 
     // A DAO's recent signing proposals, for a viewer who may see one of the agents it owns.
@@ -265,6 +268,13 @@ const supervisor = new Supervisor((agent: AgentEntry & { envFile: string }) => {
     stdio: ["ignore", "inherit", "inherit"],
   });
 });
+/** Reserves (or finds) a hosted agent and starts its process once. Callers check who may set it up. */
+function reserveHosted(...input: Parameters<HostedAgents["reserve"]>) {
+  const reserved = hosted.reserve(...input);
+  if (!agents.some(a => a.name === reserved.name)) { agents.push(reserved); start(reserved); }
+  return reserved;
+}
+
 function start(agent: AgentEntry & { envFile: string }) {
   supervisor.start(agent);
 }

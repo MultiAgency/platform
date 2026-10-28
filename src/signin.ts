@@ -84,6 +84,31 @@ export const chainKeyLookup: KeyLookup = async (accountId, publicKey) => {
   return key.permission === "FullAccess" ? "FullAccess" : "FunctionCall";
 };
 
+/** A key's standing on chain. Only an answer the chain gave decides; anything else throws, never "absent". */
+export type KeyState = "FullAccess" | "FunctionCall" | "absent";
+export type KeyStateLookup = (accountId: string, publicKey: string) => Promise<KeyState>;
+
+/**
+ * `view_access_key` at final finality, read directly so a missing key is told apart from a failed request (near-kit's
+ * `getAccessKey` answers null for both). A missing key arrives as `result.error` "... does not exist ..." or as an
+ * UNKNOWN_ACCESS_KEY / UNKNOWN_ACCOUNT error cause.
+ */
+export const chainKeyState: KeyStateLookup = async (accountId, publicKey) => {
+  const response = await fetch(mainnet.network.rpcUrl, { method: "POST", signal: AbortSignal.timeout(5_000),
+    headers: { "content-type": "application/json", ...mainnet.headers },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "key-state", method: "query",
+      params: { request_type: "view_access_key", finality: "final", account_id: accountId, public_key: publicKey } }) });
+  if (!response.ok) throw new Error(`NEAR RPC answered ${response.status}`);
+  const body = await response.json() as { result?: { permission?: unknown; error?: unknown }; error?: { cause?: { name?: unknown } } };
+  const cause = body.error?.cause?.name;
+  if (cause === "UNKNOWN_ACCESS_KEY" || cause === "UNKNOWN_ACCOUNT") return "absent";
+  if (typeof body.result?.error === "string" && body.result.error.includes("does not exist")) return "absent";
+  const permission = body.result?.permission;
+  if (permission === "FullAccess") return "FullAccess";
+  if (permission && typeof permission === "object" && "FunctionCall" in permission) return "FunctionCall";
+  throw new Error("NEAR RPC gave no key answer");
+};
+
 /** The account a sign-in proves, or an error saying why it doesn't. The nonce is spent either way. */
 export async function verifySignIn(
   { accountId, publicKey, signature, nonce, callbackUrl, callbackUrls = [] }: SignIn,

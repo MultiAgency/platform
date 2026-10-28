@@ -5,7 +5,7 @@ import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
-import { ownerClient } from "@multiagency/sdk";
+import { appClient, ownerClient } from "@multiagency/sdk";
 import { payeeClient } from "@multiagency/sdk/payee";
 import { owner as setupOwner } from "./examples/owner-workflows-1.ts";
 import { heldPayouts } from "./examples/owner-workflows-2.ts";
@@ -16,6 +16,9 @@ import { payee as setupPayee } from "./examples/payee-workflows-1.ts";
 import { agentFor } from "./examples/payee-workflows-2.ts";
 import { newReport, readRequest, revision, send } from "./examples/payee-workflows-3.ts";
 import { connectAgent, revokeAll } from "./examples/payee-workflows-4.ts";
+import { platformFor } from "./examples/app-server-1.ts";
+import { connect } from "./examples/app-server-2.ts";
+import { payOnce } from "./examples/app-server-3.ts";
 
 const listen = async (handle: (req: IncomingMessage, res: ServerResponse) => void) => {
   const server = createServer(handle);
@@ -208,4 +211,50 @@ ok(sent.filter(s => s.path.startsWith("/api/agent-connections")).every(s => s.au
 ran.connections = "started, listed and revoked from the browser session";
 await entry.close();
 
+// App routes stand-in: identity, consents (the first answer lost) and an agent's payout procedures (the request's answer lost).
+ok(platformFor("https://platform.test", "tap_test"), "the setup example constructs its client");
+const appSent: { path: string; authorization: string | null; body: string }[] = [];
+let dropConsent = 1;
+const requested: unknown[] = [];
+const appRouter = { payouts: {
+  request: os.handler(({ input }) => { requested.push(input); throw new Error("reply lost"); }),
+  status: os.handler(({ input }) => ({ requestId: (input as { requestId: string }).requestId, state: "held", status: "PENDING_APPROVAL", correlationId: "op-1", code: null })),
+} };
+const appHandler = new RPCHandler(appRouter);
+const platform = await listen(async (req, res) => {
+  const rpc = req.url!.startsWith("/apps/v1/o/");
+  let body = ""; if (!rpc) for await (const chunk of req) body += chunk;
+  appSent.push({ path: req.url!, authorization: req.headers.authorization ?? null, body });
+  if (req.url === "/apps/v1/agents/payout") return res.writeHead(200, { "content-type": "application/json" })
+    .end(JSON.stringify({ agent: "payout", owner: "owner.near", agentId: "agent-1", created: true, host: "platform.test", deployment: "staging" }));
+  if (req.url === "/apps/v1/consents") {
+    if (dropConsent-- > 0) return req.socket.destroy();
+    const consent = { id: "c".repeat(64), deployment: "staging", host: "platform.test", organization: "org_1", owner: "owner.near", agent: "payout",
+      agentId: "agent-1", scopes: ["owner", "read"], expiresAt: Date.now() + 1, createdAt: Date.now(), publicKey: "ed25519:k", revoked: false, revokedAt: null };
+    return res.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ consent }));
+  }
+  const { matched } = await appHandler.handle(req, res, { prefix: "/apps/v1/o/org_1/a/payout/rpc", context: {} });
+  if (!matched) res.writeHead(404).end();
+});
+const app = appClient({ base: platform.base as `http://${string}`, credential: "tap_test" });
+let signed = 0;
+const consented = await connect(app, "platform.test", "staging", "org_1", "payout", async (message, recipient, nonce) => {
+  signed++; equal(recipient, "platform.test"); equal(nonce.length, 32); ok(message.includes('"multiagency.app-consent"'));
+  return { publicKey: "ed25519:k", signature: "s" };
+});
+ok(consented.ok && consented.value.consent.id === "c".repeat(64), JSON.stringify(consented));
+const submissions = appSent.filter(s => s.path === "/apps/v1/consents");
+equal(signed, 1, "the owner signs once");
+equal(submissions.length, 2, "a lost consent answer is submitted again");
+equal(submissions[0]!.body, submissions[1]!.body, "with the same signed body");
+ok(appSent.every(s => s.authorization === "Bearer tap_test"), "every call carries the deployment's credential");
+ran.appConnect = "identity, consent signed once, lost answer resubmitted with the same body";
+
+const terms = { requestId: "wo-1", asset: "nep141:usdc", recipient: "payee.near", amount: "1", expectedPolicy: { revision: 1, digest: `sha256:${"0".repeat(64)}` } };
+const payout = await payOnce(app, "org_1", "payout", terms);
+deepStrictEqual(payout, { ok: true, value: { requestId: "wo-1", state: "held", status: "PENDING_APPROVAL", correlationId: "op-1", code: null } });
+equal(requested.length, 1, "a lost payout request is read by its requestId, never sent again");
+deepStrictEqual(appSent.filter(s => s.path.startsWith("/apps/v1/o/")).map(s => s.path.replace("/apps/v1/o/org_1/a/payout/rpc/", "")), ["payouts/request", "payouts/status"]);
+ran.appPayout = "request sent once; its lost answer read by payouts/status";
+await platform.close();
 console.log(JSON.stringify(ran));

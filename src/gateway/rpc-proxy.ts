@@ -4,8 +4,15 @@ import type { AgentEntry } from "./config.js";
 
 export const RPC_IDLE_TIMEOUT_MS = 15 * 60_000;
 
-/** Forwards a call to an agent server on loopback, streaming both ways (some procedures stream events). */
-export function forwardRpc(req: IncomingMessage, res: ServerResponse, agent: AgentEntry, path: string, timeoutMs = RPC_IDLE_TIMEOUT_MS, body?: string, actor?: string) {
+/** Most a held (inspected) reply may be; an owner intent with its preview is far smaller. */
+const MAX_HELD_REPLY = 1 << 20;
+
+/**
+ * Forwards a call to an agent server on loopback, streaming both ways (some procedures stream events). With `hold`, a
+ * successful reply is read whole and released only when `hold` returns null; otherwise the caller gets 403 with its reason.
+ */
+export function forwardRpc(req: IncomingMessage, res: ServerResponse, agent: AgentEntry, path: string, timeoutMs = RPC_IDLE_TIMEOUT_MS, body?: string, actor?: string,
+  hold?: (reply: unknown) => string | null) {
   const headers: import("node:http").OutgoingHttpHeaders = { ...req.headers, host: `127.0.0.1:${agent.port}` };
   delete headers.origin;
   delete headers.cookie;
@@ -22,9 +29,28 @@ export function forwardRpc(req: IncomingMessage, res: ServerResponse, agent: Age
       answer.resume();
       return json(res, 502, { error: "Agent backend redirected. Check the original record before retrying." });
     }
-    res.writeHead(answer.statusCode ?? 502, { ...answer.headers, "cache-control": "private, no-store" });
     answer.on("error", () => res.destroy());
-    answer.pipe(res);
+    const status = answer.statusCode ?? 502;
+    if (!hold || status < 200 || status >= 300) {
+      res.writeHead(status, { ...answer.headers, "cache-control": "private, no-store" });
+      return answer.pipe(res);
+    }
+    const chunks: Buffer[] = [];
+    let size = 0;
+    answer.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size <= MAX_HELD_REPLY) chunks.push(chunk);
+    });
+    answer.on("end", () => {
+      const raw = Buffer.concat(chunks);
+      let reply: unknown;
+      try { reply = size <= MAX_HELD_REPLY ? JSON.parse(raw.toString("utf8")) : undefined; } catch { reply = undefined; }
+      if (reply === undefined) return json(res, 502, { error: "Agent backend reply couldn't be checked. Check the original record before retrying." });
+      const refusal = hold(reply);
+      if (refusal) return json(res, 403, { error: refusal });
+      const { "transfer-encoding": _chunked, ...headers } = answer.headers;
+      res.writeHead(status, { ...headers, "content-length": raw.length, "cache-control": "private, no-store" }).end(raw);
+    });
   });
   upstream.on("error", () => {
     if (res.headersSent) res.destroy();

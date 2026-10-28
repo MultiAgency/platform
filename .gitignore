@@ -24,6 +24,7 @@ examples/minimal-prototype/dist/
 .hosted/
 
 .machine-auth/
+.app-access/
 .agent-connections/
 /packages/sdk/
 /packages/sdk.tsconfig.json

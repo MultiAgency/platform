@@ -31,4 +31,5 @@ backups
 dashboard.json
 
 .machine-auth/
+.app-access/
 .agent-connections/

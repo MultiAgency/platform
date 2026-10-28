@@ -17,11 +17,14 @@ const payablesDist = values('--payables-release').at(-1);
 // `--builder <account>`: an account on chain that is not yet an agreed payee; the owner adds it through the policy screen.
 // `--payout-funding <raw USDC>`: the payout agent's starting balance (default 100 USDC); fund it later with `fundPayout`.
 const builder = values('--builder').at(-1), payoutFunding = values('--payout-funding').at(-1);
+// `--treasury`: also a Treasury agent, `portfolio`, owned by the payee account (100 simulated USDC). Its owner issues
+// machine credentials at /a/portfolio/access; a server outside the browser reads it at /machine/v1/a/portfolio.
+const treasury = args.includes('--treasury');
 if (frontend && payablesDist) throw new Error('Use --frontend or --payables-release, not both');
 const directory = join(process.env.PROTO_E2E_ARTIFACTS, 'stack'), controls = join(directory, 'controls');
 mkdirSync(controls, { recursive: true });
 const stack = await environment(join(directory, 'environment'), { owner, payees, ...(builder && { accounts: [builder] }), ...(payoutFunding !== undefined && { payoutFunding: BigInt(payoutFunding) }),
-  ...(frontend && { frontendDist: resolve(frontend) }),
+  ...(frontend && { frontendDist: resolve(frontend) }), ...(treasury && { workspace: true }),
   ...(payablesDist && { ownerApp: { product: 'payables', a: resolve(payablesDist), b: resolve(payablesDist) } }) });
 const { simulated } = stack;
 // One browser, two wallet contexts (owner, payee) behind the same wallet boundary as the tests. Attach over CDP.
@@ -73,6 +76,8 @@ const state = () => ({
   ownerFrontend: payablesDist ? { product: 'payables', release: resolve(payablesDist) } : frontend ? { dist: resolve(frontend) } : 'proto web',
   dialogs, parentAgent: simulated.id, createdAgents: simulated.created(), records: stack.records(), builder: builder ?? null,
   payoutPolicy: simulated.payoutPolicy(),
+  treasury: stack.portfolio ? { agent: 'portfolio', agentId: stack.portfolio.id, owner: PAYEE, access: `${stack.dashboard}/a/portfolio/access`,
+    machineBase: `${stack.dashboard}/machine/v1/a/portfolio` } : null,
   deposits: simulated.deposits.map(({ agent, correlation_id }) => ({ agent, correlation: correlation_id })),
   transfers: simulated.transfers.map(p => ({ agent: p.agent, correlation: p.correlation, approval: p.approval, status: p.status, recipient: p.body.recipient, amount: p.body.amount })),
   providerErrors: simulated.errors, simulated: ['provider', 'chain', 'wallet signatures', 'deposits', 'settlement'],

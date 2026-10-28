@@ -29,9 +29,12 @@ no work-order lifecycle has been observed on mainnet.
 
 **One send site.** Every money action, whichever area starts it, goes through `dispatch` in
 `agent.ts`: under the money lock, with no unresolved operation, a write-ahead record, `authorize`, then
-the provider call. `test/send-path.test.ts` fails if any other file sends. The callers are
-`invoices.ts` (an invoice's payment), `treasury.ts` and `plans.ts` (shields, swaps, sweeps) and
-`agent.ts`'s own `pay` (a payment by hand).
+the provider call. Before the record, a transfer's named recipient must exist on NEAR (`recipients.ts`, read at final
+finality): otherwise it is refused `recipient_not_found`, or `recipient_unchecked` when the chain didn't answer, with
+nothing recorded or sent. NEAR Intents credits any id, and the provider's own refusal would arrive after the send claim,
+where this server can't yet prove nothing moved. Implicit ids need no account and aren't read. `test/send-path.test.ts` fails if any other file sends. The callers are
+`invoices.ts` (an invoice's payment), `payout-requests.ts` (a payout an app or owner asks for under its own
+`requestId`), `treasury.ts` and `plans.ts` (shields, swaps, sweeps) and `agent.ts`'s own `pay` (a payment by hand).
 
 ## Shared core
 
@@ -53,7 +56,7 @@ existing domain calls. Submission remains centralized in dispatch.
 | Concern | Files |
 |---|---|
 | Intake | `invoice-http.ts` (public routes, `/internal/agreements`), `invoice-page.ts` (HTML and copy), `invoice-browser.js` (checked browser module), `agreements.ts` (requests, offers, terms), `invoices-server.ts` |
-| Payments | `invoices.ts` (files an invoice through dispatch), `invoice-store.ts` (SQLite: identity, revisions, reservations), `payouts.ts` (held payouts) |
+| Payments | `invoices.ts` (files an invoice through dispatch), `invoice-store.ts` (SQLite: identity, revisions, reservations), `payouts.ts` (held payouts), `payout-requests.ts` (payout requests: the operation's key derived from the caller and `requestId`, sent once, answered by `requestId`) |
 | Approval | `payment-approval.ts` (checks a held payout against provider evidence before the owner signs) |
 
 ## Agentic Treasury Management (the treasury agent)
@@ -343,7 +346,8 @@ this is not a deployed-provider observation or a measured production performance
 
 ### Hosted walkthrough setup (offline-tested)
 
-`gateway/hosted-agents.ts` reserves one agent instance per owner and area under `.hosted/`.
+`gateway/hosted-agents.ts` reserves one agent instance per owner and area under `.hosted/`, and for an app's setup per
+app deployment and Organization as well.
 The gateway admits verified wallets without agent access only when `selfService` is enabled.
 `POST /gw/agents` verifies the requested owner type, wallet ownership or DAO group membership and
 proposal permission before reserving anything. An atomic, locked registry precedes child startup;

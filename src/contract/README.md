@@ -26,8 +26,16 @@ For development against unreleased SDK source, install an SDK repository checkou
 | Contributor-facing browser product | `payeeClient` from `@multiagency/sdk/payee` | The contributor's session on that contributor entry |
 | Contributor's external agent | `payeeClient({ base, token })` | An expiring, revocable report connection started by the contributor |
 | Treasury external agent | `ownerClient` with an absolute machine base and a `fetch` that adds the bearer | An existing wallet-owner-issued Treasury credential with the required scopes; see owner-workflows |
+| An app's server (for example the MultiAgency dashboard) | `appClient({ base, credential })` from `@multiagency/sdk` | The deployment's operator-issued service credential, plus a live owner consent per Organization and agent |
 
 The Proto operator configures a browser product's host, reachable agents and frontend release. Browser products use that host's gateway and session. A custom frontend does not receive a provider key or grant, and cannot choose another host's agents.
+
+An app's server reaches agents under `/apps/v1` and never from a browser: the service credential is a server secret. The
+owner signs `consentMessage(...)` (or `setupMessage(...)` for a hosted agent) with NEP-413 in the app; the server submits
+it. A consent reaches the listed reads (`APP_READS`) and owner actions (`APP_OWNER`) and, for `owner/prepare`, only
+actions the owner can read when signing or that platform code builds entirely (`AppOwnerAction`); everything else is
+refused. The app never asks an owner to sign the platform's sign-in text. See the platform's `docs/agent-access.md`,
+"App access".
 
 An agent connection permits its contributor's reports and compensation reads only. It cannot file invoices, approve payments, sign owner actions or manage connections. Treasury machine access is a separate existing route and credential; Payables owner delegation and DAO machine delegation are unavailable.
 

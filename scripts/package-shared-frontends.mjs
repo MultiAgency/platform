@@ -29,7 +29,7 @@ mkdirSync(output, { recursive: true });
 for (const name of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', 'src']) copy(join(root, name), join(output, name));
 copy(builds.proto, join(output, 'web/dist'));
 for (const area of ['treasury', 'payables']) copy(builds[area], join(output, 'frontends', area));
-for (const name of ['dashboard-entrypoint.sh', 'shared-frontends.json']) copy(join(root, 'deploy', name), join(output, 'deploy', name));
+for (const name of ['dashboard-entrypoint.sh', 'shared-frontends.json', 'platform-staging.json']) copy(join(root, 'deploy', name), join(output, 'deploy', name));
 chmodSync(join(output, 'deploy/dashboard-entrypoint.sh'), 0o755);
 copy(join(root, 'Dockerfile.gateway'), join(output, 'Dockerfile'));
 copy(join(root, 'deploy/railway.gateway.json'), join(output, 'railway.json'));

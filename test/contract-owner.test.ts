@@ -264,3 +264,19 @@ test("oRPC's 400 fallback for unmapped codes can't read as a refusal; every code
   assert.ok(codes.size > 0);
   assert.deepEqual([...codes].filter(code => !(code in COMMON_ERROR_STATUS_MAP)), [], "codes without an explicit HTTP status");
 });
+
+test("an oRPC error from another copy of @orpc/client keeps its kind", async () => {
+  // A separate class, as a bundler that splits @orpc/client from @orpc/client/fetch produces: same name and shape.
+  class ORPCError extends Error {
+    override name = "ORPCError";
+    constructor(readonly code: string, message: string, readonly data: unknown, readonly defined = false) { super(message); }
+  }
+  const failing = (error: Error) => ownerClient({ base: "/a/payout", fetch: async () => { throw error; } });
+  const refused = await failing(new ORPCError("BAD_REQUEST", "Not enough funds", { kind: "refused", code: "insufficient_balance" }))
+    .call("pay", { recipient: "payee.near", asset: "usdc", amount: "1", confidential: true, expectedPolicy: { revision: 1, digest: `sha256:${"0".repeat(64)}` } });
+  assert.deepEqual(refused.ok === false && [refused.kind, "code" in refused && refused.code], ["refused", "insufficient_balance"]);
+  const session = await failing(new ORPCError("UNAUTHORIZED", "Sign in", undefined)).call("overview");
+  assert.equal(session.ok === false && session.kind, "session");
+  const plain = await failing(new Error("network")).call("overview");
+  assert.equal(plain.ok === false && plain.kind, "unavailable", "an ordinary error is still a lost answer");
+});

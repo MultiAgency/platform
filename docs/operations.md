@@ -14,12 +14,16 @@ Preserve the complete state when moving an executor. This is the canonical list;
 `scripts/check-shared-image.mjs` and `docs/agent-access-release.md` repeat it, and `test/state-directories.test.ts`
 keeps them equal:
 <!-- state-directories -->
-`.ops/`, `.invoices/`, `.owner-intents/`, `.strategy/`, `.plans/`, `.evidence/`, `.inbox/`, `.agreements/`, `.notify/`, `.work-orders/`, `.hosted/`, `.agent-connections/`, `.machine-auth/`, and any legacy `.intake/` files
+`.ops/`, `.invoices/`, `.owner-intents/`, `.strategy/`, `.plans/`, `.evidence/`, `.inbox/`, `.agreements/`, `.notify/`, `.work-orders/`, `.hosted/`, `.agent-connections/`, `.machine-auth/`, `.app-access/`, and any legacy `.intake/` files
 <!-- /state-directories -->
 plus each instance's settings file. `.ops/` also holds each executor's `<agent>.submission-evidence.ndjson` (provider answers to failed sends; evidence only, never read to decide a send). `.invoices/` includes its SQLite journals and the compensation store
 (`<agent>.compensation.sqlite`); `.notify/` records which alerts were sent (losing it re-sends them); `.agent-connections/`
 holds agent connections and their access log (see [agent access](agent-access.md)); `.machine-auth/` holds Treasury
-machine credentials; `.hosted/` the hosted agent registry. Stop writers before copying state; never start the destination before stopping the
+machine credentials; `.app-access/` holds app service credentials (hashed), owner consents, revocation tombstones (`revoked/`,
+never delete: losing one lets that consent be stored again) and the access log; run `pnpm app-credential check-keys`
+on a schedule so a removed owner key ends its consents even when no call observes it. Consents belong to the deployment
+name: a credential issued under an existing deployment name acts on all of its consents, so use a new name for an
+app that shouldn't inherit them; `.hosted/` the hosted agent registry. Stop writers before copying state; never start the destination before stopping the
 source. The lease coordinates processes on one host only.
 
 ## Work-order executors
@@ -283,6 +287,34 @@ settings file before starting it there.
 To stop an agent's sends, freeze its policy by owner vote: the provider refuses every send while the
 executor keeps reconciling. To stop one host from sending, set `EXECUTOR=off` there.
 
+## Platform staging (prepared, not deployed)
+
+A `staging` environment in the platform's Railway project serves app access for the dashboard's staging
+(`dev.multiagency.ai`) at `api.dev.multiagency.ai`; production would be `api.multiagency.ai`. Consents and setups name
+this host as their NEP-413 recipient, so it isn't renamed once owners have signed. Staging runs on mainnet (the provider
+has no test network) with its own state and test agents, never the live demo hosts' records.
+
+1. In the platform's Railway project, create `staging` as an empty environment (a duplicate copies production's
+   services and variables) and add one empty service, `gateway`, with its own volume at `/data`, one replica,
+   healthcheck `/health`.
+2. Variables: `DASHBOARD_FILE=/app/deploy/platform-staging.json` (host `api.dev.multiagency.ai`, `selfService`, no
+   configured agents: every agent is a hosted agent created through app setup), `NEAR_INTENTS_AGENT_API_KEY` (a separate
+   key for staging from the same partner account, so it can be revoked without touching production's), `NEAR_INTENTS_AGENT_API_URL`,
+   `FASTNEAR_API_KEY`, and a new `SESSION_SECRET`. No `DAO_ENV`, `PAYOUT_ENV` or `RESTORE_*`.
+3. Build the package from the release candidate's commit, as for production (`scripts/package-shared-frontends.mjs`),
+   and deploy it with `railway up --service gateway --environment staging`. To check before DNS, set
+   `DASHBOARD_HOST` to the Railway domain, then point a CNAME for `api.dev.multiagency.ai` (Namecheap) at the domain
+   `railway domain status` shows and remove `DASHBOARD_HOST`.
+4. Read-only checks: `/health` 200; `/apps/v1/agents/x` without a credential 401, with a browser `Origin` 403, on another
+   host 421 (shown locally with this configuration on 2026-10-27).
+5. On the staging service, the operator issues the dashboard staging's credential from the gateway's own state
+   directory (it writes `.app-access/` there, beside the gateway): `cd /data/state && /app/node_modules/.bin/tsx
+   /app/src/app-credential.ts issue staging api.dev.multiagency.ai 90 "dashboard staging"`. The token goes only into the
+   dashboard staging's server secrets (`PLATFORM_APP_CREDENTIAL`, with `PLATFORM_URL=https://api.dev.multiagency.ai` and
+   `PLATFORM_DEPLOYMENT=staging`).
+6. Rollback: redeploy the previous image; state stays on the staging volume. Nothing here touches proto.multiagency.ai
+   or invoices.multiagency.ai.
+
 ## Payout executor
 
 The payout executor now serves both the private dashboard and public invoice page. Stop an existing
@@ -542,7 +574,15 @@ need no conversion: this is additive state. A missing settings file, corrupt reg
 port or orphan settings file requires recovery of original state; do not delete it to retry creation.
 
 Each reservation uses a distinct loopback port from 9000–9999, excluding configured agent ports.
-Keep this range available. Capacity is 32 reservations, with one per owner and area. There is no
+Keep this range available. Capacity is 32 reservations, with one per owner and area, or for an app's setup one per app
+deployment, Organization, owner and area, at most 16 per deployment. Self-service reservations stay in
+`.hosted/registry.json`, in the format earlier releases read; an app's Organization reservations are in
+`.hosted/apps.json`, which earlier releases ignore. Preserve both with the `own-*.env` files. Rolling back to a release
+before Organization scopes: the gateway starts, and the Organization agents stay down until a release that reads
+`apps.json` runs again (shown with the previous release's registry code, 2026-10-26). Don't add self-service
+reservations while rolled back: one could take a port an Organization agent holds, and the newer release then refuses
+the registry until it is recovered. Entries written before Organization scopes keep their names and need no
+conversion. There is no
 self-service deletion or automated cleanup; retain incomplete setup for recovery. The host operator
 can read all instance state. Single-host leases do not provide distributed fencing or isolation
 from a hostile host. Load capacity and admission abuse resistance remain unverified.

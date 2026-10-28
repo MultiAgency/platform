@@ -40,7 +40,7 @@ not live-provider, distributed-fencing or screen-reader-hardware acceptance.
 2. Confirm no unattended run or freeze is active. Follow the stopped-writer backup procedure in
    [operations](operations.md). Preserve the existing `/data` volume, settings, session secret, host
    registry, supplier routes and executor assignments. Preserve every state directory in
-   the canonical list of [operations](operations.md): `.ops/`, `.invoices/`, `.owner-intents/`, `.strategy/`, `.plans/`, `.evidence/`, `.inbox/`, `.agreements/`, `.notify/`, `.work-orders/`, `.hosted/`, `.agent-connections/` and `.machine-auth/`,
+   the canonical list of [operations](operations.md): `.ops/`, `.invoices/`, `.owner-intents/`, `.strategy/`, `.plans/`, `.evidence/`, `.inbox/`, `.agreements/`, `.notify/`, `.work-orders/`, `.hosted/`, `.agent-connections/`, `.machine-auth/` and `.app-access/`,
    including plan execution claims and all revocations. This release
    requires no conversion of existing records and must not initialize replacement identities.
 3. Package the reviewed Proto commit with `scripts/package-shared-frontends.mjs`, supplying the

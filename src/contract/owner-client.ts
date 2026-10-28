@@ -42,6 +42,14 @@ export type OwnerResult<T> = { ok: true; value: T } | OwnerFailure;
 
 /** oRPC codes that mean the server refused before acting. TIMEOUT and CLIENT_CLOSED_REQUEST are not: the outcome is unknown. */
 const REFUSALS = new Set(["BAD_REQUEST", "NOT_FOUND", "METHOD_NOT_SUPPORTED", "NOT_ACCEPTABLE", "CONFLICT", "PRECONDITION_FAILED", "PAYLOAD_TOO_LARGE", "UNSUPPORTED_MEDIA_TYPE", "UNPROCESSABLE_CONTENT", "TOO_MANY_REQUESTS"]);
+/**
+ * An encoded oRPC error from any copy of `@orpc/client`. A bundler can load the link's copy apart from this module's
+ * (Module Federation shares `@orpc/client` but not `@orpc/client/fetch`; seen in the dashboard's built API), and
+ * `instanceof ORPCError` then fails across them, turning a proven refusal into `unknown`. Every version names its error
+ * `ORPCError` and carries a string `code`.
+ */
+const isRpcError = (error: unknown): error is Pick<ORPCError<string, unknown>, "code" | "message" | "data"> =>
+  error instanceof ORPCError || (error instanceof Error && error.name === "ORPCError" && typeof (error as { code?: unknown }).code === "string");
 /** A non-2xx answer that isn't an encoded oRPC error. */
 class PlainAnswer extends Error { constructor(readonly status: number) { super(`HTTP ${status}`); } }
 class GatewayDenial extends Error { constructor(readonly status: 401 | 403, message: string, readonly scope?: GatewayDenialScope) { super(message); } }
@@ -87,7 +95,7 @@ export function ownerClient({ base = "", fetch: send = globalThis.fetch }: { bas
         : { ok: false, kind: "forbidden", status: 403, error: error.message, source: "gateway", ...scope };
     }
     if (error instanceof PlainAnswer) return error.status > 0 ? { ...lost, httpStatus: error.status } : lost;
-    if (!(error instanceof ORPCError)) return lost;
+    if (!isRpcError(error)) return lost;
     if (error.code === "UNAUTHORIZED") return { ok: false, kind: "session", status: 401, error: error.message, source: "agent" };
     if (error.code === "FORBIDDEN") return { ok: false, kind: "forbidden", status: 403, error: error.message, source: "agent" };
     const data = (error.data ?? {}) as { kind?: unknown; code?: unknown; availableAt?: unknown; budgetRemainingUsd?: unknown };

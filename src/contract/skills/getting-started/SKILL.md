@@ -9,7 +9,7 @@ metadata:
   purpose: 'Orients an app or agent author: the two clients, the four identities and their server-side limits, recovery kinds, and the supported surface of this package version.'
   type: lifecycle
   library: '@multiagency/sdk'
-  library_version: '0.2.0'
+  library_version: '0.3.0'
 sources:
   - 'MultiAgency/platform:src/contract/index.ts'
   - 'MultiAgency/platform:src/contract/payee-entry.ts'
@@ -22,11 +22,11 @@ Each agent moves funds for its **owner** (a NEAR account or a Sputnik DAO) only 
 This package gives apps and agents typed access to two kinds of work. It grants no authority: every call is authorized
 by the gateway and the provider, never by the client or by this guidance.
 
-1. Pick the client for the identity you act as (table below). Result: one of `ownerClient` (entry `@multiagency/sdk`) or
-   `payeeClient` (entry `@multiagency/sdk/payee`, zod only).
+1. Pick the client for the identity you act as (table below). Result: one of `ownerClient` (entry `@multiagency/sdk`),
+   `appClient` (same entry, an app's server) or `payeeClient` (entry `@multiagency/sdk/payee`, zod only).
 2. Get that identity's session the supported way. Never handle a wallet's private key or copy browser cookies into an
    agent. Result: calls return data; a `session` (401) result means sign in again.
-3. Do the task with owner-workflows or payee-workflows.
+3. Do the task with owner-workflows, app-server or payee-workflows.
 4. Keep every identity you send (`correlationId`, `commandId`, request `id`, `planId`) until you have read its outcome.
    Some owner actions (`pay`, `sweep`, `autopilot/tick`) carry no identity; owner-workflows says how to recover them.
 
@@ -36,6 +36,7 @@ by the gateway and the provider, never by the client or by this guidance.
 | --- | --- | --- | --- |
 | Owner session | NEP-413 sign-in in a browser at the agent's host (`/gw/challenge` → wallet signs → `/gw/session`) | `/a/<agent>/rpc/*` through `ownerClient` | Access per agent from the wallet owner, or from the DAO policy for a member (propose, vote; execute and manage derived). A member never acts or spends as the DAO alone: owner actions need the owner's signature (a DAO vote). Calls outside access: 403. |
 | Treasury machine credential | Issued by a wallet owner of a Treasury agent from the owner's session (`tmc_…` bearer) | `/machine/v1/a/<agent>/rpc/*` (Treasury's skill helper, not this package) | Fixed scopes (read, prepare, execute-plan, sweep), expiry, revocation, the owner's fresh access re-checked per call. Treasury only; DAO owners cannot issue it. |
+| App deployment credential | Issued by the platform operator per app deployment (`tap_…` bearer, a server secret), plus an owner-signed consent per Organization and agent | `/apps/v1/*` through `appClient` (server side only) | The consent's scopes (`read`, `owner`, `payout`), Organization and agent; owner actions only those the owner can read or the platform builds; the owner's key and ownership re-checked per call; revocation. Wallet owners only. |
 | Payee session | NEP-413 sign-in on the payee entry (`/api/signin`) | `/api/*` on that entry through `payeeClient()` | Only the signed-in account's own invoices, work orders and reports. An account that has only requested onboarding terms is not yet a payee: an agreement makes it one. |
 | Agent connection | Started by the payee from their signed-in browser session (`tac_…` bearer, shown once) | `GET`/`POST /api/compensation`, `GET /api/compensation/session` through `payeeClient({ base, token })` | Bound to host, entry, account and payout agent; expiry (at most 24h) and revocation; every other route 403 with no effect; never a browser session; each call attributed. |
 
@@ -61,8 +62,9 @@ it may retry.
 
 ## What this package version supports
 
-`@multiagency/sdk` 0.2.0, entries:
-- `@multiagency/sdk`: `ownerClient` with `OwnerResult`/`OwnerFailure`, `ownerOutputs` and `OwnerInputs`/`OwnerOutput`
+`@multiagency/sdk` 0.3.0, entries:
+- `@multiagency/sdk`: `ownerClient` with `OwnerResult`/`OwnerFailure`, `appClient` with `AppRouteResult` and the
+  consent and setup texts (`consentMessage`, `setupMessage`), `ownerOutputs` and `OwnerInputs`/`OwnerOutput`
   per procedure, `ownerCapabilities` and `mayCall` (display only), gateway discovery (`gatewayDiscovery`,
   `gatewayDenialScope`), schemas for runs (`RecordingSchema`) and proposals, `ASSETS` and account helpers. It also
   re-exports the payee entry. Peer: zod ^4.6.7. Its own dependencies: `@orpc/client` and `@orpc/contract` 2.0.0-beta.46,

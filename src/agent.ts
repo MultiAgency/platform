@@ -3,6 +3,7 @@ import { api, waitForStatus } from "./api.js";
 import { agentId, executes } from "./env.js";
 import { assertCanDispatch, assertMoneyLock, type MoneyLock, withMoneyLock } from "./lock.js";
 import { mandateDigest, type ReviewedPolicy } from "./mandate.js";
+import { recipientState } from "./recipients.js";
 import { AuthorizationHeld, claimSubmission, isHeld, provenRefusal, readOps, record, submittedSwapValues } from "./ops.js";
 import { recordSubmissionEvidence } from "./submission-evidence.js";
 import { authorize, type Case, type Purpose } from "./authorize.js";
@@ -74,7 +75,8 @@ export type Sending = { planned: { plan: Plan; leg: PlannedAction } | null; auto
  * attempt. Anything else unanswered stays unresolved, and blocks new money actions until
  * status-only reconciliation proves its outcome.
  */
-export async function dispatch(lock: MoneyLock, kind: string, action: Action, sending?: Sending, preparedKey?: string, expectedPolicy?: ReviewedPolicy): Promise<StatusResponse> {
+/** `requestKey`: the operation's identity derived from a caller's request (payout-requests.ts), instead of a new one. */
+export async function dispatch(lock: MoneyLock, kind: string, action: Action, sending?: Sending, preparedKey?: string, expectedPolicy?: ReviewedPolicy, requestKey?: string): Promise<StatusResponse> {
   action = structuredClone(action);
   expectedPolicy = expectedPolicy && { ...expectedPolicy };
   // An approve-only instance never sends: refused before anything is recorded, so nothing is left open.
@@ -82,11 +84,17 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
   if (preparedKey && !invoiceOperations().some((op) => op.idempotencyKey === preparedKey && op.submissionState === "PREPARED"))
     throw new Error("Invoice operation is not prepared; replay is blocked");
   assertCanDispatch(lock);
-  const [view, tokens, grants, shielded] = await Promise.all([
+  const payee = action.method === "transfer" ? action.request.recipient : null;
+  const [view, tokens, grants, shielded, recipient] = await Promise.all([
     api.getPolicy(agentId()), api.getTokens(), api.listGrants(agentId()),
     // A payout's funds, so `authorize` can refuse one the wallet can't cover before it goes to a vote.
     action.method === "transfer" ? api.getBalances(agentId(), { source: "confidential" }) : undefined,
+    payee === null ? "exists" as const : recipientState(payee),
   ]);
+  // A recipient that doesn't exist on NEAR, or that the chain couldn't confirm, is refused before anything is recorded:
+  // the provider's own refusal would arrive after the send claim, where it can't yet prove nothing was sent.
+  if (recipient === "absent") throw new LocalRefusal("recipient_not_found", `${payee} is not an account on NEAR. Nothing was sent.`);
+  if (recipient === "unchecked") throw new LocalRefusal("recipient_unchecked", "Whether the recipient exists on NEAR couldn't be checked. Nothing was sent; try again.");
   const { policy, revision } = view;
   const policyDigest = policy ? mandateDigest(policy) : null;
   const asset = action.method === "swap" ? action.request.origin_asset : action.request.asset;
@@ -97,7 +105,9 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
   // send in this run may have become unresolved, or ownership may have been lost during the reads above.
   assertCanDispatch(lock);
   const priorOps = readOps();
-  const idempotencyKey = preparedKey ?? `${kind}:${createIdempotencyKey()}`;
+  if (preparedKey && requestKey) throw new Error("An operation has one identity");
+  // A request's key was already recorded once: `record` refuses a second preparation, before anything is sent.
+  const idempotencyKey = preparedKey ?? requestKey ?? `${kind}:${createIdempotencyKey()}`;
   record({
     at: new Date().toISOString(),
     idempotencyKey,
@@ -133,6 +143,8 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
     : payoutGrant && action.method === "transfer" ? "payout"
     : sending?.autopilot ? "autopilot"
     : "treasury";
+  // A payout request is a payout, judged as one, or nothing: under a grant for other work it would skip the payout checks.
+  if (requestKey && purpose !== "payout") refuseLocally("grant_purpose_denied", "A payout request is sent only under a payout grant; this agent's grant is for other work.");
   const common = { now, agentId: agentId(), view, grant };
   const held = priorOps.filter(isHeld);
   const reserved = held.filter((op) => op.request.asset === asset).reduce((sum, op) => sum + BigInt(String(op.request.amount)), 0n);

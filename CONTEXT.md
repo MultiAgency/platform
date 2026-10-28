@@ -163,6 +163,22 @@ An operation without a proven outcome that blocks new sends: any but a held payo
 invoice, which are open but can't be lost. While one exists, no new operation may be sent.
 _Avoid_: pending, stuck
 
+**Payout request**:
+A payout an app (with `payout` consent) or an owner asks for under its own `requestId`, stored by the caller before it
+asks. The operation's identity is derived from the caller (the gateway's actor) and the `requestId`; the journal records
+it once, so it is sent at most once, through `dispatch`, and only under a payout grant (judged as a payout; otherwise
+refused before sending). The same identity is the provider's idempotency key, but at-most-once rests on the journal, not
+on the provider. Asked again, or read with `payouts/status` on the agent's executor, it answers what the journal proves
+(`succeeded`, `failed`, `held`, `processing`, `refused`, `unknown`, `not_found`) and sends nothing; other terms under
+the same `requestId` are refused. `processing` and `unknown` block the agent's sends and are never resent. `failed`
+(FAILED or REFUNDED) doesn't prove nothing moved, so a person checks before a new attempt; a new attempt is a new
+`requestId`, after `refused` or that check. An approve-only copy answers no request. A named recipient that doesn't exist
+on NEAR is refused `recipient_not_found` before anything is recorded (every transfer, not only requests), and
+`recipient_unchecked` when the chain didn't answer; neither consumes the `requestId`. A request names `asset` and `delivery` (`intents` or a chain); only
+confidential USDC through `intents` is paid yet.
+Offline- and stack-tested, not deployed or mainnet-observed.
+_Avoid_: retry (for a new attempt)
+
 **Held payout**:
 A payout the provider holds for the owner's approval. Its outcome is open, but it can't be lost, so it
 does not block new sends.
@@ -328,6 +344,36 @@ limited by the scheduled autopilot's per-run ceiling. DAO machine delegation rem
 current DAO management rights may inspect or revoke existing access but cannot issue or use it.
 The shared implementation is offline-tested, not deployed or mainnet-observed. See docs/agent-access.md
 for the contract and state preservation.
+
+
+**App deployment**:
+One running instance of an app built on the platform (for example the MultiAgency dashboard's `staging`) that reaches the platform
+server to server. The platform operator issues it an app service credential (`pnpm app-credential`), bound to
+the deployment and the platform host, stored only as a hash, expiring and revocable. The credential identifies the
+deployment, never a user, and authorizes nothing on its own.
+
+
+**App consent**:
+An agent owner's NEP-413 signature over a canonical consent text naming the platform host, one app deployment,
+one Organization, the agent and its provider ID, and its scopes, with an expiry of at most 366 days. The platform checks the signature and
+that the key is a full-access key of the configured owner, binds the consent to the agent's current provider ID, and
+re-checks ownership and the signing key on every call: once the chain reports the key removed (on a call or the operator's
+`check-keys` sweep), the consent is revoked for good. Scopes today: `read` (a fixed list of reads; no workflow records), `owner` (prepare, submit and follow owner actions,
+which only the owner's own wallet signature completes; limited to actions the owner can read when signing, NEP-413, or that
+platform code builds entirely) and `payout` (payout requests, their status and held payouts). Wallet owners
+only; DAO consent is not available yet. Revocable by the deployment or the operator; a revocation is a permanent tombstone. Offline-tested, not deployed or
+mainnet-observed. See docs/agent-access.md.
+
+
+**App setup**:
+A wallet owner's NEP-413 signature over a canonical setup text (host, app deployment, Organization, owner, area;
+at most an hour) asking the platform for a hosted agent. The platform reserves and starts it under the self-service
+rules and stores a setup consent: `owner` scope for that agent only while it isn't created, so the app can
+prepare its creation for the owner's wallet to sign. Once the agent exists, it only reads that agent's owner actions
+until it expires, and an ordinary app consent is needed. A setup for an agent already created is refused; one deployment holds
+at most 16 Organization agents per host.
+An app's setup reserves that deployment and Organization's own agent per owner and area, reachable only by that deployment
+for that Organization; self-service setups stay per owner and area. Offline-tested, not deployed or mainnet-observed.
 
 
 **External plan**:

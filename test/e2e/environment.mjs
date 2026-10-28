@@ -20,8 +20,9 @@ async function freePort(host = '127.0.0.1') {
  * `secondAccount`: SECOND exists on chain and the host allows sessions without an agent (account-switch scenarios).
  * `daoOwned`: the owner app's agent belongs to the simulated Sputnik DAO, whose council (OWNER) and member (SECOND)
  * can both read it with different permissions (shared-reader scenarios). Test-only: no authorization code changes.
+ * `onChainPolicyEdits`: the simulator signs provider-enforced policy edits as NEP-366 (see provider.mjs).
  */
-export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoOwned = false, accounts: extraAccounts = [], payoutFunding } = {}) {
+export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoOwned = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false } = {}) {
   const daoArea = daoOwned ? ownerApp?.product : undefined;
   if (daoOwned && !['payables', 'treasury'].includes(daoArea)) throw new Error('daoOwned requires an owner app');
   if (daoArea === 'payables') owner = DAO;
@@ -30,7 +31,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
   const services = [], proxies = [];
   const accounts = [...(secondAccount || daoOwned ? [SECOND] : []), ...(daoOwned ? [OWNER, DAO_SIGNER] : []), ...extraAccounts];
   // The gateway reads the chain through this simulator: it answers for the DAO whenever one owns an agent.
-  const simulated = await provider(directory, { account: owner === DAO ? DAO_SIGNER : owner, payees, accounts, dao: daoOwned, ...(payoutFunding !== undefined && { payoutFunding }) });
+  const simulated = await provider(directory, { account: owner === DAO ? DAO_SIGNER : owner, payees, accounts, dao: daoOwned, onChainPolicyEdits, ...(payoutFunding !== undefined && { payoutFunding }) });
   const portfolioDir = join(directory, 'portfolio');
   let portfolio;
   if (workspace) { mkdirSync(portfolioDir); portfolio = await provider(portfolioDir, { treasury: true, account: portfolioOwner === DAO ? DAO_SIGNER : portfolioOwner, accounts, dao: daoOwned }); }

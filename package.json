@@ -10,6 +10,7 @@
     "create-agent": "tsx --env-file-if-exists=.env src/create-agent.ts",
     "issue-grant": "tsx --env-file-if-exists=.env src/issue-grant.ts",
     "revoke-grant": "tsx --env-file-if-exists=.env src/revoke-grant.ts",
+    "app-credential": "tsx src/app-credential.ts",
     "update-policy": "tsx --env-file-if-exists=.env src/update-policy.ts",
     "inspect": "tsx --env-file-if-exists=.env src/inspect.ts",
     "reconcile": "tsx --env-file-if-exists=.env src/reconcile.ts",

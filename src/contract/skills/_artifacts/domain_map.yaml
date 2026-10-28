@@ -1,11 +1,11 @@
 # domain_map.yaml
 # Library: @multiagency/sdk
-# Version: 0.2.0
+# Version: 0.3.0
 # Date: 2026-10-18
 # Status: draft
 library:
   name: '@multiagency/sdk'
-  version: '0.2.0'
+  version: '0.3.0'
   repository: 'MultiAgency/platform'
   description: 'Typed owner and payee clients, schemas and the shared release server for MultiAgency agents behind the gateway.'
   primary_framework: 'framework-agnostic'
@@ -16,6 +16,9 @@ domains:
   - name: 'Owner work'
     slug: 'owner'
     description: 'Reading an agent''s records and taking owner-signed actions and money actions through the gateway.'
+  - name: 'App servers'
+    slug: 'app'
+    description: 'An app''s server reaching agents for its Organizations: credential, owner consents, relayed owner actions, payout requests.'
   - name: 'Payee work'
     slug: 'payee'
     description: 'A payee''s own reports and payment status, from a browser session or an agent connection.'
@@ -36,6 +39,32 @@ skills:
           // branch on result.kind: forbidden means this identity may not do it
         source: 'docs/agent-access.md'
         priority: 'HIGH'
+        status: 'active'
+  - name: 'App server'
+    slug: 'app-server'
+    domain: 'app'
+    description: 'Service credential, owner consents, relayed owner actions and payout requests by requestId with appClient.'
+    type: 'core'
+    covers: ['appClient', 'consentMessage', 'payouts/request', 'payouts/status']
+    tasks: ['connect an Organization''s agent with the owner''s consent', 'request a payout once and follow it after a lost reply']
+    failure_modes:
+      - mistake: 'Asking an owner to sign the platform sign-in text'
+        mechanism: 'A signed sign-in is a full platform session that can send payouts without another signature.'
+        wrong_pattern: |
+          // sign "Sign in to <platform host>" in the app
+        correct_pattern: |
+          // the app asks only for consentMessage or setupMessage texts
+        source: 'docs/agent-access.md'
+        priority: 'CRITICAL'
+        status: 'active'
+      - mistake: 'A new requestId after unknown'
+        mechanism: 'The first request may have been sent; a new id would pay again.'
+        wrong_pattern: |
+          // on unknown, request again with requestId + "-retry"
+        correct_pattern: |
+          // read payouts/status by the same requestId
+        source: 'src/payout-requests.ts'
+        priority: 'CRITICAL'
         status: 'active'
   - name: 'Owner workflows'
     slug: 'owner-workflows'

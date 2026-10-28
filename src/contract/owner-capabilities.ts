@@ -17,6 +17,7 @@ export const ownerCapabilities = {
   "treasury-plans-v1": { routes: [], procedures: ["rebalance", "externalPlan", "executePlan", "steward/propose"] },
   "treasury-recovery-v1": { routes: [], procedures: ["recover"] },
   "payables-payments-v1": { routes: [], procedures: ["pay", "paymentHistory", "paymentStatus", "invoices", "cancelPreparedInvoice", "ledger", "ledgerCsv", "reconcileBooks"] },
+  "payables-payout-requests-v1": { routes: [], procedures: ["payouts/request", "payouts/status"] },
   "payables-agreements-v1": { routes: [], procedures: ["agreements/list", "agreements/propose", "agreements/offer", "agreements/decline"] },
   "payables-work-orders-v1": { routes: [], procedures: ["workOrders/list", "workOrders/get", "workOrders/status", "workOrders/create", "workOrders/prepare", "workOrders/submit", "workOrders/deposit", "workOrders/file"] },
   "payables-compensation-v1": { routes: [], procedures: ["compensation/list", "compensation/agreement", "compensation/review", "compensation/prepare", "compensation/send"] },

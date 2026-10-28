@@ -173,6 +173,21 @@ and recorded settlement; before funding, the send is refused and the payment sta
 send response leaves the payment unknown (no operation id to read): it is never sent again, and the payout agent's
 later sends are blocked until it is reviewed.
 
+App access (`test/e2e/app-access.spec.mjs`): an app deployment's server (the dashboard's, as the first app) on the real stack, using the
+published oRPC client. The operator CLI issues its service credential; the owner signs a consent with the simulated
+wallet; overview is read; freeze, unfreeze, a payee added to a non-empty list and a budget edit are each prepared through
+`/apps/v1`, signed and submitted. A provider-enforced edit, payees at creation, an approval vote and DAO signing are
+refused before any intent is generated. Removing the last payee (which also turns transfers off) is prepared by the
+agent, made NEP-366 by the simulator, and withheld with a `withheld` log line; the policy stays unchanged. A signed
+setup reserves the Organization's own payables agent beside the owner's configured one, its creation is relayed
+under the setup consent, and a consent naming the created agent's ID then relays a grant. Here the simulator signs
+provider-enforced policy edits as NEP-366 (`onChainPolicyEdits`), following the provider's docs, not observation. A second
+case requests payouts through the app's `payout` consent on the Organization's own hosted agent (its grant and payee
+signed by the owner, its funding simulated; the first payee is a fixture step there, since per the provider's docs it is
+signed on chain): one request is held for the owner, asked again and read by `requestId` without a second send, other
+terms under its `requestId` are refused, a second request with the same payee and amount while the first is held is
+refused before sending, and a lost reply reads `unknown`, is never resent and blocks new requests.
+
 Owner contract conformance (`test/e2e/conformance.mjs`): in the Payables, Treasury, work-order and example specs, every
 owner RPC answer the page receives, including each streamed event, is decoded with oRPC's serializer and must parse
 against its published schema (`src/contract/owner-outputs.ts`) and deep-equal the decoded value, so a stripped field
@@ -209,12 +224,15 @@ outside the application, not test-control HTTP routes. Close the agent-browser s
 `--payee <account>`, `--frontend <dir>` to serve a prototype build on the `showcase` host, `--payables-release <dir>` to serve a
 Payables build at `/a/payout/`, `--builder <account>` for an account on chain that is not yet an agreed payee (the
 owner adds it with a signed `policy_update`, which the simulator applies and versions), `--payout-funding <raw USDC>`
-for the payout agent's starting balance, `--headed` or `--no-browser`) builds the same isolated stack for app-owned workflow
+for the payout agent's starting balance, `--treasury` to add the Treasury agent `portfolio` (owned by the payee
+account, 100 simulated USDC; its owner issues machine credentials at `/a/portfolio/access`), `--headed` or `--no-browser`) builds the same isolated stack for app-owned workflow
 recipes and filming, and keeps it running. `stack/state.json` lists the application URLs, CDP endpoint,
-owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`), the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
+owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`), with `--treasury` the portfolio's access page and
+machine base, the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
 refreshed every 250 ms. Write `stack/controls/<name>.json` with a `command` of `fund`, `fundPayout`, `settle`,
 `dropTransferResponse`, `dropSignatureResponse`, `revealOwnerOutcome` or `setUnavailable`; its result
-appears as `<name>.result.json`. Create `stack/stop` to stop. Signatures, deposits and settlement are simulated.
+appears as `<name>.result.json`. Create `stack/stop` to stop. An attached client signs in from the stack's own wallet
+pages: a page it opens itself has no local test wallet, and its own CDP connection must accept the local certificate. Signatures, deposits and settlement are simulated.
 Page dialogs (such as the payee's filing `confirm()`) are logged in `state.json` `dialogs` and left open
 for the attached client or person to answer; an attached Playwright client must register its own dialog
 handler, or it dismisses the dialog itself. `--accept-dialog '<exact message>'` (repeatable) instead accepts

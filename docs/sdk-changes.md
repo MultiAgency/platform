@@ -5,6 +5,36 @@ wire change all apps must update for together. The first change after a release 
 version, so a package staged or packed from changed sources never carries a released version's number. The release
 candidate dates the heading. Under 0.x, any public-interface change bumps at least the minor version.
 
+## 0.3.0 (not released)
+
+All additive. Nothing on the existing wire changes.
+
+- **App access for an app's server** (the MultiAgency dashboard is the first app): `appClient({ base, credential })`
+  for the platform's new `/apps/v1` routes, which aren't deployed yet. `identity(agent)`, `setup(...)`, and
+  `consents.list/submit/revoke` answer with `AppRouteResult` kinds (`session`, `forbidden`, `refused`, `unavailable`;
+  resending the same signed body is safe). `agent(organization, agent).call(...)` uses `ownerClient` and its result
+  kinds, typed to `AppProcedure` (`APP_READS`, `APP_OWNER`). `owner/prepare` takes only `AppOwnerAction`: agent
+  creation without payees, freeze, unfreeze, grants, and policy edits to destinations and budget. The gateway enforces
+  the same lists (`appMayAsk`) and withholds a prepared policy edit or grant the provider makes NEP-366.
+- **Payout requests:** `payouts/request` (`requestId`, `asset`, `delivery` (`"intents"` or `{ chain }`),
+  recipient, amount, reviewed policy; only confidential USDC through `intents` is paid yet: another asset is refused
+  `transfer_not_allowed`, a chain delivery before anything is recorded) and `payouts/status`, answering `payoutRequestOutput` (`state`: `succeeded`, `failed`, `held`, `processing`,
+  `refused`, `unknown`, `not_found`; `failed` doesn't prove nothing moved). A request is sent at most once per caller and `requestId`; asked again it sends nothing; other
+  terms under the same `requestId` are refused (`refused`, code `request_conflict`). Owners reach them with `ownerClient`
+  (capability `payables-payout-requests-v1`), apps with `payout` consent (`APP_PAYOUT`).
+- **Fix: `ownerClient` (and so `appClient`) keeps an encoded refusal's kind when the app's bundler splits oRPC.**
+  Module Federation shares `@orpc/client` but not `@orpc/client/fetch`, so the link's `ORPCError` came from another copy
+  and failed `instanceof`: a proven refusal read as `unknown` and a 401 as `unavailable` (found in the dashboard's built
+  API, 2026-10-27; reproduced here). Errors are now recognized by name and `code`.
+- **Recipient check on every transfer:** a payout (`pay`, invoices, compensation, payout requests) to a named account
+  that doesn't exist on NEAR is refused `recipient_not_found` before anything is recorded or sent; `recipient_unchecked`
+  when the chain didn't answer. Both are refusals (`kind: "refused"`); implicit ids are never read.
+- **Skills:** `app-server` added (the app's credential, owner consents, relayed owner actions, payout requests by
+  `requestId` with recovery by state, and never asking an owner to sign the platform's sign-in text); getting-started
+  names the app deployment identity and `appClient`. Each example typechecks and runs against stand-ins of the app routes.
+- **Consent and setup texts:** `consentMessage`, `setupMessage`, their parsers, `appConsentSubmission`, `AppScope`, and
+  the route answer schemas (`appAgent`, `appConsentView`, `appSetupStored`).
+
 ## 0.2.0 (2026-10-26)
 
 All additive. Nothing on the wire changes, and 0.1.0 consumers keep working unchanged.

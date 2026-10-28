@@ -234,6 +234,19 @@ of maintaining separate requirement statuses.
 - Agent connections exist only for a contractor's own reports and are offline-tested and stack-tested, not deployed.
   A connection token is a bearer: whoever holds it can act within its permissions until it expires (at most 24 hours)
   or is revoked. Owner connections are not built. See [agent access](docs/agent-access.md#agent-connections-contractor-reports).
+- App access (`/apps/v1`) covers reads, wallet-signed owner actions and payout requests (confidential USDC, sent at most
+  once per `requestId`), offline- and stack-tested with a simulated provider, not deployed or mainnet-observed. Consents
+  and hosted agent setup work for wallet-owned agents only; DAO consent and setup, and wNEAR payouts, are not built. Hosted
+  agents an app sets up belong to that deployment and Organization (one per owner and area), and nothing else reaches
+  them; each is its own process, at most 32 per host, so many Organizations need more hosts. With `owner` scope an app can prepare only actions the
+  owner can read in their wallet (NEP-413: grants, destination and budget edits) or that platform code builds entirely
+  (agent creation without payees, freeze, unfreeze); a destination edit the provider makes on-chain is withheld. The first
+  payee edit, cap and asset changes and held-payout votes are signed on the platform. Whether each wallet shows NEP-413
+  text is not checked. These limits bind only the app route: an owner who signs the platform's sign-in text on an
+  app's page gives that app a full platform session, which can send payouts within the signed policy without
+  another signature. See [agent access](docs/agent-access.md#app-access-server-to-server). An app service
+  credential is a bearer: whoever holds it acts within the consents owners gave that deployment until it expires or is
+  revoked. See [agent access](docs/agent-access.md#app-access-server-to-server).
 - Payables' frontend (`97ddec7`, re-checked 2026-10-16) passes the source contract preflight now that
   Proto serves `compensation`; this is a source-type check only. Its build is not yet exercised in the
   real-stack E2E suite, and owner-app builds are not checked for compatibility at runtime.

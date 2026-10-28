@@ -143,6 +143,122 @@ Offline-tested (`test/agent-connections.test.ts`) and shown on the local stack (
 report, lost reply recovered by reading the same request id, owner review and authorization, human filing,
 recorded payment, revocation; mutation challenge `agent-route-unrestricted`). Not deployed; no live credentials.
 
+## App access (server to server)
+
+An app deployment (for example the MultiAgency dashboard's `staging`) reaches agents under `/apps/v1` with its service
+credential (`Authorization: Bearer
+tap_<id>.<secret>`, no cookies or Origin). The operator issues it on the gateway host: `pnpm app-credential issue
+<deployment> <host> [days]` (1–365 days, default 90; the token prints once), `list`, `revoke <id>`, and for consents
+`consents [deployment]`, `revoke-consent <id>` and `check-keys` (checks every live consent's signing key and revokes those
+the chain reports removed; exits non-zero if any lookup went unanswered).
+
+| Request | Result |
+| --- | --- |
+| `GET /apps/v1/agents/<agent>` | `{ agent, owner, agentId, created, host, deployment }`: what the owner's consent must name (wallet-owned agents only; `agentId` null and `created` false before the agent exists) |
+| `POST /apps/v1/setup` with a signed setup text | `201 { agent, consent }`: reserves and starts this owner's hosted agent for the area, and a setup consent (below) |
+| `POST /apps/v1/consents` with `{ message, nonce, publicKey, signature }` | `201 { consent }`; responses omit the message, nonce and signature, which the record keeps (mode 0600) |
+| `GET /apps/v1/consents[?organization=]` | This deployment's consents on this host |
+| `DELETE /apps/v1/consents/<id>` | `{ revoked: true }`; this deployment's on this host only; permanent (below) |
+| `POST /apps/v1/o/<organization>/a/<agent>/rpc/<procedure>` | Forwarded to the agent with actor `app:<deployment>:<organization>` |
+
+The consent text is exactly `consentMessage({ host, deployment, organization, owner, agent, agentId, scopes, expiresAt })`
+(`src/contract/app-consent.ts`), signed with NEP-413 for recipient the host, with a 32-byte nonce and no callback URL.
+It is refused unless it names this host and the calling deployment, expires between a minute and 366 days from now,
+verifies, and the key is a full-access key of the owner now. The agent must be configured with that owner, and the owner
+must be a wallet whose agent's server reports that owner and the provider agent ID the text names (the machine route's
+check), so a signature held for an agent that was since replaced isn't attached to the replacement.
+
+**Setup.** The owner signs `setupMessage({ host, deployment, organization, owner, area, expiresAt })` (at most an hour;
+the same checks as a consent). Wallet owners only: a DAO owner gets 409. The platform then reserves the hosted agent for
+that owner and area, under the same rules as self-service `/gw/agents` (self-service enabled, the area allowed on this
+host, registry capacity), starts it, and stores a setup consent: `owner` scope with the reserved stand-in agent ID
+`unborn`, which no signed consent may name. It acts only while the agent's server reports no agent created, so it serves the
+owner's `agent_create` (prepared here, signed by the owner's wallet), which must name the key that signed the setup. Once
+the agent exists the setup consent reads `owner/status`, `owner/actions` and `owner/pending` until it expires (at most an
+hour): those cover every owner action of the agent in that time, not only its creation. A setup is refused when the
+owner's agent for that area already exists and is created (409), or when that can't be checked (503); a setup whose
+consent can't be stored (revoked, or the deployment's consent limit reached) reserves nothing.
+The owner then signs an ordinary consent naming the new provider ID. An app's setup reserves that deployment and
+Organization's own agent, per owner and area (`.hosted/apps.json` records the scope), so Organizations sharing an
+owner wallet don't share payees, budget or balance: each policy is signed and provider-enforced. Only that deployment
+reads its identity, and only that deployment for that Organization stores consents for it and calls it, whatever consent
+is signed, since a consent names the agent by a generated name its owner can't tell apart. The scope names the
+deployment, not the host: give each app deployment a distinct name on every host. One deployment holds at most 16
+Organization agents per host (`PER_DEPLOYMENT`), so it can't take the host's capacity. Self-service setups
+(`/gw/agents`) stay per owner and area. An ownership or key check that goes unanswered (the agent's server, a chain
+read) is 503 on every app route: nothing is stored or forwarded, and the app reads again or resends the same body;
+refusals (400, 403, 404, 409) are answers.
+
+A revocation writes a tombstone, `.app-access/revoked/<id>`, which is never deleted: a revoked consent stays
+revoked even if its record is archived, and its signature can't be stored again. The operator can revoke any consent by
+id, including one whose record is already gone. Expired records may be archived; their text can't verify again. Each
+deployment holds at most 1,024 unexpired consents.
+
+A call is forwarded only with a live consent for that deployment, host, Organization and agent, bound to the agent's
+current provider ID, whose signing key is still a full-access key of the owner, and whose scope allows the procedure. The
+key is read with `view_access_key` at final finality on every call (`chainKeyState`, `src/signin.ts`): when the chain
+answers that the key is absent or no longer full-access, the consent is revoked for good (tombstone reason `key-removed`
+or `key-not-full-access`), so re-adding the key revives nothing; an unanswered lookup refuses the call with 503 and
+revokes nothing. Read scope: `read` permits `instance`, `overview`, `policyHistory`,
+`activity`, `unresolved`, `held`, `ledger`, `ledgerCsv`, `owner/actions`, `owner/pending`, `owner/status`,
+`paymentHistory` and `paymentStatus`. Owner scope: `owner` permits `owner/prepare`, `owner/submit`, `owner/status`,
+`owner/pending` and `owner/actions`, and nothing else (no reads beyond those). Payout scope: `payout` permits
+`payouts/request`, `payouts/status` and `held`: payout requests (CONTEXT.md, "Payout request"), each sent at most once
+under the app's `requestId` and namespaced by the actor `app:<deployment>:<organization>`, judged as a payout
+(`authorize`, then the provider's policy) and refused before sending on an agent whose grant is for other work. The
+`held` read shows every held payout of the agent, not only this app's. With `owner_approval: false` an app with `payout` consent pays agreed payees
+within caps and budget with no owner signature; that bound is the owner-signed policy. `owner/prepare` must name `signer: "wallet"`:
+the owner signs in the app with their own wallet, and `owner/submit` verifies that signature against the prepared
+intent (`src/owner-signature.ts`), so the app can prepare and forward but never complete an owner action alone.
+**The app chooses what it prepares and how it presents it**, so the gateway lets it prepare only what the owner can
+read in their wallet or what platform code builds entirely (`appMayPrepare`, `appMayRelease`,
+`src/gateway/app-access.ts`):
+- Built by the platform: `agent_create` without payees (the policy is the platform's treasury or payout policy; the
+  owner key must be the one that signed the setup), `agent_freeze`, `agent_unfreeze`. These may be signed as NEP-366;
+  the owner relies on the platform's code for their content, not the app's preview. The app still chooses
+  which one it asks for: a compromised app could present an unfreeze as a freeze, and whether the owner notices
+  depends on the wallet showing the delegate's method.
+- Readable: `grant_issue`, `grant_revoke`, and `policy_update` changing only `destinations` and `budget`, the
+  API-enforced fields that the provider's policy reference (skills repo `references/policy.md` at `5f536b5`) signs as
+  NEP-413. The gateway reads the prepared reply and releases these only when its intent is NEP-413. Otherwise it
+  answers 403, logs `withheld` with the correlation ID, and the intent expires unsigned at the provider. That case is
+  real: the platform turns transfers on exactly while the destination list has an entry (`policyRequest`,
+  `src/owner-requests.ts`), so adding the first payee or removing the last also changes provider-enforced `actions`,
+  which per the provider's rule is signed on chain (inferred from code and docs, not observed).
+- Refused before forwarding: `signer: "dao"`, `agent_create` with payees, policy edits to any other field (`swap`,
+  `assets`, `owner_approval`, `limits`, `max_actions_per_hour`), `approval_vote`, and anything that doesn't parse as the
+  agent server would read it (oRPC's `RPCSerializer`, then `ownerPrepareInput`).
+
+A NEP-413 message is readable only if the owner's wallet shows it; which wallets do is not checked here. Within the
+allowed actions, the app still picks which one to ask for and when: a compromised app can ask the owner to
+sign a readable grant or a destinations edit the owner didn't intend, but not hide its terms. These limits bind only the
+app route: an app that asks the owner to sign the platform's own sign-in text (`Sign in to <host>`, NEP-413,
+readable) gets an ordinary platform session for that owner. With it, it can move money with no further signature
+(`pay`, `sweep`, `compensation/send`, `executePlan`, `autopilot/enable`; `src/contract/permissions.ts`), within the
+owner-signed policy (agreed payees, caps, budget, held for approval where `owner_approval` is on), and prepare any owner
+action, including opaque NEP-366 edits, for the owner to sign. The signature covers only the host and a nonce the
+platform issued, so whoever fetched the nonce can relay it; the platform can't tell where it was signed. Whether a
+wallet shows the recipient, or refuses one that doesn't match the requesting page, is not checked. Consents belong to the deployment name, not to one credential: a
+credential issued again under the same deployment name acts on every consent that deployment holds.
+Scopes are separate: a consent carries each it needs. Agreements, invoices, compensation and work-order records are not
+reachable. Each
+consent, call and revocation is appended to `.app-access/access.jsonl`.
+
+Limits: wallet owners only (DAO consent and DAO setup are not available, and `signer: "dao"` is refused); payout requests
+are confidential USDC only (wNEAR withdrawn to NEAR is designed, not built); the owner can't revoke on the platform directly
+(the deployment or the operator can, and removing the signing key ends it once a call or `check-keys` observes the
+removal: a key removed and re-added with no call or sweep in between goes unnoticed); a wallet that signs a callback URL into
+NEP-413 can't consent; owner actions are limited to the list above, so the first payee edit, cap and asset changes
+and held-payout votes are signed on the platform, not through the app; a withheld intent stays open at the provider
+until it expires, and an open policy intent blocks new agent creation until then (provider behavior, recorded in
+`.agents/skills/near-agent-api`; whether it also delays other policy edits is not checked); hosted agents are never released, and
+each is its own process, so setups (like self-service `/gw/agents`) can fill the host's 32-agent registry, each needing an
+owner's signature; many Organizations need more hosts. Offline-tested (`test/app-access.test.ts`). On 2026-10-26 each of those checks (scope, agent identity,
+host, deployment, owner, key permission, revocation, browser credentials) was also removed by hand and the tests failed
+every time; that was a manual check, not part of the suite. Stack-tested with simulated provider, chain and wallet
+(`test/e2e/app-access.spec.mjs`, run-rq8nqz, 2026-10-26): reads, owner actions, refusals, a withheld NEP-366 edit,
+and hosted setup through creation and a grant. Not deployed; no live credentials.
+
 ## State preservation and rollback
 
 `.machine-auth/` is additive host-local gateway state, owned by one gateway process. It contains

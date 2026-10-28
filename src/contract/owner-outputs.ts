@@ -413,6 +413,20 @@ export const paymentHistoryOutput = z.looseObject({
   complete: z.boolean(),
 });
 /** payouts.ts paymentStatus (evidence: provider-display.ts paymentEvidence). */
+/**
+ * payout-requests.ts: a payout request as recorded. `succeeded` settled with SUCCESS; `failed` ended FAILED or REFUNDED,
+ * which doesn't prove nothing moved, so a person checks before asking again; `held` waits for the owner's approval;
+ * `processing` was accepted and is still moving; `refused` was proven not sent (`code`); `unknown` has no proven
+ * outcome. `processing` and `unknown` block the agent's sends and are never sent again; `not_found` was never recorded
+ * by this executor.
+ */
+export const payoutRequestOutput = z.looseObject({
+  requestId: z.string(),
+  state: z.enum(["succeeded", "failed", "held", "processing", "refused", "unknown", "not_found"]),
+  status: z.string().nullable(),
+  correlationId: z.string().nullable(),
+  code: z.string().nullable(),
+});
 export const paymentStatusOutput = z.looseObject({
   status,
   failureCode: z.string().nullable(),
@@ -688,6 +702,8 @@ export const ownerOutputs = {
   "reconcileBooks": reconcileBooksOutput,
   "paymentHistory": paymentHistoryOutput,
   "paymentStatus": paymentStatusOutput,
+  "payouts/request": payoutRequestOutput,
+  "payouts/status": payoutRequestOutput,
   "invoices": invoicesOutput,
   "agreements/list": agreementsListOutput,
   "owner/status": ownerStatusOutput,

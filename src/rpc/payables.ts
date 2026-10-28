@@ -6,7 +6,8 @@ import { type AgreementStore, localStore, remoteStore } from "../agreements.js";
 import { agreed } from "../invoices.js";
 import { os } from "./base.js";
 import { readOutput } from "./read-output.js";
-import { transferAccount, units, reviewedPolicy } from "../contract/inputs.js";
+import { transferAccount, units, reviewedPolicy, payoutRequestInput, payoutStatusInput } from "../contract/inputs.js";
+import { payoutStatus, requestPayout } from "../payout-requests.js";
 
 const agreementId = z.string().regex(/^[0-9a-f]{32}$/);
 /** This host's agreements when it serves the invoice page; otherwise the invoice host's, if configured. */
@@ -19,6 +20,11 @@ export const payablesRoutes = {
   pay: os
     .input(z.object({ recipient: transferAccount, asset: z.string(), amount: units, confidential: z.boolean(), expectedPolicy: reviewedPolicy }))
     .handler(({ input: { expectedPolicy, ...request } }) => pay(request, expectedPolicy)),
+  /** Payouts under the caller's own `requestId` (payout-requests.ts): sent at most once, answered by `requestId`. */
+  payouts: {
+    request: os.input(payoutRequestInput).handler(({ input, context }) => requestPayout(context.actor, input)),
+    status: os.use(readOutput("payouts/status")).input(payoutStatusInput).handler(({ input, context }) => payoutStatus(context.actor, input.requestId)),
+  },
   /**
    * Agreements with terms (agreements.ts): requested by payees on the invoice page, or offered by the
    * owner. Proposing terms or offering only records them; agreeing is the owner's policy update.

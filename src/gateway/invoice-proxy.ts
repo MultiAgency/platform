@@ -9,6 +9,8 @@ export function forwardInvoice(req: IncomingMessage, res: ServerResponse, origin
   delete headers["x-forwarded-host"];
   delete headers["x-forwarded-for"];
   delete headers["forwarded"];
+  // Gateway headers are set only by the gateway itself, never passed through from a client.
+  for (const name of Object.keys(headers)) if (name.startsWith("x-gateway")) delete headers[name];
   for (const name of (req.headers.connection ?? "").split(",").map(s => s.trim().toLowerCase())) delete headers[name];
   for (const name of ["connection", "keep-alive", "proxy-authorization", "proxy-authenticate", "te", "trailer", "transfer-encoding", "upgrade"]) delete headers[name];
   headers.host = target.host;
