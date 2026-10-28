@@ -25,6 +25,7 @@ afterEach(() => mock.restoreAll());
 test("dashboard keeps balances when a managed asset lacks a price", async () => {
   mock.method(api, "getTokens", async () => Object.values(ASSETS).map(asset_id => ({ asset_id, symbol: "fixture", decimals: 6, price: null })) as never);
   const result = await client.overview();
+  assert.equal(result.policy.usage.budget.weekly.spent_usd, "0.000000", "an uncapped window reads as clients on earlier SDKs expect");
   const usdc = result.book.find(h => h.asset === ASSETS.USDC)!;
   assert.equal(usdc.confidential, 1000000000n);
   assert.equal(usdc.usd, null);

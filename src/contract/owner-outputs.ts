@@ -65,8 +65,8 @@ const policy = z.looseObject({
   sign: z.looseObject({ recipients: z.array(z.string()) }).optional(),
 });
 const cooldowns = z.looseObject({ policy_change_available_at: z.string().nullable(), unfreeze_available_at: z.string().nullable() });
-/** One USD budget window as the provider reports it: every field null for an uncapped window (API #51, SDK 0.7.2). */
-const budgetWindow = z.looseObject({ limit_usd: z.string().nullable(), spent_usd: z.string().nullable(), remaining_usd: z.string().nullable(), resets_at: z.string().nullable() });
+/** One USD budget window. An uncapped window's spend is "0.000000": nothing counted (`countedSpend`, src/budget-window.ts). */
+const budgetWindow = z.looseObject({ limit_usd: z.string().nullable(), spent_usd: z.string(), remaining_usd: z.string().nullable(), resets_at: z.string().nullable() });
 /** SDK PolicyView, as `api.getPolicy` returns it. */
 const policyView = z.looseObject({
   wallet_id: z.string(),

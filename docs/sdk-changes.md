@@ -31,8 +31,9 @@ All additive. Nothing on the existing wire changes.
   `@orpc/client` (Module Federation shares bare names only) no longer mixes its copy with the SDK's link. `@orpc/contract`
   still imports its own `@orpc/client` (installed with it); the SDK's calls don't go through that copy. `@orpc/contract` stays a dependency (apps implement
   servers from the contract objects); `zod` stays the one peer.
-- **Fix: a budget window's `spent_usd` may be `null`** (`overview`), as the provider reports every field of an uncapped
-  window since its API #51 (SDK 0.7.2). The stricter schema failed the whole overview read for such a policy.
+- **No change for uncapped budget windows:** since the provider's API #51 (SDK 0.7.2) it reports an uncapped window's
+  spend as `null`; the platform's `overview` keeps reporting `"0.000000"` there, as the provider did before, so apps on
+  any SDK version read it unchanged.
 - **Fix: `ownerClient` (and so `appClient`) keeps an encoded refusal's kind when the app's bundler splits oRPC.**
   Module Federation shares `@orpc/client` but not `@orpc/client/fetch`, so the link's `ORPCError` came from another copy
   and failed `instanceof`: a proven refusal read as `unknown` and a 401 as `unavailable` (found in the dashboard's built

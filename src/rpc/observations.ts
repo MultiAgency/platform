@@ -12,6 +12,7 @@ import { dismiss, readInbox } from "../inbox.js";
 import { ledger, ledgerCsv, reconcileBooks } from "../ledger.js";
 import { agreedPayees, notInForce } from "../authorize.js";
 import { mandateDigest } from "../mandate.js";
+import { countedSpend } from "../budget-window.js";
 import { adoptStagedGrant, isLive, liveGrant } from "../grants.js";
 import { blocksDispatch, readOps } from "../ops.js";
 import { recover } from "../recover.js";
@@ -92,7 +93,7 @@ export const observationsRoutes = {
       unmanaged,
       target: targets(strategy),
       rebalance: { minLegUsd: strategy.minLegUsd, maxCostBps: strategy.maxCostBps },
-      policy,
+      policy: countedSpend(policy),
       digest,
       /** Why the policy isn't in force, by the rule `authorize` refuses with; null when it is. */
       notInForce: notInForce(policy),

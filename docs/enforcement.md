@@ -220,8 +220,12 @@ We retain the existing provider controls and local checks; this review introduce
 **Provider SDK 0.7.2 (locked in `pnpm-lock.yaml` 2026-10-28; 0.7.1 from 2026-10-26): documented refusals not adopted.**
 Neither upgrade changes a classification rule. 0.7.2 adds `retryAfterSeconds` to `AgentApiError` (not read here) and
 types a budget window's `spent_usd` as nullable: every field is `null` for an uncapped window (provider API #51, its
-skills and OpenAPI on 2026-10-28). The overview schema required a string there, so the agent refused its own overview of
-a policy with an uncapped window; it was found on staging on 2026-10-28 and is fixed with a test. `src/ops.ts` already treats `policy_denied` and `spend_budget_exceeded` (4xx) and `route_unavailable`,
+skills and OpenAPI on 2026-10-28); before, it reported `"0.000000"` there (the provider's own demo stub and tests, changed
+2026-10-27). The overview schema required a string, so the agent refused its own overview of a policy with an uncapped
+window (found on staging on 2026-10-28). The overview now reports an uncapped window's spend as `"0.000000"` again
+(`countedSpend`, `src/budget-window.ts`): nothing is counted against a cap that doesn't exist, and owner apps built on
+earlier SDKs keep reading it. Production runs the earlier build, so its overview of a policy with an uncapped window
+fails until it gets this one (not checked on production). `src/ops.ts` already treats `policy_denied` and `spend_budget_exceeded` (4xx) and `route_unavailable`,
 `quote_unavailable` and `spend_price_unavailable` (5xx) as proven refusals, each only at its listed status class. Per
 the SDK's CHANGELOG.md at 0.7.1 (docs, not observed): from 0.7.0, `policy_limit_exceeded`,
 `policy_action_limit_exceeded` and `policy_usage_unavailable` on a request that runs now, and `provider_refused`, send
