@@ -182,8 +182,8 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0
       '@near-intents-agent-api/sdk':
-        specifier: ^0.7.1
-        version: 0.7.1
+        specifier: ^0.7.2
+        version: 0.7.2
       '@nearai/inference-sdk':
         specifier: ^0.1.0
         version: 0.1.0(typescript@7.0.2)(undici@7.30.0)(ws@8.21.0)(zod@4.6.7)
@@ -784,8 +784,8 @@ packages:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
 
-  '@near-intents-agent-api/sdk@0.7.1':
-    resolution: {integrity: sha512-SzDJ5kQbL0krXCIuEa5IHQTlNPmiFJhyMXDgC/dZ8QefvxGEFnzA0UfPHnQ70bcGtxcIbih03rnP/v+fM4mvGQ==}
+  '@near-intents-agent-api/sdk@0.7.2':
+    resolution: {integrity: sha512-GMsaN/5VhzGErjUp9Ff1lCCV9Snc997GeiM1iWra1S8d7cYxT4KgI4fkn81li8tEEzqE/vXTvJpmU1+julY7NA==}
     engines: {node: '>=24'}
 
   '@nearai/inference-sdk@0.1.0':
@@ -4007,7 +4007,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
-  '@near-intents-agent-api/sdk@0.7.1':
+  '@near-intents-agent-api/sdk@0.7.2':
     dependencies:
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0

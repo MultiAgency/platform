@@ -131,7 +131,10 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         if (agent && route === '/grants') return json(res, { data: agent.grants });
         if (agent && route === '/policy') return json(res, { policy: agent.policy, revision: agent.revision ?? 1, status: 'APPLIED', provider_policy_synced: true, wallet_id: agent.wallet.wallet_id, policy_hash: null, applied_at: null, transaction_hash: null,
           cooldowns: { policy_change_available_at: null, unfreeze_available_at: null },
-          usage: { budget: Object.fromEntries(['daily', 'weekly', 'monthly'].map(window => [window, { limit_usd: agent.policy.budget[`${window}_usd`], spent_usd: '0', remaining_usd: agent.policy.budget[`${window}_usd`], resets_at: null }])), timelock: { delay_ms: 0, scheduled_count: 0 } } });
+          // An uncapped window reports every field null, as the provider does since its API #51.
+          usage: { budget: Object.fromEntries(['daily', 'weekly', 'monthly'].map(window => { const limit = agent.policy.budget[`${window}_usd`];
+            return [window, limit === null ? { limit_usd: null, spent_usd: null, remaining_usd: null, resets_at: null }
+              : { limit_usd: limit, spent_usd: '0', remaining_usd: limit, resets_at: null }]; })), timelock: { delay_ms: 0, scheduled_count: 0 } } });
         if (agent && route === '/policy/history') return json(res, { data: [], next_cursor: null });
         if (agent && route === '/balances') return json(res, { near_account_id: agent.wallet.near_account_id, source: url.searchParams.get('source'),
           balances: treasury && agent.id === id ? [...treasuryBalances].map(([asset_id, balance]) => ({ asset_id, balance_raw: url.searchParams.get('source') === 'public' ? '0' : balance.toString() }))

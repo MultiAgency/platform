@@ -16,7 +16,7 @@ const rpc = <T>(agent: string, path: string) => hostedRpc<T>(BASE, COOKIE, agent
 
 /** Raw balances arrive as strings (the JSON form of the API's bigints). */
 type Holding = { symbol: string; usd: number | null; asset: string; decimals: number; confidential: string };
-type Window = { limit_usd: string | null; spent_usd: string; remaining_usd: string | null; resets_at: string | null };
+type Window = { limit_usd: string | null; spent_usd: string | null; remaining_usd: string | null; resets_at: string | null };
 type Period = "daily" | "weekly" | "monthly";
 type Overview = { book: Holding[]; target: Record<string, number>; rebalance: { minLegUsd: number }; policy: { usage: { budget: Record<Period, Window> } } };
 

@@ -217,8 +217,11 @@ We retain the existing provider controls and local checks; this review introduce
 
 ## Recovery limitation
 
-**Provider SDK 0.7.1 (locked in `pnpm-lock.yaml` 2026-10-26): documented refusals not adopted.** The upgrade changes no
-classification rule. `src/ops.ts` already treats `policy_denied` and `spend_budget_exceeded` (4xx) and `route_unavailable`,
+**Provider SDK 0.7.2 (locked in `pnpm-lock.yaml` 2026-10-28; 0.7.1 from 2026-10-26): documented refusals not adopted.**
+Neither upgrade changes a classification rule. 0.7.2 adds `retryAfterSeconds` to `AgentApiError` (not read here) and
+types a budget window's `spent_usd` as nullable: every field is `null` for an uncapped window (provider API #51, its
+skills and OpenAPI on 2026-10-28). The overview schema required a string there, so the agent refused its own overview of
+a policy with an uncapped window; it was found on staging on 2026-10-28 and is fixed with a test. `src/ops.ts` already treats `policy_denied` and `spend_budget_exceeded` (4xx) and `route_unavailable`,
 `quote_unavailable` and `spend_price_unavailable` (5xx) as proven refusals, each only at its listed status class. Per
 the SDK's CHANGELOG.md at 0.7.1 (docs, not observed): from 0.7.0, `policy_limit_exceeded`,
 `policy_action_limit_exceeded` and `policy_usage_unavailable` on a request that runs now, and `provider_refused`, send
@@ -229,7 +232,11 @@ observed provider behaviour and a separate rule decision. `policy_denied` was ma
 [mainnet log](mainnet-log.md)) but 0.7.1's types no longer name it; they name `policy_action_denied`,
 `policy_destination_denied`, `policy_asset_denied` and `policy_schedule_denied`, which aren't listed, so a refusal under
 those codes leaves the operation unresolved. `quote_unavailable`, which the changelog removes, stays in
-`PROVEN_5XX` because the deployed provider version isn't established. The pre-send balance check (`src/agent.ts`) still
+`PROVEN_5XX` because the deployed provider version isn't established. Since provider API #51/#54 (skills repo,
+2026-10-27), a dry swap quote is no longer refused by the account's rules: it answers 200 with `warnings` carrying the
+code the live swap would get. `quoteLeg` (`src/treasury.ts`) doesn't read `warnings`, so a leg the policy will refuse
+can now be planned and is refused only when sent, under a code that leaves the operation unresolved and blocks sends
+until reconciled. Not yet observed here; reading the warnings is a money-path change awaiting a decision. The pre-send balance check (`src/agent.ts`) still
 reads the confidential balance rather than 0.7's `available` figure (balance minus queued or timelocked work), so it can
 pass a send the provider then refuses with `insufficient_balance`. The ledger's `details.amount_out` is documented as
 present only on `SUCCESS` (or a partial `REFUNDED`), so pending swap rows show none. The unresolved treasury
