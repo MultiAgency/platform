@@ -38,10 +38,18 @@ export type PolicyChanges = Partial<Pick<Policy, "assets" | "owner_approval" | "
 };
 
 /**
- * The agent's current policy with `changes` applied. Transfers are on exactly while the
- * destination list has an entry, so funds cannot leave without a destination the owner signed.
+ * The agent's current policy with `changes` applied. After an edit, transfers are on exactly while the destination list
+ * has an entry, so funds cannot leave without a destination the owner signed. A payout agent is created with transfers on
+ * and no payees (`payoutPolicy`), so its first payee changes only `destinations`; removing the last turns transfers off.
  */
-export async function policyRequest({ swap, destinations, ...fields }: PolicyChanges, expectedPolicy: ReviewedPolicy) {
+export async function policyRequest(changes: PolicyChanges, expectedPolicy: ReviewedPolicy) {
+  return (await policyChange(changes, expectedPolicy)).request;
+}
+
+/** The provider request for a reviewed policy edit, and the policy in force it replaces. */
+export async function policyChange({ swap, destinations, ...asked }: PolicyChanges, expectedPolicy: ReviewedPolicy) {
+  // A field sent as undefined (the serializer keeps the key) leaves it as it is in force.
+  const fields = Object.fromEntries(Object.entries(asked).filter(([, value]) => value !== undefined));
   const id = agentId();
   const { policy, revision } = await api.getPolicy(id);
   if (!policy || revision === null) throw new PublicError("The agent's policy is not applied yet");
@@ -65,5 +73,5 @@ export async function policyRequest({ swap, destinations, ...fields }: PolicyCha
       ],
     },
   };
-  return { type: "policy_update", agent_id: id, expected_revision: revision, policy: next } as const;
+  return { request: { type: "policy_update", agent_id: id, expected_revision: revision, policy: next } as const, current: policy };
 }

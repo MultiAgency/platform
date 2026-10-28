@@ -208,6 +208,16 @@ test("a policy change between preparing and submitting an approval invalidates i
   assert.equal(signatures, 0);
 });
 
+test("a prepared vote names the payout it releases and, for approve, the terms proven against the provider's hash", async () => {
+  onDashboard();
+  const approve = await prepare(vote);
+  assert.deepEqual(approve.payment, { correlationId: "payment", verdict: "approve", terms: { recipient: invoice.payee, asset: ASSETS.USDC, amount: invoice.amount } });
+  mock.method(api, "generateIntent", async () => ({ type: "approval_vote", correlation_id: "vote-2", expires_at: new Date(Date.now() + 60_000).toISOString(),
+    preview: { approval: { approval_id: "approval", request_hash: requestHash, verdict: "reject" } }, intent: walletIntent, signer: walletSigner }));
+  assert.deepEqual((await prepare({ ...vote, verdict: "reject" })).payment, { correlationId: "payment", verdict: "reject", terms: null },
+    "a reject proves no terms: rejecting releases nothing");
+});
+
 test("rejecting needs only the identity checks: no policy or agent reads", async () => {
   onDashboard();
   mock.method(api, "getPolicy", async () => assert.fail("reject must not read policy"));

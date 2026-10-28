@@ -9,10 +9,11 @@ const MAX_HELD_REPLY = 1 << 20;
 
 /**
  * Forwards a call to an agent server on loopback, streaming both ways (some procedures stream events). With `hold`, a
- * successful reply is read whole and released only when `hold` returns null; otherwise the caller gets 403 with its reason.
+ * successful reply is read whole and released only when `hold` returns null; a string refuses it (403 with that reason),
+ * and `{ answer }` sends that JSON in its place.
  */
 export function forwardRpc(req: IncomingMessage, res: ServerResponse, agent: AgentEntry, path: string, timeoutMs = RPC_IDLE_TIMEOUT_MS, body?: string, actor?: string,
-  hold?: (reply: unknown) => string | null) {
+  hold?: (reply: unknown) => string | null | { answer: unknown }) {
   const headers: import("node:http").OutgoingHttpHeaders = { ...req.headers, host: `127.0.0.1:${agent.port}` };
   delete headers.origin;
   delete headers.cookie;
@@ -46,8 +47,15 @@ export function forwardRpc(req: IncomingMessage, res: ServerResponse, agent: Age
       let reply: unknown;
       try { reply = size <= MAX_HELD_REPLY ? JSON.parse(raw.toString("utf8")) : undefined; } catch { reply = undefined; }
       if (reply === undefined) return json(res, 502, { error: "Agent backend reply couldn't be checked. Check the original record before retrying." });
-      const refusal = hold(reply);
-      if (refusal) return json(res, 403, { error: refusal });
+      let held: ReturnType<typeof hold>;
+      // A hold that fails (a state write, a disk error) answers this call only; the reply is never released.
+      try { held = hold(reply); }
+      catch (error) {
+        console.error("Holding an agent reply failed", error);
+        return json(res, 502, { error: "The platform couldn't hold this reply. Nothing was released; prepare it again." });
+      }
+      if (typeof held === "string") return json(res, 403, { error: held });
+      if (held) return json(res, status, held.answer, { "cache-control": "private, no-store" });
       const { "transfer-encoding": _chunked, ...headers } = answer.headers;
       res.writeHead(status, { ...headers, "content-length": raw.length, "cache-control": "private, no-store" }).end(raw);
     });

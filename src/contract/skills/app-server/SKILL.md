@@ -74,12 +74,39 @@ signing key removed): the owner signs a new one. A 503 means a check went unansw
 
 ## Relay an owner action
 
-With `owner` scope an app may prepare only what the owner can read when signing, or what the platform builds itself:
-`agent_create` without payees (naming the key that signed the setup), `agent_freeze`, `agent_unfreeze`, `grant_issue`,
-`grant_revoke`, and `policy_update` of `destinations` or `budget`. Everything else is refused before it reaches the
-agent, and a destinations edit the provider makes on-chain is withheld (`forbidden`, from the gateway after the agent
-prepared it, so that intent expires unsigned): the owner signs it on the platform; don't retry it.
-Follow owner-workflows' prepare, sign once, submit once, status, through `app.agent(organization, agent).call(...)`.
+With `owner` scope an app may prepare `agent_create` without payees (naming the key that signed the setup),
+`agent_freeze`, `agent_unfreeze`, `grant_issue`, `grant_revoke`, `policy_update`, and `approval_vote` on a held payout,
+through `app.agent(organization, agent).call(...)`. Everything else is refused before it reaches the agent.
+
+```ts
+import { appClient, type AppOwnerAction } from "@multiagency/sdk";
+
+type SignNep413Intent = (intent: { standard: "nep413"; payload: { message: string; recipient: string; nonce: string } }) => Promise<Record<string, unknown>>;
+
+/** Prepares an owner action; a readable one the owner signs in your app, any other on the platform's confirm page. */
+export async function ownerAction(app: ReturnType<typeof appClient>, organization: string, agent: string, action: AppOwnerAction,
+  signReadable: SignNep413Intent, openForOwner: (url: string) => void) {
+  const calls = app.agent(organization, agent);
+  const prepared = await calls.call("owner/prepare", { action, signer: "wallet" });
+  if (!prepared.ok) return prepared;
+  const { correlationId, intent, confirm } = prepared.value;
+  if (confirm) openForOwner(confirm.url); // NEP-366: the owner reads the platform's record and signs there
+  else if (intent?.standard === "nep413")
+    await calls.call("owner/submit", { correlationId, signedData: await signReadable(intent) });
+  return calls.call("owner/status", { correlationId });
+}
+```
+
+Result: `owner/status` answers the outcome; read it again until it is final. Open a `confirm` link for the owner right
+away (the intent expires in minutes). It shows the action's terms to whoever holds it; the bytes to sign go only to
+whoever presents the owner's signature over the link's text, which the page asks the wallet for, and `owner/submit`
+through the app is refused for it.
+
+A vote on a held payout names it from `held` (`approvalId`, `correlationId`). The prepared vote's `payment.terms`
+(recipient, asset, amount) are what the platform proved against the provider's evidence: show those to the owner, not
+your own record of the request. The vote's signed text holds only an identifier and a hash, so your display is the only
+place the owner reads the terms. A payout an owner approves can still read `processing` until the provider settles it;
+follow `payouts/status`.
 
 ## Set up a hosted agent for an Organization
 
@@ -91,6 +118,9 @@ consent naming its `agentId`. A 409 means it already exists or the deployment re
 503 means a check went unanswered: submit the same body again.
 
 ## Request a payout once, and follow it
+
+To fund the agent first, `agentCalls.call("deposit")` (payout scope) answers a one-time address (with `memo`,
+`minAmount` and `expiresAt` when given) that credits USDC to the agent's confidential balance; send exactly there.
 
 Write the `requestId` (1–64 of `[A-Za-z0-9_-]`) and the exact terms to your database before calling. The platform sends
 one request at most once per deployment, Organization, agent and `requestId`. Never send the same payout under a new `requestId` until
@@ -130,6 +160,10 @@ USDC through `intents` is paid.
 - **A new requestId after `unknown`** (CRITICAL): the first may have been sent. Read `payouts/status`.
 - **Treating `failed` as unpaid** (HIGH): a partial payout fails too. A person checks before a new attempt.
 - **Showing your own summary instead of the signed text** (HIGH): the owner must read what the wallet signs.
+- **Asking the owner to sign the confirm page's text ("Open a MultiAgency confirm page.") in your app** (CRITICAL): it
+  is the owner's proof to the platform's page; signed elsewhere, it hands out the bytes for a blind signature.
+- **Showing your own record of a held payout when asking for a vote** (HIGH): show the prepared vote's
+  `payment.terms`, which the platform proved; your record may name another payout than the one the vote releases.
 
 ## Completion
 

@@ -54,3 +54,15 @@ test("RPC allows silent settlement before a response", async t => {
   const result = await fetch(`http://127.0.0.1:${gatewayPort}`, { method: "POST" });
   assert.equal(await result.text(), "settled");
 });
+
+test("a hold that throws answers 502 and releases nothing, instead of taking the gateway down", async t => {
+  const backend = createServer((req, res) => { req.resume(); req.on("end", () => res.writeHead(200, { "content-type": "application/json" }).end('{"json":{"ok":true}}')); });
+  const port = await listen(backend);
+  const gateway = createServer((req, res) => forwardRpc(req, res, { name: "fixture", owner: "owner.near", port, executor: true }, "owner/prepare",
+    undefined, "{}", "app:x:y", () => { throw new Error("App access directory must be private"); }));
+  const gatewayPort = await listen(gateway);
+  t.after(() => { gateway.closeAllConnections(); gateway.close(); backend.closeAllConnections(); backend.close(); });
+  const result = await fetch(`http://127.0.0.1:${gatewayPort}`, { method: "POST", body: "{}" });
+  assert.equal(result.status, 502);
+  assert.doesNotMatch(await result.text(), /"ok"/, "the reply isn't released");
+});

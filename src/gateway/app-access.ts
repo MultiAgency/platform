@@ -9,7 +9,7 @@ import { nep413Hash, signatureBytes, verifyEd25519 } from "../nep413.js";
 import type { KeyLookup, KeyStateLookup } from "../signin.js";
 import { writeAtomic } from "../synced.js";
 import { AppScope, appConsentSubmission, parseConsentMessage, parseSetupMessage, UNBORN_AGENT } from "../contract/app-consent.js";
-import { appMayAsk, appScopesCover, isPlatformBuilt } from "../contract/app-access.js";
+import { appMayAsk, appScopesCover } from "../contract/app-access.js";
 import { mayCall } from "./allowlist.js";
 import type { Access } from "./roles.js";
 
@@ -29,26 +29,27 @@ export function appMayCall(scopes: readonly AppScope[], access: Access, path: st
 
 /** The owner action an `owner/prepare` body asks for, read as the agent server reads it, if the app may ask for it. */
 const rpcInput = new RPCSerializer();
+/** The correlation ID an `owner/submit` body names, read as the agent server reads it; null when unreadable. */
+export function submittedCorrelation(input: unknown) {
+  try {
+    const decoded = rpcInput.deserialize(input as Parameters<RPCSerializer["deserialize"]>[0]) as { correlationId?: unknown } | null;
+    return typeof decoded?.correlationId === "string" ? decoded.correlationId : null;
+  } catch { return null; }
+}
 export function appMayPrepare(input: unknown) {
   let decoded: unknown;
   try { decoded = rpcInput.deserialize(input as Parameters<RPCSerializer["deserialize"]>[0]); } catch { return null; }
   const parsed = ownerPrepareInput.safeParse(decoded);
   return parsed.success && parsed.data.signer === "wallet" && appMayAsk(parsed.data.action) ? parsed.data.action : null;
 }
-/** Whether a prepared intent for this action may reach the app: readable, unless the platform built all of it. */
-export function appMayRelease(type: string, prepared: unknown) {
-  if (isPlatformBuilt(type)) return true;
-  const output = (prepared as { json?: { intent?: { standard?: unknown } } } | null)?.json;
-  return output?.intent?.standard === "nep413";
-}
 
-function privateDirectory(root: string) {
+export function privateDirectory(root: string) {
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const parent = openSync(dirname(root), "r");
   try { fsyncSync(parent); } finally { closeSync(parent); }
   if ((statSync(root).mode & 0o077) !== 0) throw new Error("App access directory must be private");
 }
-function readRecord<T>(file: string, schema: z.ZodType<T>): T | null {
+export function readRecord<T>(file: string, schema: z.ZodType<T>): T | null {
   let text: string;
   try { text = readFileSync(file, "utf8"); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
@@ -71,9 +72,7 @@ export class AppCredentials {
   constructor(root: string) { this.dir = join(root, "credentials"); }
   private read(id: string) {
     if (!z.uuid().safeParse(id).success) return null;
-    const record = readRecord(join(this.dir, `${id}.json`), Credential);
-    if (record && (record.id !== id || record.expiresAt <= record.createdAt)) throw new Error("Invalid app credential record");
-    return record;
+    return readRecord(join(this.dir, `${id}.json`), Credential);
   }
   issue(input: { deployment: string; host: string; label: string; days: number }, now = Date.now()) {
     if (!Number.isInteger(input.days) || input.days < 1 || input.days > MAX_CREDENTIAL_DAYS) throw new BadRequest(`Choose 1 to ${MAX_CREDENTIAL_DAYS} days.`);
@@ -179,7 +178,6 @@ export class AppConsents {
   private read(id: string) {
     if (!/^[a-f0-9]{64}$/.test(id)) return null;
     const record = readRecord(join(this.dir, `${id}.json`), Consent);
-    if (record && record.id !== id) throw new Error("Invalid app consent record");
     return record && (this.isRevoked(id) && !record.revoked ? { ...record, revoked: true } : record);
   }
   isRevoked(id: string) { return /^[a-f0-9]{64}$/.test(id) && existsSync(join(this.tombstones, id)); }

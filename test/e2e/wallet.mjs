@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { sign, PUBLIC_KEY } from './provider.mjs';
+import { sign, signDelegate, PUBLIC_KEY } from './provider.mjs';
 
 /** External wallet boundary only: actual app routes and RPC responses are never intercepted. */
 export async function browserContext(browser, env, account, options = {}) {
@@ -24,6 +24,7 @@ export async function installWallet(context, env, account) {
   });
   await context.routeWebSocket('**/*', socket => { unexpected.push(socket.url()); socket.close(); });
   await context.exposeFunction('__localSign', payload => { signatures.push({ account, ...payload }); return sign(account, payload); });
+  await context.exposeFunction('__localSignDelegate', payload => { signatures.push({ account, delegate: payload }); return signDelegate(account, payload); });
   await context.addInitScript(({ account, publicKey, origins }) => {
     if (!origins.includes(location.origin)) return;
     const accounts = [{ accountId: account, publicKey }];
@@ -32,7 +33,7 @@ export async function installWallet(context, env, account) {
       signIn: async () => accounts, getAccounts: async () => accounts, signOut: async () => {},
       signMessage: payload => window.__localSign({ ...payload, nonce: btoa(String.fromCharCode(...new Uint8Array(payload.nonce))) }),
       signAndSendTransaction: async () => { throw new Error('Chain submission is not implemented by this test wallet'); },
-      signDelegateActions: async () => { throw new Error('Delegate signing is not implemented by this test wallet'); },
+      signDelegateActions: async ({ delegateActions }) => ({ signedDelegateActions: await Promise.all(delegateActions.map(action => window.__localSignDelegate(action))) }),
     };
     // Exercise near-connect's actual injected-wallet interface; no application module replacement.
     window.addEventListener('near-selector-ready', () => window.dispatchEvent(new CustomEvent('near-wallet-injected', { detail: wallet })));

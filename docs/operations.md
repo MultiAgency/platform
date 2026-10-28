@@ -20,7 +20,8 @@ plus each instance's settings file. `.ops/` also holds each executor's `<agent>.
 (`<agent>.compensation.sqlite`); `.notify/` records which alerts were sent (losing it re-sends them); `.agent-connections/`
 holds agent connections and their access log (see [agent access](agent-access.md)); `.machine-auth/` holds Treasury
 machine credentials; `.app-access/` holds app service credentials (hashed), owner consents, revocation tombstones (`revoked/`,
-never delete: losing one lets that consent be stored again) and the access log; run `pnpm app-credential check-keys`
+never delete: losing one lets that consent be stored again), held confirm-page actions (`confirm/`, one record per link,
+named by its token's hash, and a `.claim` file once a submission was made; an older build ignores them) and the access log; run `pnpm app-credential check-keys`
 on a schedule so a removed owner key ends its consents even when no call observes it. Consents belong to the deployment
 name: a credential issued under an existing deployment name acts on all of its consents, so use a new name for an
 app that shouldn't inherit them; `.hosted/` the hosted agent registry. Stop writers before copying state; never start the destination before stopping the
@@ -314,6 +315,54 @@ has no test network) with its own state and test agents, never the live demo hos
    `PLATFORM_DEPLOYMENT=staging`).
 6. Rollback: redeploy the previous image; state stays on the staging volume. Nothing here touches proto.multiagency.ai
    or invoices.multiagency.ai.
+
+### Staging evidence on a test agent (prepared, not run)
+
+User-run, on mainnet, with a small amount of the user's own USDC; never scheduled. It shows the app path end to end:
+setup, creation on the confirm page, consent, a payout request held for the owner, and the owner's vote relayed by an
+app. Until the dashboard's own screens exist, the app is a local stand-in, `scripts/staging-app.ts`: it holds the
+staging credential in one local process and has the owner's wallet sign app texts in a localhost page. Test tooling
+only; never deployed.
+
+Before starting: staging deployed from a candidate that includes app votes and the confirm page; a staging credential
+issued (step 5); an owner wallet whose key is a full-access key of the owner account (check with `view_access_key`) and
+that signs NEP-413 messages, and for the confirm page NEP-366 delegate actions (Meteor and Intear did when last checked);
+a payee account that exists on NEAR, ideally the user's own second account; no other staging run in progress.
+
+1. Start the stand-in from the repository root, with the credential only in the environment:
+   `PLATFORM_URL=https://api.dev.multiagency.ai PLATFORM_APP_CREDENTIAL=tap_… PLATFORM_DEPLOYMENT=staging
+   ORGANIZATION=org_step8 pnpm exec tsx scripts/staging-app.ts`, then open `http://127.0.0.1:4318/` and connect the wallet.
+2. Set up: sign the setup text. Expect the Organization's agent name in the answer.
+3. Create the agent. Per the provider's docs creation is NEP-366, so the platform's confirm page opens: check that it
+   names this deployment, Organization and agent and shows the payout policy at creation, then sign twice (the page's
+   own text, then the action). Read the owner status until `SUCCESS`. Record the standard that came back, the wallet,
+   and what the wallet showed for each of the two signatures.
+4. Sign the consent (owner, payout, read). Expect it stored.
+5. Issue the payout grant (NEP-413 per the provider's docs: signed in the stand-in). Read the owner status until
+   `SUCCESS`.
+6. Add the payee. The payout agent was created with transfers on and no payees, so the first payee changes only
+   `destinations`, which per the provider's docs is signed NEP-413: expect it signed in the stand-in, not on the confirm
+   page. Record which standard came back; if the confirm page opens instead, check it shows `destinations` before and
+   after.
+7. Fund the agent: take a deposit address in the stand-in ("Deposit address", the agent's `deposit` under the payout
+   consent) and send the USDC there, with the memo if one is given, before it expires and above any minimum shown. A
+   deposit credits the confidential balance directly (mainnet-observed 2026-10-13 on a treasury agent; not yet on a
+   payout agent).
+8. Request a payout with a new request ID and the amount. Expect `held` (the payout policy holds every payout for the
+   owner). Ask again with the same request ID and terms: expect the same answer and nothing new sent.
+9. Vote approve from the stand-in. Before signing, check the prepared vote's `payment.terms` against the request.
+   Record what the wallet shows for the vote; the recorded format (`approve:{approval_id}:{wallet_pubkey}:{request_hash}`,
+   2026-10-11) names no payee or amount, so expect only an identifier and a hash. Read the payout status until
+   `succeeded`; the payee checks the receipt in near.com.
+10. Optionally freeze and unfreeze, each on the confirm page.
+
+Stop rules: a payout reading `unknown`, or `processing` that doesn't settle, is never retried under a new request ID;
+stop and report. A refusal is recorded with its code. Afterwards the agent remains (hosted agents are never released)
+with any remaining funds under the signed policy; the consent ends when it expires or the operator revokes it
+(`pnpm app-credential revoke-consent <consent id>` on the host).
+
+Record each step's outcome in `docs/mainnet-log.md` with the date (UTC) and the deployment id; op ids, transaction
+hashes, amounts and payees go only in the private release record.
 
 ## Payout executor
 

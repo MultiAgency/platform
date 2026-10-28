@@ -20,7 +20,10 @@ const args = process.argv.slice(2).filter(arg => arg !== '--');
 const take = flag => { const i = args.indexOf(flag); if (i === -1) return undefined; const [, value] = args.splice(i, 2); return value; };
 const ref = take('--ref') ?? 'HEAD';
 const sdk = args.includes('--sdk') && Boolean(args.splice(args.indexOf('--sdk'), 1));
-const inputs = [...args];
+// App inputs are directories; gates run inside the frozen snapshot, so each is resolved against the caller's directory.
+const PATH_INPUTS = new Set(['--invoices-dist-release', '--invoices-dist-next', '--payables-dist', '--payables-dist-next',
+  '--treasury-dist', '--treasury-dist-next', '--treasury-skill']);
+const inputs = args.map((arg, i) => PATH_INPUTS.has(args[i - 1]) ? resolve(arg) : arg);
 const flag = name => { const i = inputs.indexOf(name); return i === -1 ? undefined : resolve(inputs[i + 1]); };
 const required = ['--invoices-dist-release', '--invoices-dist-next', '--payables-dist', '--payables-dist-next', '--payables-change',
   '--treasury-dist', '--treasury-dist-next', '--treasury-change', '--treasury-skill'];

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, mock, test } from "node:test";
 import { api } from "../src/api.js";
 import { pay } from "../src/agent.js";
 import { prepare } from "../src/owner-intents.js";
-import { policyRequest } from "../src/owner-requests.js";
+import { policyChange, policyRequest } from "../src/owner-requests.js";
 import { mandateDigest } from "../src/mandate.js";
 import { readOps, blocksDispatch } from "../src/ops.js";
 import { ASSETS, payoutPolicy } from "../src/policy.js";
@@ -67,6 +67,30 @@ test("matching owner review reaches generation with the reviewed revision and ex
   });
   await assert.rejects(prepare({ type: "policy_update", changes: { max_actions_per_hour: 5 }, expectedPolicy: expected }, "wallet"), /^Error: generation reached$/);
   assert.equal(generate.mock.callCount(), 1);
+});
+
+test("a prepared edit names the policy in force and the one requested, including fields derived from the change", async () => {
+  mock.method(api, "generateIntent", async (request: { type: string }) => ({ type: request.type, correlation_id: "edit-1", expires_at: new Date(Date.now() + 60_000).toISOString(),
+    preview: { summary: "Change the policy" }, intent: { standard: "nep366", payload: { receiverId: "outlayer.near", actions: [] } },
+    signer: { type: "near", account_id: "owner.near", public_key: "ed25519:k" } }) as never);
+  const prepared = await prepare({ type: "policy_update", changes: { destinations: [] }, expectedPolicy: expected }, "wallet");
+  assert.deepEqual(prepared.policy?.current, original);
+  assert.deepEqual(prepared.policy?.requested, { ...original, actions: [], destinations: { mode: "only", list: [] } },
+    "removing the last payee also turns transfers off, and the record says so");
+});
+
+test("a payout agent's first payee changes only its destinations: it was created with transfers on", async () => {
+  current = payoutPolicy([]);
+  const { request, current: before } = await policyChange({ destinations: [{ address: "payee.near", confidential: true }] }, { revision: 1, digest: mandateDigest(current) });
+  assert.deepEqual(before.actions, ["transfer"]);
+  assert.deepEqual(request.policy.actions, ["transfer"]);
+  assert.deepEqual(request.policy.destinations.list, [{ action: "transfer", address: "payee.near", confidential: true }]);
+});
+
+test("a field sent as undefined stays as it is in force, never dropped from the requested policy", async () => {
+  const result = await policyRequest({ owner_approval: undefined, max_actions_per_hour: 5 }, expected);
+  assert.equal(result.policy.owner_approval, original.owner_approval);
+  assert.equal(result.policy.max_actions_per_hour, 5);
 });
 
 test("payment dispatch refuses a changed reviewed policy without sending or leaving unresolved work", async () => {

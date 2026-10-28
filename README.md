@@ -238,11 +238,14 @@ of maintaining separate requirement statuses.
   once per `requestId`), offline- and stack-tested with a simulated provider, not deployed or mainnet-observed. Consents
   and hosted agent setup work for wallet-owned agents only; DAO consent and setup, and wNEAR payouts, are not built. Hosted
   agents an app sets up belong to that deployment and Organization (one per owner and area), and nothing else reaches
-  them; each is its own process, at most 32 per host, so many Organizations need more hosts. With `owner` scope an app can prepare only actions the
-  owner can read in their wallet (NEP-413: grants, destination and budget edits) or that platform code builds entirely
-  (agent creation without payees, freeze, unfreeze); a destination edit the provider makes on-chain is withheld. The first
-  payee edit, cap and asset changes and held-payout votes are signed on the platform. Whether each wallet shows NEP-413
-  text is not checked. These limits bind only the app route: an owner who signs the platform's sign-in text on an
+  them; each is its own process, at most 32 per host, so many Organizations need more hosts. With `owner` scope an app
+  receives an owner intent only when it is NEP-413 (a text the wallet can show); a NEP-366 one (creation, freeze, unfreeze,
+  on-chain policy edits) reaches the app only as a link to the platform's confirm page, where the owner reads the
+  agent's record and signs; the bytes go only to a visitor who first signs the link's readable text with the owner's
+  key. A dishonest app that gets the owner to sign that text on its own page could still ask for a blind signature. Votes on
+  held payouts can be relayed: the platform binds each to the held payout's provider evidence and returns its proven
+  terms for the app to show; the vote's own text names no payee or amount, so that display is the only place the owner
+  sees them. Whether each wallet shows NEP-413 text is not checked. These limits bind only the app route: an owner who signs the platform's sign-in text on an
   app's page gives that app a full platform session, which can send payouts within the signed policy without
   another signature. See [agent access](docs/agent-access.md#app-access-server-to-server). An app service
   credential is a bearer: whoever holds it acts within the consents owners gave that deployment until it expires or is

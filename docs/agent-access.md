@@ -203,31 +203,63 @@ revokes nothing. Read scope: `read` permits `instance`, `overview`, `policyHisto
 `activity`, `unresolved`, `held`, `ledger`, `ledgerCsv`, `owner/actions`, `owner/pending`, `owner/status`,
 `paymentHistory` and `paymentStatus`. Owner scope: `owner` permits `owner/prepare`, `owner/submit`, `owner/status`,
 `owner/pending` and `owner/actions`, and nothing else (no reads beyond those). Payout scope: `payout` permits
-`payouts/request`, `payouts/status` and `held`: payout requests (CONTEXT.md, "Payout request"), each sent at most once
+`payouts/request`, `payouts/status`, `held` and `deposit` (a one-time address crediting USDC to the agent's
+confidential balance, so the app can fund it; it moves nothing out): payout requests (CONTEXT.md, "Payout request"), each sent at most once
 under the app's `requestId` and namespaced by the actor `app:<deployment>:<organization>`, judged as a payout
 (`authorize`, then the provider's policy) and refused before sending on an agent whose grant is for other work. The
 `held` read shows every held payout of the agent, not only this app's. With `owner_approval: false` an app with `payout` consent pays agreed payees
 within caps and budget with no owner signature; that bound is the owner-signed policy. `owner/prepare` must name `signer: "wallet"`:
 the owner signs in the app with their own wallet, and `owner/submit` verifies that signature against the prepared
 intent (`src/owner-signature.ts`), so the app can prepare and forward but never complete an owner action alone.
-**The app chooses what it prepares and how it presents it**, so the gateway lets it prepare only what the owner can
-read in their wallet or what platform code builds entirely (`appMayPrepare`, `appMayRelease`,
-`src/gateway/app-access.ts`):
-- Built by the platform: `agent_create` without payees (the policy is the platform's treasury or payout policy; the
-  owner key must be the one that signed the setup), `agent_freeze`, `agent_unfreeze`. These may be signed as NEP-366;
-  the owner relies on the platform's code for their content, not the app's preview. The app still chooses
-  which one it asks for: a compromised app could present an unfreeze as a freeze, and whether the owner notices
-  depends on the wallet showing the delegate's method.
-- Readable: `grant_issue`, `grant_revoke`, and `policy_update` changing only `destinations` and `budget`, the
-  API-enforced fields that the provider's policy reference (skills repo `references/policy.md` at `5f536b5`) signs as
-  NEP-413. The gateway reads the prepared reply and releases these only when its intent is NEP-413. Otherwise it
-  answers 403, logs `withheld` with the correlation ID, and the intent expires unsigned at the provider. That case is
-  real: the platform turns transfers on exactly while the destination list has an entry (`policyRequest`,
-  `src/owner-requests.ts`), so adding the first payee or removing the last also changes provider-enforced `actions`,
-  which per the provider's rule is signed on chain (inferred from code and docs, not observed).
-- Refused before forwarding: `signer: "dao"`, `agent_create` with payees, policy edits to any other field (`swap`,
-  `assets`, `owner_approval`, `limits`, `max_actions_per_hour`), `approval_vote`, and anything that doesn't parse as the
-  agent server would read it (oRPC's `RPCSerializer`, then `ownerPrepareInput`).
+**The app chooses what it asks for, never what the owner reads** (`appMayAsk`, `src/contract/app-access.ts`;
+`appMayPrepare` and the reply hold in `src/gateway/app-routes.ts`). The app may prepare `agent_create` without payees (the
+policy is the platform's treasury or payout policy; the owner key must be the one that signed the setup),
+`agent_freeze`, `agent_unfreeze`, `grant_issue`, `grant_revoke`, `policy_update` of any field, and `approval_vote`. The
+gateway reads each prepared reply before releasing it:
+- NEP-413 goes to the app unchanged: it is a text the owner's wallet can show (which wallets show it is not checked).
+- NEP-366 (creation, freeze, unfreeze and on-chain policy edits, per the provider's docs) is held on the platform. The
+  app gets `confirm: { url, expiresAt }` in its place, with no delegate bytes, and the gateway logs `confirm`. The URL
+  is the platform host's confirm page, `/confirm/<token>` (128-bit token; the record in `.app-access/confirm/` is named
+  by its hash). That page (`web/src/confirm.tsx`, a separate entry from the owner app, with no platform session) shows
+  the requesting deployment and Organization, the agent and the action's terms from the agent's own record: for a
+  policy edit every field that changes, before and after, as the agent built the request (so fields derived from what
+  the app asked, such as transfers turned off with the last payee, show too); for a creation the whole policy;
+  otherwise the action's fields. Anyone holding the link, the app included, can read those terms. The bytes to sign go
+  only to a visitor who first signs the link's NEP-413 text with the key the action names (recipient the host). That text
+  is plain words the wallet shows: it opens a MultiAgency confirm page, says to sign it only on
+  `https://<host>/confirm/` and to refuse anywhere else, and names the link, deployment, Organization, agent, action and
+  expiry. The page asks the wallet for that, then for the action. The gateway checks the action's signature against the held bytes
+  (`ownerSignatureProblem`) and claims the link's one submission with an exclusive claim file before forwarding
+  `owner/submit` to the agent as the app's actor (`confirmed` in the log). A wrong wallet or other bytes are refused
+  without using the link; a used link answers 409 (also when the forward then failed: nothing was sent, and the app
+  prepares the action again), an expired one 410. `/apps/v1` refuses `owner/submit` for an action held here. The app
+  follows the outcome with `owner/status`. What remains: a dishonest app can read the link's text itself, ask the
+  owner to sign it on its own page or a look-alike, then take the bytes, ask for a blind signature and post it to the
+  link (reproduced offline, 2026-10-27). A wallet that shows NEP-413 text shows its warning wherever it is asked; heeding it,
+  and checking the page's domain, is the last line, since the wallet can't show an encrypted policy.
+- Anything else (another standard, an unreadable reply) is not released: 403, logged `withheld`, and the intent expires
+  unsigned at the provider.
+- Votes on held payouts: the agent binds `approval_vote` to the held payout's provider evidence before preparing and
+  again under the money lock before submitting (`checkPaymentApproval`, `src/payment-approval.ts`): the approval and
+  the held execution name each other and this agent's wallet, the approval's recipient, asset and amount hash to the
+  provider's request hash, and an approve is re-authorized under the current policy. The prepared answer carries those
+  proven terms (`payment`) for the app to show. What a dishonest app gains: a vote on another of this agent's held
+  payouts than the one it showed, which is itself a transfer to an agreed payee within the caps; the power it would
+  have if the owner had turned `owner_approval` off. The vote's signed text names no payee or amount: it is OutLayer's
+  `approve:{approval_id}:{wallet_pubkey}:{request_hash}` (recorded 2026-10-11 on a payout agent,
+  `.agents/skills/near-agent-api`). So the owner sees the terms only where the app shows `payment.terms`, and can't
+  catch that swap in the wallet.
+- Refused before forwarding: `signer: "dao"`, `agent_create` with payees, other owner actions (such as
+  `agent_delete`), and anything that doesn't parse as the agent server would read it (oRPC's `RPCSerializer`, then
+  `ownerPrepareInput`).
+
+Before 2026-10-27 the app received the NEP-366 intents for creation, freeze and unfreeze and had the owner's wallet sign
+them on its own page. A dishonest app could have handed the wallet another delegate action and relayed it on-chain
+itself. Per `outlayer.near`'s source at `out-layer/outlayer@aaf60a2` (a deployed version is not assumed from source),
+`store_wallet_policy` requires the agent wallet's own signature over the encrypted policy and the caller, which an app
+doesn't hold, while `freeze_wallet` and `unfreeze_wallet` check only that the caller owns the wallet: an app could have
+had the owner unfreeze any of their wallets while showing a freeze. Since the confirm page, an app gets those bytes only
+with the owner's signature over the link's text, which tells the owner in the wallet to sign it only on the platform.
 
 A NEP-413 message is readable only if the owner's wallet shows it; which wallets do is not checked here. Within the
 allowed actions, the app still picks which one to ask for and when: a compromised app can ask the owner to
@@ -240,7 +272,9 @@ action, including opaque NEP-366 edits, for the owner to sign. The signature cov
 platform issued, so whoever fetched the nonce can relay it; the platform can't tell where it was signed. Whether a
 wallet shows the recipient, or refuses one that doesn't match the requesting page, is not checked. Consents belong to the deployment name, not to one credential: a
 credential issued again under the same deployment name acts on every consent that deployment holds.
-Scopes are separate: a consent carries each it needs. Agreements, invoices, compensation and work-order records are not
+The platform doesn't see the app's users: the app's own sign-in and roles decide which of its users act for which
+Organization, so a fault there acts within every consent the deployment holds (for `payout`, within the owner-signed
+policy). Scopes are separate: a consent carries each it needs. Agreements, invoices, compensation and work-order records are not
 reachable. Each
 consent, call and revocation is appended to `.app-access/access.jsonl`.
 
@@ -248,8 +282,8 @@ Limits: wallet owners only (DAO consent and DAO setup are not available, and `si
 are confidential USDC only (wNEAR withdrawn to NEAR is designed, not built); the owner can't revoke on the platform directly
 (the deployment or the operator can, and removing the signing key ends it once a call or `check-keys` observes the
 removal: a key removed and re-added with no call or sweep in between goes unnoticed); a wallet that signs a callback URL into
-NEP-413 can't consent; owner actions are limited to the list above, so the first payee edit, cap and asset changes
-and held-payout votes are signed on the platform, not through the app; a withheld intent stays open at the provider
+NEP-413 can't consent; owner actions are limited to the list above, and NEP-366 ones are signed on the platform's
+confirm page; a withheld or unsigned intent stays open at the provider
 until it expires, and an open policy intent blocks new agent creation until then (provider behavior, recorded in
 `.agents/skills/near-agent-api`; whether it also delays other policy edits is not checked); hosted agents are never released, and
 each is its own process, so setups (like self-service `/gw/agents`) can fill the host's 32-agent registry, each needing an
@@ -257,7 +291,9 @@ owner's signature; many Organizations need more hosts. Offline-tested (`test/app
 host, deployment, owner, key permission, revocation, browser credentials) was also removed by hand and the tests failed
 every time; that was a manual check, not part of the suite. Stack-tested with simulated provider, chain and wallet
 (`test/e2e/app-access.spec.mjs`, run-rq8nqz, 2026-10-26): reads, owner actions, refusals, a withheld NEP-366 edit,
-and hosted setup through creation and a grant. Not deployed; no live credentials.
+and hosted setup through creation and a grant; on 2026-10-27 (narrow run of that spec, Node 24.22.1) a NEP-366 policy
+edit reached the app only as a confirm link and was signed by the simulated wallet on the platform's page in a
+browser, and an owner's vote on a held payout was relayed by the app. Not deployed; no live credentials.
 
 ## State preservation and rollback
 

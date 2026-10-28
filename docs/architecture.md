@@ -72,7 +72,9 @@ existing domain calls. Submission remains centralized in dispatch.
 - **Gateway** (`gateway/`): sign-in decided per agent from its owner (`roles.ts`): a DAO's roles, or the
   owner account itself; which calls each role may
   make (`allowlist.ts`), and, for members, proposal decoding for "What am I voting on?" (`proposals.ts`, `sign-requests.ts`).
-- **Web** (`web/src/`): one app for both areas. `format.ts` `kindOf` uses the configured area, with a policy-based fallback for legacy instances; `beats.ts` holds each area's briefs, requirements and stages; `showcase.tsx` shows
+  App access (`app-access.ts`, `app-routes.ts`) serves `/apps/v1` to app servers; `app-confirm.ts` holds the NEP-366
+  owner actions apps prepare and serves the confirm page's two calls.
+- **Web** (`web/src/`): one app for both areas, plus the standalone confirm page (`confirm.tsx`, its own build entry). `format.ts` `kindOf` uses the configured area, with a policy-based fallback for legacy instances; `beats.ts` holds each area's briefs, requirements and stages; `showcase.tsx` shows
   them. `timeline-payment.tsx` and `timeline-run.tsx` follow one held payment or the latest autopilot
   run step by step, each step read from its own record; they show data only on the instance that holds
   those records (approvals filed there, evidence its executor wrote).

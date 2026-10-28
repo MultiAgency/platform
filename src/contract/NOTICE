@@ -2,3 +2,6 @@ MultiAgency SDK
 Copyright 2026 MultiAgency LLC
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes a bundled copy of the oRPC client and its dependencies, each under the MIT License; their notices are in
+THIRD-PARTY-NOTICES.

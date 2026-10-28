@@ -1,5 +1,4 @@
-import { createORPCClient, ORPCError } from "@orpc/client";
-import { RPCLink } from "@orpc/client/fetch";
+import { createORPCClient, ORPCError, RPCLink } from "./orpc-client.js";
 import type { z } from "zod";
 import { ownerOutputs, ownerStreams } from "./owner-outputs.js";
 import type { OwnerInputs } from "./owner-inputs.js";

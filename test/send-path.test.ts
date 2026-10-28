@@ -63,7 +63,7 @@ test("the permitted send is called only inside dispatch, and only once", () => {
 });
 
 // Known destructurings of a same-named field that is not a grant client method, each with its reason.
-const NOT_GRANT = new Map([["src/owner-requests.ts:policyRequest:swap", "a PolicyChanges field (the policy's swap rules), not a grant method"]]);
+const NOT_GRANT = new Map([["src/owner-requests.ts:policyChange:swap", "a PolicyChanges field (the policy's swap rules), not a grant method"]]);
 
 test("money methods and the grant factory are never taken out of their object by destructuring", () => {
   const found: string[] = [];

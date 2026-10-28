@@ -4,7 +4,8 @@ import { serveOwnerFrontend } from "./owner-frontend.js";
 import { providedCapabilities } from "../contract/owner-capabilities.js";
 import { resolveMachineManagement } from "./machine-authority.js";
 import { machineRoutes } from "./machine-routes.js";
-import { appRoutes } from "./app-routes.js";
+import { APP_ROOT, appRoutes, confirms } from "./app-routes.js";
+import { confirmRoutes } from "./app-confirm.js";
 import { payeeBase, supplierCookie, supplierEnvironment, payeeRoute } from "./hosted-supplier.js";
 import { demoHost, demoCrossSite, demoSession, invoiceRoute, assignedToHost } from "./demo-hosts.js";
 import { forwardRpc } from "./rpc-proxy.js";
@@ -150,9 +151,10 @@ const server = createServer(async (req, res) => {
 
     if (pathname === "/health") return json(res, 200, { ok: true });
 
-    if (!site && (pathname.startsWith("/machine/") || pathname.startsWith("/apps/") || pathname.startsWith("/gw/machine-credentials/") || pathname === "/gw/access-session")
+    if (!site && (pathname.startsWith("/machine/") || pathname.startsWith("/apps/") || pathname.startsWith("/confirm/") || pathname.startsWith("/gw/machine-credentials/") || pathname === "/gw/access-session")
       && req.headers.host?.toLowerCase() !== signingHost.toLowerCase()) return json(res, 421, { error: "Use the configured host for agent access" });
     if (await machineRoutes(req, res, pathname, signingHost, selected, () => auth.account(req), () => stopping)) return;
+    if (await confirmRoutes(req, res, pathname, signingHost, confirms, APP_ROOT, selected, DIST, () => stopping)) return;
     if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, config.selfService ? { setup: async ({ owner, area, deployment, organization }) => {
       if (site && !site.hostedAreas?.includes(area)) throw new Error("This area is not available on this host");
       return reserveHosted({ owner, kind: "wallet", area }, { deployment, organization });

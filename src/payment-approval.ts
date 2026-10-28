@@ -26,6 +26,7 @@ const requestHash = (terms: Terms) =>
  * a confidential transfer whose terms hash to the provider's request hash, to a payee, asset and
  * amount the applied policy allows. A payment this instance recorded must also match its record and
  * any invoice behind it must be unrevised. Anything that can't be verified refuses, with the reason.
+ * `terms` are the approved transfer's, proven against the provider's hash; null for a reject, which releases nothing.
  */
 export async function checkPaymentApproval(input: Pick<PaymentApproval, "approvalId" | "correlationId" | "verdict">, saved?: PaymentApproval) {
   const id = process.env.AGENT_ID;
@@ -45,6 +46,7 @@ export async function checkPaymentApproval(input: Pick<PaymentApproval, "approva
 
   // Rejecting releases nothing, so it needs no more than the identity checks above.
   let invoiceId: string | undefined;
+  let terms: { recipient: string; asset: string; amount: string } | null = null;
   if (approving) {
     if (approval.request_type !== "confidential") throw new AuthorizationHeld(`approving a ${approval.request_type} request is not supported`);
     const { to, token, amount } = approval.request_data as Partial<Record<keyof Terms, unknown>>;
@@ -52,6 +54,7 @@ export async function checkPaymentApproval(input: Pick<PaymentApproval, "approva
       throw new AuthorizationHeld("provider approval terms are incomplete: recipient, asset or amount missing");
     if (requestHash({ to, token, amount }) !== approval.request_hash)
       throw new AuthorizationHeld("provider approval terms don't match its request hash");
+    terms = { recipient: to, asset: token, amount };
 
     if (!view) throw new AuthorizationHeld("policy unavailable");
     const refusal = authorize({ method: "transfer", request: { recipient: to, asset: token, amount, confidential: true } },
@@ -78,5 +81,5 @@ export async function checkPaymentApproval(input: Pick<PaymentApproval, "approva
     }
   };
   assertCurrent();
-  return { binding, assertCurrent };
+  return { binding, assertCurrent, terms };
 }

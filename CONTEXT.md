@@ -359,10 +359,19 @@ one Organization, the agent and its provider ID, and its scopes, with an expiry 
 that the key is a full-access key of the configured owner, binds the consent to the agent's current provider ID, and
 re-checks ownership and the signing key on every call: once the chain reports the key removed (on a call or the operator's
 `check-keys` sweep), the consent is revoked for good. Scopes today: `read` (a fixed list of reads; no workflow records), `owner` (prepare, submit and follow owner actions,
-which only the owner's own wallet signature completes; limited to actions the owner can read when signing, NEP-413, or that
-platform code builds entirely) and `payout` (payout requests, their status and held payouts). Wallet owners
+which only the owner's own wallet signature completes; the app receives an intent only when it is NEP-413, and a NEP-366
+one only as a confirm page link) and `payout` (payout requests, their status, held payouts and a deposit address to fund the agent). Wallet owners
 only; DAO consent is not available yet. Revocable by the deployment or the operator; a revocation is a permanent tombstone. Offline-tested, not deployed or
 mainnet-observed. See docs/agent-access.md.
+
+
+**Confirm page**:
+The platform's own page, `/confirm/<token>`, where an owner signs a NEP-366 owner action an app prepared. The platform
+holds the intent and gives the app only the link; the page shows the agent's record of the action (requesting
+deployment and Organization, agent, and for a policy edit each field before and after) to whoever holds the link, and
+releases the bytes to sign only after the owner's key signs the link's readable text. It submits only the owner's
+signature over the held bytes, once, before the intent expires. Offline- and stack-tested with a simulated wallet, not
+deployed. See docs/agent-access.md.
 
 
 **App setup**:

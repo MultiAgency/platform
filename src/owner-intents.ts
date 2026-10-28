@@ -11,7 +11,7 @@ import { agentId, ENV_FILE, executes, saveEnv } from "./env.js";
 import { appendSynced, writeAtomic } from "./synced.js";
 
 import { type GrantLabel, grantRequest, promoteGrantToken, stageGrantToken } from "./grants.js";
-import { ownerRequests, type PolicyChanges, policyRequest } from "./owner-requests.js";
+import { ownerRequests, type PolicyChanges, policyChange } from "./owner-requests.js";
 import type { AgentRole } from "./policy.js";
 import { daoPolicy, nextProposalId } from "./chain.js";
 import { mandateDigest, type ReviewedPolicy } from "./mandate.js";
@@ -227,7 +227,7 @@ function hold(correlationId: string, prepared: Prepared) {
 
 async function build(
   action: OwnerAction,
-): Promise<{ request: Parameters<typeof api.generateIntent>[0]; grantToken?: string; releases?: string }> {
+): Promise<{ request: Parameters<typeof api.generateIntent>[0]; grantToken?: string; releases?: string; current?: Awaited<ReturnType<typeof policyChange>>["current"] }> {
   switch (action.type) {
     case "agent_create":
       // Onboarding creates the server's one agent; it never replaces a configured one.
@@ -243,7 +243,7 @@ async function build(
     case "grant_revoke":
       return { request: { type: "grant_revoke", agent_id: agentId(), grant_id: action.grantId } as const };
     case "policy_update":
-      return { request: await policyRequest(action.changes, action.expectedPolicy) };
+      return policyChange(action.changes, action.expectedPolicy);
     case "approval_vote": {
       const { approvalId, verdict, correlationId } = action;
       const request = { type: "approval_vote", agent_id: agentId(), approval_id: approvalId, verdict } as const;
@@ -268,11 +268,12 @@ export function prepare(action: OwnerAction, signer: Signer = "wallet") {
 async function prepareLocked(action: OwnerAction, signer: Signer) {
   if (process.env.HOSTED_OWNER && action.type === "agent_create" && [...pending.values()].some(p => p.type === "agent_create" && p.stage !== "settled"))
     throw new PublicError("Agent creation already has an open owner action. Follow its existing record before preparing another.");
-  const paymentApproval = action.type === "approval_vote" ? (await checkPaymentApproval(action)).binding : undefined;
+  const vote = action.type === "approval_vote" ? await checkPaymentApproval(action) : undefined;
+  const paymentApproval = vote?.binding;
   const owner = signer === "dao" ? await treasuryOwner() : undefined;
   if (action.type === "agent_create" && (owner ?? action.owner))
     checkHostedCreation((owner ?? action.owner)!, signer, action.role);
-  const { request, grantToken, releases } = await build(action.type === "agent_create" && owner ? { ...action, owner } : action);
+  const { request, grantToken, releases, current } = await build(action.type === "agent_create" && owner ? { ...action, owner } : action);
   const generated = await api.generateIntent(request, { idempotencyKey: crypto.randomUUID() });
   if (generated.type !== request.type) throw new Error("Provider generated a different owner intent type");
   if (paymentApproval && (generated.preview.approval?.approval_id !== paymentApproval.approvalId ||
@@ -281,7 +282,10 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
   // The mandate this signature asks for, as the server requested it. Whether the signed payload
   // commits to it is the API's to prove: a NEP-366 edit carries the policy encrypted.
   const digest = request.type === "policy_update" ? mandateDigest(request.policy) : null;
-  const base = { correlationId: generated.correlation_id, preview: generated.preview, expiresAt: generated.expires_at, digest };
+  // The policy this signature asks for, as this server built the request, and the one in force it replaces.
+  const policies = "policy" in request ? { current: current ?? null, requested: request.policy } : undefined;
+  const base = { correlationId: generated.correlation_id, preview: generated.preview, expiresAt: generated.expires_at, digest,
+    ...(policies && { policy: policies }), ...(paymentApproval && { payment: { ...paymentOf(paymentApproval)!, terms: vote!.terms } }) };
 
   if (!owner) {
     const wallet = { intent: generated.intent, signer: generated.signer };

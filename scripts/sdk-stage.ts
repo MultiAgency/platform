@@ -1,8 +1,9 @@
 // Stages @multiagency/sdk into a package directory from the same src/contract files Proto's handlers import. Used by
 // contract-pack.ts (the per-release-candidate tarball) and sdk-dev.ts (the local `link:` directory apps develop against).
 import { spawnSync } from "node:child_process";
+import { buildSync } from "esbuild";
 import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { z } from "zod";
 import * as contract from "../src/contract/index.js";
 
@@ -33,6 +34,31 @@ export function copyGuidance(staging: string) {
   for (const file of ["LICENSE", "NOTICE"]) cpSync(join(root, "src/contract", file), join(staging, file));
 }
 
+/**
+ * Replaces the emitted `orpc-client` re-export with one self-contained module: the SDK's own oRPC client and fetch link,
+ * with no bare `@orpc/*` import left for an app's bundler to share. Its types stay internal (no published declaration
+ * names them). Each bundled package's license goes into THIRD-PARTY-NOTICES.
+ */
+export function bundleOrpcClient(staging: string) {
+  const out = join(staging, "dist/contract/orpc-client.js");
+  const { metafile } = buildSync({ entryPoints: [join(root, "src/contract/orpc-client.ts")], outfile: out, bundle: true, format: "esm",
+    platform: "neutral", target: "es2023", mainFields: ["module", "main"], conditions: ["import"], legalComments: "inline",
+    allowOverwrite: true, metafile: true, logLevel: "error" });
+  rmSync(join(staging, "dist/contract/orpc-client.d.ts"), { force: true });
+  if (/(from|import)\s*\(?\s*["']@orpc\//.test(readFileSync(out, "utf8"))) throw new Error("The bundled oRPC client still imports @orpc/*");
+  const packages = new Set(Object.keys(metafile.inputs).flatMap(input => {
+    const match = input.match(/^(.*node_modules\/(?:@[^/]+\/)?[^/]+)\//);
+    return match ? [resolve(root, match[1]!)] : [];
+  }));
+  const notices = [...packages].sort().map(dir => {
+    const { name: pkg, version: release, license } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { name: string; version: string; license: string };
+    const text = readdirSync(dir).find(file => /^licen[cs]e/i.test(file));
+    if (!text) throw new Error(`${pkg} has no license file to carry`);
+    return `${pkg}@${release} (${license}), bundled in dist/contract/orpc-client.js\n\n${readFileSync(join(dir, text), "utf8").trim()}\n`;
+  });
+  writeFileSync(join(staging, "THIRD-PARTY-NOTICES"), notices.join("\n" + "-".repeat(78) + "\n\n"));
+}
+
 /** Builds `staging` (emptied first) and returns the repository files it was built from. */
 export function stage(staging: string, tsconfig: string) {
   rmSync(staging, { recursive: true, force: true }); mkdirSync(staging, { recursive: true });
@@ -40,6 +66,7 @@ export function stage(staging: string, tsconfig: string) {
   run(join(root, "node_modules/.bin/tsc"), ["-p", tsconfig]);
   const emitted = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? emitted(join(dir, e.name)) : [join(dir, e.name)]);
   const sources = emitted(join(staging, "dist")).filter(f => f.endsWith(".js")).map(f => join("src", relative(join(staging, "dist"), f)).replace(/\.js$/, ".ts")).sort();
+  bundleOrpcClient(staging);
 
   // The shared release asset server ships as-is: plain ESM with no dependencies.
   mkdirSync(join(staging, "bin")); cpSync(join(root, "src/contract/release-server.mjs"), join(staging, "bin/release-server.mjs"));
@@ -67,10 +94,10 @@ export function stage(staging: string, tsconfig: string) {
     exports: { ".": { types: "./dist/contract/index.d.ts", default: "./dist/contract/index.js" },
       "./payee": { types: "./dist/contract/payee-entry.d.ts", default: "./dist/contract/payee-entry.js" },
       "./schemas/*": "./schemas/*", "./release-server": { types: "./bin/release-server.d.mts", default: "./bin/release-server.mjs" } }, bin: { "proto-release-server": "bin/release-server.mjs" },
-    files: ["dist", "bin", "schemas", "skills", "!skills/_artifacts", "CHANGES.md", "README.md", "LICENSE", "NOTICE", "provenance.json"],
-    // The owner entry's oRPC and AG-UI are the SDK's own, so an app on another oRPC version keeps it. zod is the one peer:
-    // the app's schemas and the SDK's must be one instance.
-    dependencies: { "@orpc/client": dependencies["@orpc/client"], "@orpc/contract": dependencies["@orpc/contract"], "@ag-ui/core": dependencies["@ag-ui/core"] },
+    files: ["dist", "bin", "schemas", "skills", "!skills/_artifacts", "CHANGES.md", "README.md", "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES", "provenance.json"],
+    // The oRPC client is bundled (`bundleOrpcClient`); the contract objects and AG-UI are dependencies. zod is the one
+    // peer: the app's schemas and the SDK's must be one instance.
+    dependencies: { "@orpc/contract": dependencies["@orpc/contract"], "@ag-ui/core": dependencies["@ag-ui/core"] },
     peerDependencies: { zod: dependencies.zod } }, null, 2) + "\n");
   return sources;
 }

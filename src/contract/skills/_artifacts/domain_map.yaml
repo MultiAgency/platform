@@ -46,7 +46,7 @@ skills:
     description: 'Service credential, owner consents, relayed owner actions and payout requests by requestId with appClient.'
     type: 'core'
     covers: ['appClient', 'consentMessage', 'payouts/request', 'payouts/status']
-    tasks: ['connect an Organization''s agent with the owner''s consent', 'request a payout once and follow it after a lost reply']
+    tasks: ['connect an Organization''s agent with the owner''s consent', 'request a payout once and follow it after a lost reply', 'relay the owner''s vote on a held payout with the terms the platform proved', 'send the owner to the platform confirm page for a NEP-366 owner action']
     failure_modes:
       - mistake: 'Asking an owner to sign the platform sign-in text'
         mechanism: 'A signed sign-in is a full platform session that can send payouts without another signature.'

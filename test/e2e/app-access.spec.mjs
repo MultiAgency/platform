@@ -9,6 +9,7 @@ import { appClient } from '../../src/contract/app-client.ts';
 import { consentMessage, setupMessage } from '../../src/contract/app-consent.ts';
 import { environment } from './environment.mjs';
 import { BUILDER, OWNER, PUBLIC_KEY, USDC, sign } from './provider.mjs';
+import { browserContext } from './wallet.mjs';
 
 // An app deployment's server reaching the platform on the real stack: an operator-issued service credential, owner
 // consents and a hosted setup signed by the simulated wallet, then reads and owner actions through /apps/v1 with
@@ -56,7 +57,7 @@ async function connect(stack) {
   return { host, gateway, app, ownerSigned, ownerStep, consent, hostedAgent };
 }
 
-test('an app server reads and relays only readable or platform-built owner actions, and sets up a hosted agent', async ({}, info) => {
+test('an app server relays readable owner actions, sends NEP-366 ones to the platform confirm page, and sets up a hosted agent', async ({ browser }, info) => {
   test.setTimeout(180_000);
   const stack = await environment(info.outputPath('environment'), { secondAccount: true, accounts: [BUILDER], onChainPolicyEdits: true });
   const steps = [];
@@ -92,26 +93,53 @@ test('an app server reads and relays only readable or platform-built owner actio
     expect(stack.simulated.payoutPolicy()).toMatchObject({ revision: 3, policy: { budget: { daily_usd: '40', monthly_usd: '150' } } });
     steps.push('destination and budget edits (NEP-413), each signed by the owner');
 
-    // 4. Refused before the agent: provider-enforced edits, payees at creation, held-payout votes, DAO signing.
+    // 4. Refused before the agent: payees at creation, DAO signing.
     const before = intents();
-    for (const input of [{ action: { type: 'policy_update', expectedPolicy: await reviewed(), changes: { owner_approval: false } }, signer: 'wallet' },
-      { action: { type: 'agent_create', owner: { type: 'near', account_id: OWNER, public_key: PUBLIC_KEY }, role: 'payout', payees: [BUILDER] }, signer: 'wallet' },
-      { action: { type: 'approval_vote', approvalId: crypto.randomUUID(), verdict: 'approve', correlationId: 'c' }, signer: 'wallet' },
+    for (const input of [{ action: { type: 'agent_create', owner: { type: 'near', account_id: OWNER, public_key: PUBLIC_KEY }, role: 'payout', payees: [BUILDER] }, signer: 'wallet' },
       { action: { type: 'agent_freeze' }, signer: 'dao' }])
       expect(await payout.call('owner/prepare', input), JSON.stringify(input.action)).toMatchObject({ ok: false, kind: 'forbidden', source: 'gateway' });
     expect(intents(), 'nothing refused reached the provider').toBe(before);
-    steps.push('provider-enforced edit, payees at creation, approval vote and DAO signer refused before the agent');
+    steps.push('payees at creation and the DAO signer refused before the agent');
 
-    // 5. Removing the last payee also turns transfers off (provider-enforced `actions`): the provider makes it NEP-366,
-    //    so the prepared intent is withheld and the policy is unchanged.
-    expect(await payout.call('owner/prepare', { action: { type: 'policy_update', expectedPolicy: await reviewed(), changes: { destinations: [] } }, signer: 'wallet' }))
-      .toMatchObject({ ok: false, kind: 'forbidden', source: 'gateway' });
-    expect(intents(), 'the agent did prepare it').toBe(before + 1);
+    // 5. A provider-enforced edit (`owner_approval` off) comes back NEP-366: the app gets only a confirm link, and the
+    //    owner signs it on the platform's page, which shows the platform's record of the edit.
+    const held = value(await payout.call('owner/prepare', { action: { type: 'policy_update', expectedPolicy: await reviewed(), changes: { owner_approval: false } }, signer: 'wallet' }));
     expect(stack.simulated.intents.at(-1).intent.standard).toBe('nep366');
-    expect(stack.simulated.payoutPolicy().revision).toBe(3);
+    expect(held.intent, 'the app never holds the delegate bytes').toBeUndefined();
+    expect(held.confirm.url.slice(`https://${host}/confirm/`.length)).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    expect(held.confirm.url.startsWith(`https://${host}/confirm/`)).toBe(true);
+    // The app holds the link too: it reads the terms there, never the bytes, and can't submit the action itself.
+    const linkView = await (await localFetch(held.confirm.url.replace('/confirm/', '/confirm/v1/'))).json();
+    expect(linkView).toMatchObject({ type: 'policy_update', state: 'open', policy: { current: { owner_approval: true }, requested: { owner_approval: false } } });
+    expect(linkView.intent).toBeUndefined();
+    expect(await payout.call('owner/submit', { correlationId: held.correlationId, signedData: { standard: 'nep366' } }))
+      .toMatchObject({ ok: false, kind: 'forbidden', source: 'gateway' });
+    const wallet = await browserContext(browser, stack, OWNER);
+    try {
+      const page = await wallet.context.newPage();
+      await page.goto(held.confirm.url);
+      await expect(page.getByRole('heading', { name: "Change the agent's policy" })).toBeVisible();
+      await expect(page.getByText('owner_approval', { exact: true })).toBeVisible();
+      await expect(page.getByText('After signing')).toBeVisible();
+      await expect(page.getByText(/App deployment local asks owner\.near/)).toBeVisible();
+      // The owner's wallet may already be connected; otherwise connect it, choosing it if near-connect asks.
+      const sign = page.getByRole('button', { name: 'Sign and submit' }), connect = page.getByRole('button', { name: `Connect ${OWNER}` });
+      await expect(sign.or(connect)).toBeVisible();
+      if (await connect.isVisible()) {
+        await connect.click();
+        const chooser = page.getByText('Local test wallet', { exact: true });
+        await Promise.race([chooser.waitFor().then(() => chooser.click()).catch(() => {}), sign.waitFor()]);
+      }
+      await sign.click();
+      await expect(page.getByText(/Submitted\. The app follows the outcome/)).toBeVisible();
+      expect(wallet.signatures.filter(s => s.delegate)).toHaveLength(1);
+      expect(wallet.signatures.filter(s => !s.delegate).map(s => s.message.split('\n')[0]), 'first the link\'s readable text').toEqual(['Open a MultiAgency confirm page.']);
+    } finally { await wallet.context.close(); }
+    await expect.poll(async () => value(await payout.call('owner/status', { correlationId: held.correlationId })).status).toBe('SUCCESS');
+    expect(stack.simulated.payoutPolicy()).toMatchObject({ revision: 4, policy: { owner_approval: false } });
     const log = readFileSync(join(gateway, '.app-access/access.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
-    expect(log.filter(l => l.event === 'withheld')).toEqual([expect.objectContaining({ action: 'policy_update', correlationId: stack.simulated.intents.at(-1).correlation_id })]);
-    steps.push('a destinations edit the provider made NEP-366 was withheld and logged');
+    expect(log.filter(l => ['confirm', 'confirmed'].includes(l.event)).map(l => [l.event, l.correlationId])).toEqual([['confirm', held.correlationId], ['confirmed', held.correlationId]]);
+    steps.push("a NEP-366 edit reached the app only as a confirm link; the owner signed it on the platform's page and it applied");
 
     // 6. Hosted setup: the owner's signed setup reserves this Organization's own payables agent, beside the owner's
     //    configured one; the setup consent relays its creation.
@@ -146,9 +174,8 @@ test('an app server reads and relays only readable or platform-built owner actio
 
 test('an app requests a payout once under its requestId, follows it by requestId, and a lost reply is never resent', async ({}, info) => {
   test.setTimeout(180_000);
-  // Policy edits stay NEP-413 in this environment, so the Organization's first payee is a fixture step here. Per the
-  // provider's docs that edit is signed on chain, which an app can't relay (the first test shows it withheld); the owner
-  // signs it on the platform.
+  // The payout agent starts with transfers on and no payees, so its first payee changes only `destinations`: NEP-413 per
+  // the provider's docs, relayed by the app. The first test shows an on-chain edit going through the confirm page.
   const stack = await environment(info.outputPath('environment'), { secondAccount: true, accounts: [BUILDER] });
   const steps = [];
   try {
@@ -160,8 +187,10 @@ test('an app requests a payout once under its requestId, follows it by requestId
     await ownerStep(agent, { type: 'grant_issue', label: 'invoices' });
     const reviewed = async () => { const o = value(await agent.call('overview')); return { revision: o.policy.revision, digest: o.digest }; };
     await ownerStep(agent, { type: 'policy_update', expectedPolicy: await reviewed(), changes: { destinations: [{ address: BUILDER, confidential: true }] } });
+    const deposit = value(await agent.call('deposit'));
+    expect(deposit.address, 'the app takes a deposit address to fund the agent').toBeTruthy();
     stack.simulated.fund(created, 10_000_000n);
-    steps.push("setup: the Organization's own payout agent, its grant and payee (owner signatures) and funding (simulated)");
+    steps.push("setup: the Organization's own payout agent, its grant and payee (owner signatures), a deposit address through the app, and funding (simulated)");
 
     const ask = async (requestId, amount = '2000000') =>
       agent.call('payouts/request', { requestId, asset: USDC, delivery: 'intents', recipient: BUILDER, amount, expectedPolicy: await reviewed() });
@@ -179,6 +208,19 @@ test('an app requests a payout once under its requestId, follows it by requestId
     expect(value(await ask('wo-2'))).toMatchObject({ requestId: 'wo-2', state: 'refused', code: 'duplicate_held_payout' });
     expect(stack.simulated.transfers).toHaveLength(1);
     steps.push('a second request with the same payee and amount, while the first is held, is refused before sending');
+
+    // The owner's vote, relayed by the app: prepared with the payout's terms as the platform proved them, signed by the
+    // owner; the provider settles the released payout (simulated) and nothing is sent again.
+    const { approvalId } = value(await agent.call('held')).find(h => h.correlationId === first.correlationId);
+    const vote = value(await agent.call('owner/prepare', { action: { type: 'approval_vote', approvalId, verdict: 'approve', correlationId: first.correlationId }, signer: 'wallet' }));
+    expect(vote.payment).toEqual({ correlationId: first.correlationId, verdict: 'approve', terms: { recipient: BUILDER, asset: USDC, amount: '2000000' } });
+    expect(vote.intent.standard).toBe('nep413');
+    const signed = await sign(OWNER, vote.intent.payload);
+    value(await agent.call('owner/submit', { correlationId: vote.correlationId, signedData: { ...vote.intent, public_key: signed.publicKey, signature: signed.signature } }));
+    stack.simulated.settle(first.correlationId);
+    await expect.poll(async () => value(await agent.call('payouts/status', { requestId: 'wo-1' })).state).toBe('succeeded');
+    expect(stack.simulated.transfers).toHaveLength(1);
+    steps.push("the owner's vote, relayed by the app with the proven terms, released the held payout once");
 
     // A lost reply: the provider accepted the transfer, and its answer never arrived.
     stack.simulated.dropTransferResponse();

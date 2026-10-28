@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
 import { createGrantCredential, grantCommitment } from '@near-intents-agent-api/sdk';
-import { Near, parseKey } from 'near-kit';
+import { DelegateAction, encodeSignedDelegateAction, Near, parseKey, serializeDelegateAction } from 'near-kit';
 import { rawKey } from '../../src/nep413.ts';
 
 // Generated for each local environment. Never load application credentials or funded keys.
@@ -27,6 +27,17 @@ const daoPolicy = { proposal_bond: '100000000000000000000000', default_vote_poli
 export async function sign(account, payload) {
   const near = new Near({ network: 'mainnet', privateKey: TEST_KEY, defaultSignerId: account });
   return { accountId: account, ...await near.signMessage({ ...payload, nonce: Buffer.from(payload.nonce, 'base64') }) };
+}
+/** A wallet signing a delegate action (NEP-366) with the local test key, in the base64 transport form. */
+export function signDelegate(account, { receiverId, actions }) {
+  const key = parseKey(TEST_KEY), publicKey = key.publicKey;
+  const calls = actions.map(({ params }) => ({ functionCall: { methodName: params.methodName, args: new TextEncoder().encode(JSON.stringify(params.args)),
+    gas: BigInt(params.gas), deposit: BigInt(params.deposit) } }));
+  const action = new DelegateAction(account, receiverId, calls, 1n, 1_000_000n, publicKey);
+  const signature = key.sign(createHash('sha256').update(serializeDelegateAction(action)).digest());
+  return encodeSignedDelegateAction({ signedDelegate: {
+    delegateAction: { senderId: account, receiverId, actions: calls, nonce: 1n, maxBlockHeight: 1_000_000n, publicKey: { ed25519Key: { data: Array.from(publicKey.data) } } },
+    signature: { ed25519Signature: { data: Array.from(signature.data) } } } });
 }
 export const listen = server => new Promise((resolve, reject) => {
   server.once('error', reject);

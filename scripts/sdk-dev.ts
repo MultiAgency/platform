@@ -1,6 +1,7 @@
 // The local @multiagency/sdk apps develop against: `packages/sdk`, linked with pnpm `link:`. It is staged once (package.json,
 // bin, JSON Schemas); then `dist` is kept current by the compiler in watch mode, and the skills and change notes are
-// recopied when they change. Rerun after changing a JSON-Schema-exported schema or the release server.
+// recopied when they change. Rerun after changing a JSON-Schema-exported schema or the release server. Staging bundles the
+// oRPC client as the published package does; once the compiler re-emits it, it resolves this repository's copy instead.
 // Usage: pnpm sdk:dev            (stage, then watch)
 //        pnpm sdk:dev --once     (stage only)
 import { spawn } from "node:child_process";

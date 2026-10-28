@@ -1,18 +1,20 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createServer, request, type Server } from "node:http";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { generateKey, Near, type PrivateKey } from "near-kit";
+import { DelegateAction, encodeSignedDelegateAction, generateKey, Near, parsePublicKey, serializeDelegateAction, type PrivateKey } from "near-kit";
 import { consentMessage, parseConsentMessage, parseSetupMessage, setupMessage } from "../src/contract/app-consent.js";
 import { AppConsents, AppCredentials, MAX_CONSENTS_PER_DEPLOYMENT, sweepConsentKeys, verifyConsent, verifySetup, type VerifiedConsent } from "../src/gateway/app-access.js";
-import { appRoutes, type HostedSetup } from "../src/gateway/app-routes.js";
+import { APP_ROOT, appRoutes, confirms, type HostedSetup } from "../src/gateway/app-routes.js";
+import { AppConfirms, confirmRoutes } from "../src/gateway/app-confirm.js";
 import { appClient } from "../src/contract/app-client.js";
 import { BadRequest, sendFailure } from "../src/http.js";
 import { daoPolicy } from "../src/chain.js";
+import { payoutPolicy } from "../src/policy.js";
 import { AuthorityUnanswered, resolveMachineAccess, resolveWalletAuthority } from "../src/gateway/machine-authority.js";
 import { chainKeyState, type KeyLookup, type KeyState, type KeyStateLookup } from "../src/signin.js";
 
@@ -32,6 +34,24 @@ async function signed(message: string, account = "owner.near", recipient = HOST)
 const refusal = async (promise: Promise<unknown>, pattern: RegExp) => {
   await assert.rejects(promise, (error: unknown) => error instanceof BadRequest && pattern.test(error.message));
 };
+
+/** A prepared owner intent as the agent server answers it; NEP-366 is a freeze delegate signed by `DELEGATE_KEY`. */
+const DELEGATE_KEY = generateKey();
+const DELEGATE_INTENT = { standard: "nep366", payload: { receiverId: "outlayer.near",
+  actions: [{ type: "FunctionCall", params: { methodName: "freeze_wallet", args: { wallet_pubkey: "w" }, gas: "30000000000000", deposit: "0" } }] } };
+const preparedReply = (standard: string, correlationId = "c-1", expiresAt = later(0.005), policy?: object) => JSON.stringify({ json: { correlationId,
+  preview: { summary: "s" }, expiresAt, digest: null, ...(policy && { policy }), signer: { type: "near", account_id: "owner.near", public_key: DELEGATE_KEY.publicKey.toString() },
+  intent: standard === "nep413" ? { standard, payload: { message: "m", recipient: "r", nonce: "n" } } : standard === "nep366" ? DELEGATE_INTENT : { standard, payload: {} } } });
+/** The owner's wallet signing a delegate action: by default exactly `DELEGATE_INTENT`. */
+function signDelegate({ methodName = "freeze_wallet", signer = DELEGATE_KEY }: { methodName?: string; signer?: ReturnType<typeof generateKey> } = {}) {
+  const publicKey = parsePublicKey(signer.publicKey.toString());
+  const functionCall = { functionCall: { methodName, args: new TextEncoder().encode('{"wallet_pubkey":"w"}'), gas: 30_000_000_000_000n, deposit: 0n } };
+  const action = new DelegateAction("owner.near", "outlayer.near", [functionCall], 5n, 100n, publicKey);
+  const signature = signer.sign(createHash("sha256").update(serializeDelegateAction(action)).digest());
+  return { ...DELEGATE_INTENT, signed_delegate: encodeSignedDelegateAction({ signedDelegate: {
+    delegateAction: { senderId: "owner.near", receiverId: "outlayer.near", actions: [functionCall], nonce: 5n, maxBlockHeight: 100n, publicKey: { ed25519Key: { data: Array.from(publicKey.data) } } },
+    signature: { ed25519Signature: { data: Array.from(signature.data) } } } } as never) };
+}
 
 test("a consent text is accepted only in its exact canonical form", () => {
   const text = consentMessage(fields({ scopes: ["read"] }));
@@ -111,14 +131,16 @@ function call(port: number, path: string, method = "GET", token?: string, body?:
 async function routeHarness(t: import("node:test").TestContext) {
   const cwd = process.cwd(), dir = mkdtempSync(join(tmpdir(), "app-routes-")); process.chdir(dir);
   const state = { providerId: "provider-id" as string | null, dao: false, keys: (async () => "FullAccess") as KeyStateLookup,
-    setup: undefined as HostedSetup | undefined, agentDown: false, reply: { status: 200, body: '{"json":{"ok":true}}' } };
-  const forwarded: { headers: Record<string, unknown>; path: string }[] = [];
-  const upstream = createServer((req, res) => { req.resume(); req.on("end", () => {
-    forwarded.push({ headers: req.headers, path: req.url! }); res.writeHead(state.reply.status, { "content-type": "application/json" }); res.end(state.reply.body);
+    setup: undefined as HostedSetup | undefined, agentDown: false, stopping: false, reply: { status: 200, body: '{"json":{"ok":true}}' } };
+  const forwarded: { headers: Record<string, unknown>; path: string; body: string }[] = [];
+  const upstream = createServer((req, res) => { let body = ""; req.on("data", chunk => body += chunk); req.on("end", () => {
+    forwarded.push({ headers: req.headers, path: req.url!, body }); res.writeHead(state.reply.status, { "content-type": "application/json" }); res.end(state.reply.body);
   }); });
   const agent = { name: "payout", owner: "owner.near", port: await listen(upstream), area: "payables" as const, executor: true };
+  writeFileSync(join(dir, "confirm.html"), "<!doctype html><title>Confirm</title>");
   const server = createServer(async (req, res) => { try {
-    if (!await appRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, [agent], () => false,
+    if (await confirmRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, confirms, APP_ROOT, [agent], dir, () => state.stopping)) return;
+    if (!await appRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, [agent], () => state.stopping,
       { keyState: (account, key) => state.keys(account, key), ...(state.setup && { setup: state.setup }) })) { res.writeHead(404); res.end("{}"); }
   } catch (e) { sendFailure(res, e); } });
   const port = await listen(server);
@@ -196,8 +218,9 @@ test("the app route needs the deployment's credential and a live owner consent, 
 });
 
 test("an owner consent lets the app prepare and submit wallet-signed owner actions, and nothing else", async t => {
-  const { port, forwarded, staging, rpc, consent } = await routeHarness(t);
+  const { port, state, forwarded, staging, rpc, consent } = await routeHarness(t);
   const prepare = (signer: string) => call(port, rpc("org_1", "owner/prepare"), "POST", staging, { json: { action: { type: "agent_freeze" }, signer } });
+  state.reply.body = preparedReply("nep413");
   assert.equal((await consent({ scopes: ["owner"] })).status, 201);
   assert.equal((await prepare("wallet")).status, 200);
   assert.equal(forwarded.at(-1)!.path, "/rpc/owner/prepare");
@@ -212,7 +235,7 @@ test("an owner consent lets the app prepare and submit wallet-signed owner actio
   assert.equal(forwarded.length, before, "nothing refused was forwarded");
 });
 
-test("the app prepares only what the owner can read or the platform built, and releases a policy edit only if it's readable", async t => {
+test("the app prepares the owner actions an app may ask for; a readable intent reaches it, a NEP-366 one becomes a confirm link", async t => {
   const { port, state, forwarded, staging, rpc, consent } = await routeHarness(t);
   const given = await consent({ scopes: ["owner"] });
   assert.equal(given.status, 201);
@@ -220,43 +243,130 @@ test("the app prepares only what the owner can read or the platform built, and r
   const prepare = (action: object, meta?: unknown[]) => call(port, rpc("org_1", "owner/prepare"), "POST", staging, { json: { action, signer: "wallet" }, ...(meta && { meta }) });
   const expectedPolicy = { revision: 3, digest: `sha256:${"0".repeat(64)}` };
   const edit = (changes: object) => ({ type: "policy_update", expectedPolicy, changes });
-  const intent = (standard: string, correlationId = "c-1") => JSON.stringify({ json: { correlationId, preview: { summary: "s" }, expiresAt: "x", digest: null,
-    intent: { standard, payload: {} } } });
 
-  state.reply.body = intent("nep413");
+  state.reply.body = preparedReply("nep413");
   for (const action of [{ type: "agent_create", owner: owner() }, { type: "agent_create", owner: owner(), role: "payout", payees: [] }, { type: "agent_freeze" }, { type: "agent_unfreeze" },
     { type: "grant_issue", label: "payout" }, { type: "grant_revoke", grantId: "g" },
-    edit({ destinations: [{ address: "payee.near", confidential: true }] }), edit({ budget: { daily_usd: "10", weekly_usd: null, monthly_usd: null } })])
+    edit({ destinations: [{ address: "payee.near", confidential: true }] }), edit({ budget: { daily_usd: "10", weekly_usd: null, monthly_usd: null } }),
+    edit({ swap: true }), edit({ assets: "any" }), edit({ owner_approval: false }), edit({ max_actions_per_hour: 100 }), edit({ limits: { daily: { usdc: "1" } } }),
+    { type: "approval_vote", approvalId: crypto.randomUUID(), verdict: "approve", correlationId: "c" }])
     assert.equal((await prepare(action)).status, 200, JSON.stringify(action));
   assert.equal((await prepare(edit({ budget: { daily_usd: "10", weekly_usd: null, monthly_usd: null }, swap: null }), [["undefined", "action", "changes", "swap"]])).status, 200,
     "serializer metadata is read as the agent server reads it: undefined leaves a field unchanged");
+  const readable = await prepare(edit({ owner_approval: false }));
+  assert.deepEqual(readable.body, JSON.parse(state.reply.body), "a readable intent is released unchanged");
 
   const before = forwarded.length;
   for (const action of [{ type: "agent_create", owner: owner(), payees: ["payee.near"] }, { type: "agent_create" },
-    { type: "agent_create", owner: owner(`ed25519:${"1".repeat(44)}`) }, { type: "approval_vote", approvalId: crypto.randomUUID(), verdict: "approve", correlationId: "c" },
-    edit({ swap: true }), edit({ assets: "any" }), edit({ owner_approval: false }), edit({ max_actions_per_hour: 100 }), edit({ limits: { daily: { usdc: "1" } } }),
-    edit({ budget: { daily_usd: "10", weekly_usd: null, monthly_usd: null }, owner_approval: false }), { type: "agent_delete" }])
+    { type: "agent_create", owner: owner(`ed25519:${"1".repeat(44)}`) }, { type: "agent_delete" }])
     assert.equal((await prepare(action)).status, 403, JSON.stringify(action));
   assert.equal((await prepare(edit({}), [["date", "action", "changes", "assets"]])).status, 403, "metadata naming a field that isn't there is refused");
   assert.equal(forwarded.length, before, "nothing refused was forwarded");
 
-  state.reply.body = intent("nep366", "c-opaque");
-  const opaque = await prepare(edit({ destinations: [{ address: "payee.near", confidential: true }] }));
-  assert.equal(opaque.status, 403, "a destinations edit the provider made on-chain isn't released");
-  assert.equal(JSON.stringify(opaque.body).includes("c-opaque"), false, "nor is its identity");
-  assert.equal(forwarded.length, before + 1);
-  assert.equal((await prepare({ type: "grant_issue" })).status, 403, "a grant must come back readable too");
-  assert.equal((await prepare({ type: "agent_freeze" })).status, 200, "the platform built all of a freeze");
-  state.reply.body = intent("nep413", "c-readable");
-  const readable = await prepare(edit({ budget: { daily_usd: "5", weekly_usd: null, monthly_usd: null } }));
-  assert.deepEqual([readable.status, readable.body], [200, JSON.parse(intent("nep413", "c-readable"))], "a readable edit is released unchanged");
+  for (const [action, id] of [[edit({ owner_approval: false }), "c-edit"], [{ type: "agent_freeze" }, "c-freeze"], [{ type: "agent_create", owner: owner(), role: "payout" }, "c-create"]] as const) {
+    state.reply.body = preparedReply("nep366", id);
+    const held = await prepare(action);
+    assert.equal(held.status, 200, JSON.stringify(action));
+    assert.equal(held.body.json.correlationId, id);
+    assert.match(held.body.json.confirm.url, new RegExp(`^https://${HOST}/confirm/[A-Za-z0-9_-]{22}$`));
+    assert.equal(held.body.json.intent, undefined, "the app never receives NEP-366 bytes");
+    assert.equal(JSON.stringify(held.body).includes("outlayer.near"), false);
+  }
+  state.reply.body = preparedReply("eip712", "c-other");
+  assert.equal((await prepare({ type: "agent_freeze" })).status, 403, "an intent the platform can't show the owner isn't released");
   state.reply = { status: 409, body: '{"json":{"defined":false,"code":"CONFLICT","status":409,"message":"open"}}' };
   assert.equal((await prepare(edit({}))).status, 409, "the agent's refusals pass through");
   state.reply = { status: 200, body: "not json" };
   assert.equal((await prepare(edit({}))).status, 502, "an unreadable reply isn't released");
 
   const log = readFileSync(join(".app-access", "access.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
-  assert.deepEqual(log.filter(l => l.event === "withheld").map(l => [l.action, l.correlationId]), [["policy_update", "c-opaque"], ["grant_issue", "c-opaque"]]);
+  assert.deepEqual(log.filter(l => ["confirm", "withheld"].includes(l.event)).map(l => [l.event, l.action, l.correlationId]),
+    [["confirm", "policy_update", "c-edit"], ["confirm", "agent_freeze", "c-freeze"], ["confirm", "agent_create", "c-create"], ["withheld", "agent_freeze", "c-other"]]);
+});
+
+/** A POST whose body arrives `delay` ms after its headers, so two can be read concurrently. */
+function slowPost(port: number, path: string, body: object, delay: number) {
+  return new Promise<number>((resolve, reject) => {
+    const text = JSON.stringify(body);
+    const req = request({ host: "127.0.0.1", port, path, method: "POST", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(text) } },
+      res => { res.resume(); res.on("end", () => resolve(res.statusCode!)); });
+    req.on("error", reject); req.flushHeaders(); setTimeout(() => req.end(text), delay);
+  });
+}
+/** The owner key's NEP-413 signature over a link's opening text, as the page asks the wallet for it. */
+async function openingSignature(opening: { message: string; recipient: string; nonce: string }, key = DELEGATE_KEY) {
+  const near = new Near({ network: "mainnet", privateKey: key.secretKey as PrivateKey, defaultSignerId: "owner.near" });
+  const signed = await near.signMessage({ message: opening.message, recipient: opening.recipient, nonce: Buffer.from(opening.nonce, "base64") });
+  return { signature: signed.signature };
+}
+
+test("a confirm link shows the agent's record; the bytes go only to the owner's key, and only its signature over them submits, once", async t => {
+  const { port, state, forwarded, staging, rpc, consent } = await routeHarness(t);
+  assert.equal((await consent({ scopes: ["owner"] })).status, 201);
+  const current = payoutPolicy(["payee.near"]), requested = { ...current, owner_approval: false };
+  state.reply.body = preparedReply("nep366", "c-edit", undefined, { current, requested });
+  const held = await call(port, rpc("org_1", "owner/prepare"), "POST", staging,
+    { json: { action: { type: "policy_update", expectedPolicy: { revision: 3, digest: `sha256:${"0".repeat(64)}` }, changes: { owner_approval: false } }, signer: "wallet" } });
+  const path = new URL(held.body.json.confirm.url).pathname, api = path.replace("/confirm/", "/confirm/v1/");
+  assert.equal(await (await httpFetch(`http://127.0.0.1:${port}${path}`)).text(), "<!doctype html><title>Confirm</title>", "the page is the platform's own");
+
+  // Anyone holding the link, the app included, reads the terms but not the bytes to sign.
+  const view = await call(port, api);
+  assert.deepEqual([view.status, view.body.deployment, view.body.organization, view.body.agent, view.body.type, view.body.policy, view.body.state],
+    [200, "staging", "org_1", "payout", "policy_update", { current, requested }, "open"]);
+  assert.equal(view.body.intent, undefined);
+  assert.equal(JSON.stringify(view.body).includes("outlayer.near"), false);
+  const lines = view.body.opening.message.split("\n");
+  assert.equal(lines[0], "Open a MultiAgency confirm page.");
+  assert.match(lines[1], new RegExp(`^Sign this only on https://${HOST}/confirm/\\. If any other page asks you to sign it, refuse`), "the wallet shows the warning");
+  assert.deepEqual(lines.slice(3), ["App deployment: staging", "Organization: org_1", "Agent: payout", "Action: policy_update", `Expires: ${view.body.expiresAt}`]);
+  assert.equal(view.body.opening.recipient, HOST);
+
+  const before = forwarded.length;
+  const viaApp = await call(port, rpc("org_1", "owner/submit"), "POST", staging, { json: { correlationId: "c-edit", signedData: signDelegate() } });
+  assert.equal(viaApp.status, 403, "the app can't submit an action held for the confirm page");
+  assert.equal((await call(port, `${api}/open`, "POST", undefined, await openingSignature(view.body.opening, generateKey()))).status, 403, "another key doesn't open it");
+  assert.equal((await call(port, `${api}/open`, "POST", undefined, await openingSignature({ ...view.body.opening, message: "{}" }))).status, 403,
+    "nor the owner's signature over another text");
+  const opened = await call(port, `${api}/open`, "POST", undefined, await openingSignature(view.body.opening));
+  assert.deepEqual([opened.status, opened.body.intent], [200, DELEGATE_INTENT], "the owner's signature over the link's text releases the bytes");
+
+  const submit = (signedData: object) => call(port, api, "POST", undefined, { signedData });
+  assert.equal((await submit(signDelegate({ methodName: "unfreeze_wallet" }))).status, 400, "a signature over other bytes is refused here");
+  assert.equal((await submit(signDelegate({ signer: generateKey() }))).status, 400, "so is another key's");
+  assert.equal(forwarded.length, before, "nothing reached the agent");
+  assert.equal((await call(port, api)).body.state, "open", "and the link stays usable");
+
+  state.reply.body = JSON.stringify({ json: { status: "SUCCESS" } });
+  const statuses = await Promise.all([slowPost(port, api, { signedData: signDelegate() }, 100), slowPost(port, api, { signedData: signDelegate() }, 150)]);
+  assert.deepEqual(statuses.sort(), [200, 409], "two submissions read together: one is forwarded");
+  const submits = forwarded.slice(before).filter(f => f.path === "/rpc/owner/submit");
+  assert.equal(submits.length, 1);
+  assert.equal(submits[0]!.headers["x-gateway-actor"], "app:staging:org_1");
+  assert.equal(JSON.parse(submits[0]!.body).json.correlationId, "c-edit");
+  const again = await submit(signDelegate());
+  assert.deepEqual([again.status, again.body.error], [409, "A submission was already made from this link. The app follows its outcome; if it failed, the app prepares the action again."]);
+  assert.equal((await call(port, `${api}/open`, "POST", undefined, await openingSignature(view.body.opening))).status, 409, "a used link releases nothing more");
+  assert.equal((await call(port, api)).body.state, "submitted");
+
+  state.reply.body = JSON.stringify({ json: { status: "SUCCESS" } });
+  assert.equal((await call(port, rpc("org_1", "owner/submit"), "POST", staging, { json: { correlationId: "c-readable", signedData: {} } })).status, 200,
+    "an action not held here is the app's to submit");
+  assert.equal((await call(port, "/confirm/v1/AAAAAAAAAAAAAAAAAAAAAA")).status, 404);
+  writeFileSync(join(".app-access", "confirm", `${"0".repeat(64)}.json`), "{not json");
+  assert.equal((await call(port, rpc("org_1", "owner/submit"), "POST", staging, { json: { correlationId: "c-other", signedData: {} } })).status, 200,
+    "an unreadable confirm record doesn't stop other submissions");
+  assert.equal((await call(port, rpc("org_1", "owner/submit"), "POST", staging, { json: { correlationId: "c-edit", signedData: signDelegate() } })).status, 403,
+    "and a held action stays refused");
+  state.reply.body = preparedReply("nep366", "c-late", new Date(Date.now() - 1000).toISOString());
+  const late = await call(port, rpc("org_1", "owner/prepare"), "POST", staging, { json: { action: { type: "agent_freeze" }, signer: "wallet" } });
+  const lateApi = new URL(late.body.json.confirm.url).pathname.replace("/confirm/", "/confirm/v1/");
+  const lateView = await call(port, lateApi);
+  assert.deepEqual([lateView.body.state, lateView.body.policy], ["expired", null]);
+  assert.equal((await call(port, `${lateApi}/open`, "POST", undefined, await openingSignature(lateView.body.opening))).status, 410);
+  assert.equal((await call(port, lateApi, "POST", undefined, { signedData: signDelegate() })).status, 410);
+  const log = readFileSync(join(".app-access", "access.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+  assert.deepEqual(log.filter(l => l.event === "confirmed").map(l => l.correlationId), ["c-edit"]);
 });
 
 /** The harness mocks global fetch for chain and provider reads, so the client reaches the gateway over node:http. */
@@ -294,20 +404,17 @@ test("the app client reaches its routes with the deployment credential and keeps
   assert.deepEqual(await payout.call("owner/status", { correlationId: "c" }), { ok: true, value: { stage: "submitted", status: "SUCCESS" } });
   assert.equal(forwarded.at(-1)!.headers["x-gateway-actor"], "app:staging:org_1");
   assert.equal(forwarded.at(-1)!.headers.authorization, undefined, "the credential never reaches the agent");
-  const prepared = (standard: string) => JSON.stringify({ json: { correlationId: "c-1", preview: { summary: "s" }, expiresAt: "x", digest: null,
-    intent: standard === "nep413" ? { standard, payload: { message: "m", recipient: "r", nonce: "n" } }
-      : { standard, payload: { receiverId: "outlayer.near", actions: [] } } } });
   const expectedPolicy = { revision: 3, digest: `sha256:${"0".repeat(64)}` };
-  state.reply.body = prepared("nep413");
+  state.reply.body = preparedReply("nep413");
   const readable = await payout.call("owner/prepare", { action: { type: "policy_update", expectedPolicy, changes: { budget: { daily_usd: "5", weekly_usd: null, monthly_usd: null } } }, signer: "wallet" });
   assert.equal(readable.ok && readable.value.intent?.standard, "nep413");
-  state.reply.body = prepared("nep366");
-  const withheld = await payout.call("owner/prepare", { action: { type: "policy_update", expectedPolicy, changes: { destinations: [] } }, signer: "wallet" });
-  assert.deepEqual(withheld.ok === false && [withheld.kind, "source" in withheld && withheld.source], ["forbidden", "gateway"]);
+  state.reply.body = preparedReply("nep366");
+  const held = await payout.call("owner/prepare", { action: { type: "policy_update", expectedPolicy, changes: { owner_approval: false } }, signer: "wallet" });
+  assert.ok(held.ok && held.value.confirm && held.value.intent === undefined, "a NEP-366 intent answers a confirm link, typed, without its bytes");
   const before = forwarded.length;
-  // @ts-expect-error an app may not ask the owner to sign a provider-enforced edit; the gateway refuses it too
-  const opaque = await payout.call("owner/prepare", { action: { type: "policy_update", expectedPolicy, changes: { owner_approval: false } }, signer: "wallet" });
-  assert.equal(opaque.ok === false && opaque.kind, "forbidden");
+  // @ts-expect-error an app may not ask for payees at creation; the gateway refuses it too
+  const payees = await payout.call("owner/prepare", { action: { type: "agent_create", owner: { type: "near", account_id: "owner.near", public_key: "k" }, payees: ["p.near"] }, signer: "wallet" });
+  assert.equal(payees.ok === false && payees.kind, "forbidden");
   assert.equal(forwarded.length, before);
   // @ts-expect-error `pay` is not an app procedure
   void (() => payout.call("pay", {}));
@@ -330,13 +437,14 @@ test("an agent an app set up is reachable only by that deployment and Organizati
   assert.equal((await call(port, rpc("org_2", "overview"), "POST", staging, {})).status, 403, "a consent signed for another Organization reaches nothing");
 });
 
-test("a payout consent reaches payout requests, their status and held payouts, and nothing else; other scopes don't reach requests", async t => {
+test("a payout consent reaches payout requests, their status, held payouts and a deposit address, and nothing else; other scopes don't reach requests", async t => {
   const { port, forwarded, staging, rpc, consent } = await routeHarness(t);
   const ask = { json: { requestId: "r-1", asset: "nep141:usdc", delivery: "intents", recipient: "payee.near", amount: "1", expectedPolicy: { revision: 1, digest: `sha256:${"0".repeat(64)}` } } };
   assert.equal((await consent({ scopes: ["owner", "read"] })).status, 201);
   assert.equal((await call(port, rpc("org_1", "payouts/request"), "POST", staging, ask)).status, 403, "read and owner scopes don't request payouts");
   assert.equal((await consent({ organization: "org_2", scopes: ["payout"] })).status, 201);
-  for (const procedure of ["payouts/request", "payouts/status", "held"])
+  assert.equal((await call(port, rpc("org_1", "deposit"), "POST", staging, {})).status, 403, "read and owner scopes don't take a deposit address");
+  for (const procedure of ["payouts/request", "payouts/status", "held", "deposit"])
     assert.equal((await call(port, rpc("org_2", procedure), "POST", staging, procedure === "payouts/request" ? ask : { json: { requestId: "r-1" } })).status, 200, procedure);
   assert.equal(forwarded.at(-1)!.headers["x-gateway-actor"], "app:staging:org_2", "the agent namespaces requests by this actor");
   const before = forwarded.length;
@@ -418,6 +526,7 @@ test("a signed setup reserves the owner's hosted agent and lets the app prepare 
   assert.deepEqual((await call(port, "/apps/v1/agents/payout", "GET", staging)).body.created, false);
   const create = (public_key = done.body.consent.publicKey) => ({ type: "agent_create", owner: { type: "near", account_id: "owner.near", public_key } });
   const prepare = (action: object = create()) => call(port, rpc("org_1", "owner/prepare"), "POST", staging, { json: { action, signer: "wallet" } });
+  state.reply.body = preparedReply("nep413");
   assert.equal((await prepare()).status, 200, "the app prepares the creation the owner then signs");
   assert.equal((await prepare(create(`ed25519:${"1".repeat(44)}`))).status, 403, "with the key that signed the setup, not one the app picks");
   assert.equal((await call(port, rpc("org_1", "overview"), "POST", staging, {})).status, 403, "a setup consent reads nothing");
@@ -544,4 +653,73 @@ test("an agent not created yet is visible to its wallet owner's setup, never to 
   answer = { agentId: "provider-id", owner: { type: "near", account_id: "owner.near" } };
   assert.equal((await resolveMachineAccess("owner.near", agent))?.agentId, "provider-id");
   assert.equal(await resolveWalletAuthority("intruder.near", agent), null);
+});
+
+test("while the gateway stops, setup, consents and confirm submissions are refused and nothing is stored, reserved or used", async t => {
+  const { port, state, staging, rpc, consent } = await routeHarness(t);
+  assert.equal((await consent({ scopes: ["owner"] })).status, 201);
+  state.reply.body = preparedReply("nep366", "c-stop");
+  const held = await call(port, rpc("org_1", "owner/prepare"), "POST", staging, { json: { action: { type: "agent_freeze" }, signer: "wallet" } });
+  const api = new URL(held.body.json.confirm.url).pathname.replace("/confirm/", "/confirm/v1/");
+  const reserved: unknown[] = [];
+  state.setup = async input => { reserved.push(input); return { name: "own-x", owner: input.owner, area: input.area, port: 1, executor: true } as never; };
+  state.stopping = true;
+  assert.equal((await call(port, "/apps/v1/setup", "POST", staging, await signed(setupMessage(setupFields())))).status, 503);
+  assert.deepEqual(reserved, [], "nothing reserved");
+  assert.equal((await consent({ organization: "org_9" })).status, 503);
+  assert.equal((await call(port, api, "POST", undefined, { signedData: signDelegate() })).status, 503);
+  state.stopping = false;
+  assert.equal((await call(port, "/apps/v1/consents?organization=org_9", "GET", staging)).body.consents.length, 0, "nothing stored");
+  assert.equal((await call(port, api)).body.state, "open", "the link stays usable");
+});
+
+test("a confirm link whose agent this gateway no longer serves answers 503 and keeps the owner's signature unspent", async t => {
+  const { port, state, staging, rpc, consent, forwarded } = await routeHarness(t);
+  assert.equal((await consent({ scopes: ["owner"] })).status, 201);
+  state.reply.body = preparedReply("nep366", "c-gone");
+  const held = await call(port, rpc("org_1", "owner/prepare"), "POST", staging, { json: { action: { type: "agent_freeze" }, signer: "wallet" } });
+  const api = new URL(held.body.json.confirm.url).pathname.replace("/confirm/", "/confirm/v1/");
+  const dir = join(".app-access", "confirm");
+  for (const file of readdirSync(dir).filter(f => f.endsWith(".json"))) {
+    const record = JSON.parse(readFileSync(join(dir, file), "utf8"));
+    if (record.correlationId === "c-gone") writeFileSync(join(dir, file), JSON.stringify({ ...record, agent: "gone" }));
+  }
+  const before = forwarded.length;
+  assert.equal((await call(port, api, "POST", undefined, { signedData: signDelegate() })).status, 503);
+  assert.equal(forwarded.length, before);
+  assert.equal((await call(port, api)).body.state, "open", "the link isn't used");
+});
+
+test("the call that observes a removed key is refused by the key check itself; access ending during that check refuses before forwarding", async t => {
+  const { port, state, staging, rpc, forwarded } = await routeHarness(t);
+  const stored = await call(port, "/apps/v1/consents", "POST", staging, await signed(consentMessage(fields())));
+  assert.equal(stored.status, 201);
+  state.keys = async () => "absent";
+  const removed = await call(port, rpc("org_1", "overview"), "POST", staging, {});
+  assert.deepEqual([removed.status, removed.body.error], [403, "The key that signed this consent was removed from its owner's account, so the consent was revoked"]);
+  state.keys = async () => "FullAccess";
+  const second = await call(port, "/apps/v1/consents", "POST", staging, await signed(consentMessage(fields({ organization: "org_2" }))));
+  assert.equal(second.status, 201);
+  // The credential is revoked while the key check waits on the chain.
+  state.keys = async () => { new AppCredentials(".app-access").revoke(new AppCredentials(".app-access").list().find(c => c.deployment === "staging")!.id); return "FullAccess"; };
+  const before = forwarded.length;
+  const ended = await call(port, rpc("org_2", "overview"), "POST", staging, {});
+  assert.deepEqual([ended.status, ended.body.error], [403, "Access ended before forwarding"]);
+  assert.equal(forwarded.length, before, "nothing forwarded");
+});
+
+test("each credential has an hourly request limit", async t => {
+  const { port, staging } = await routeHarness(t);
+  let last = 0;
+  for (let i = 0; i < 1_201; i++) last = (await call(port, "/apps/v1/agents/payout", "GET", staging)).status;
+  assert.equal(last, 429);
+});
+
+test("app access state is written only into a directory no one else can read", t => {
+  const dir = mkdtempSync(join(tmpdir(), "app-private-")); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  mkdirSync(join(dir, "confirm"), { mode: 0o755 }); chmodSync(join(dir, "confirm"), 0o755);
+  assert.throws(() => new AppConfirms(dir).hold({ deployment: "d", host: HOST, organization: "o", owner: "owner.near", agent: "payout", agentId: null,
+    consent: "c", correlationId: "c-private", type: "agent_freeze", action: {}, policy: null, summary: null, expiresAt: later(1),
+    intent: { standard: "nep366", payload: {} }, signer: { type: "near", account_id: "owner.near", public_key: "ed25519:k" } }), /must be private/);
+  assert.equal(readdirSync(join(dir, "confirm")).length, 0, "nothing written");
 });

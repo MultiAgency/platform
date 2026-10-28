@@ -6,6 +6,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { demoSession } from "../src/gateway/demo-hosts.js";
+import { AppConfirms } from "../src/gateway/app-confirm.js";
 const listen = (server: Server) => new Promise<number>(resolve => server.listen(0, "127.0.0.1", () => resolve((server.address() as { port: number }).port)));
 const close = (server: Server) => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
 test("real shared gateway isolates access sessions, credentials and agent assignments by host", { timeout: 30000 }, async t => {
@@ -55,4 +56,21 @@ test("real shared gateway isolates access sessions, credentials and agent assign
   const view = await call("one.test", "/gw/access-session", { account: "owner.near" });
   assert.deepEqual(view.data.agents.map((a: { name: string }) => a.name), ["portfolio", "dao"]);
   assert.equal(view.data.viewer.access.portfolio.canExecute, false);
+
+  // A confirm link is served on the host the app called, as `/apps/v1` is, and only there.
+  const { token } = new AppConfirms(join(dir, ".app-access")).hold({ deployment: "staging", host: "one.test", organization: "org_1", owner: "owner.near",
+    agent: "portfolio", agentId: "provider-agent", consent: "c", correlationId: "c-host", type: "agent_freeze", action: { type: "agent_freeze" }, policy: null,
+    summary: null, expiresAt: new Date(Date.now() + 60_000).toISOString(), intent: { standard: "nep366", payload: {} },
+    signer: { type: "near", account_id: "owner.near", public_key: "ed25519:k" } });
+  const raw = (host: string, path: string, method = "GET") => new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const req = request({ host: "127.0.0.1", port, path, method, headers: { host, "content-type": "application/json" } }, res => {
+      let body = ""; res.on("data", c => body += c); res.on("end", () => resolve({ status: res.statusCode!, body }));
+    }); req.on("error", reject); req.end(method === "POST" ? "{}" : undefined);
+  });
+  const read = await raw("one.test", `/confirm/v1/${token}`);
+  assert.equal(read.status, 200, read.body);
+  assert.equal(JSON.parse(read.body).agent, "portfolio");
+  assert.equal((await raw("one.test", `/confirm/v1/${token}/open`, "POST")).status, 403, "opening still needs the owner's signature");
+  const elsewhere = await raw("two.test", `/confirm/v1/${token}`);
+  assert.equal(elsewhere.status, 404, "another host doesn't serve this link");
 });

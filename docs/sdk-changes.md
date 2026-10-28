@@ -14,14 +14,23 @@ All additive. Nothing on the existing wire changes.
   `consents.list/submit/revoke` answer with `AppRouteResult` kinds (`session`, `forbidden`, `refused`, `unavailable`;
   resending the same signed body is safe). `agent(organization, agent).call(...)` uses `ownerClient` and its result
   kinds, typed to `AppProcedure` (`APP_READS`, `APP_OWNER`). `owner/prepare` takes only `AppOwnerAction`: agent
-  creation without payees, freeze, unfreeze, grants, and policy edits to destinations and budget. The gateway enforces
-  the same lists (`appMayAsk`) and withholds a prepared policy edit or grant the provider makes NEP-366.
+  creation without payees, freeze, unfreeze, grants, policy edits, and votes on held payouts; the gateway enforces the
+  same list (`appMayAsk`). A NEP-413 intent comes back as `intent`; a NEP-366 one comes back without it, as
+  `confirm: { url, expiresAt }` (`appConfirm`): open the platform's confirm page for the owner, then follow
+  `owner/status`. A prepared vote answers `payment` with the held payout and, for approve, its recipient, asset and
+  amount as the platform proved them against the provider's request hash (`ownerPrepareOutput`).
 - **Payout requests:** `payouts/request` (`requestId`, `asset`, `delivery` (`"intents"` or `{ chain }`),
   recipient, amount, reviewed policy; only confidential USDC through `intents` is paid yet: another asset is refused
   `transfer_not_allowed`, a chain delivery before anything is recorded) and `payouts/status`, answering `payoutRequestOutput` (`state`: `succeeded`, `failed`, `held`, `processing`,
   `refused`, `unknown`, `not_found`; `failed` doesn't prove nothing moved). A request is sent at most once per caller and `requestId`; asked again it sends nothing; other
   terms under the same `requestId` are refused (`refused`, code `request_conflict`). Owners reach them with `ownerClient`
-  (capability `payables-payout-requests-v1`), apps with `payout` consent (`APP_PAYOUT`).
+  (capability `payables-payout-requests-v1`), apps with `payout` consent (`APP_PAYOUT`, which also covers `deposit`: a
+  one-time address that credits USDC to the agent, so an app can fund it).
+- **The oRPC client is bundled.** `@orpc/client` is no longer a direct dependency: the SDK's own client calls use the
+  copy it carries (`dist/contract/orpc-client.js`, licenses in `THIRD-PARTY-NOTICES`), so an app whose bundler shares
+  `@orpc/client` (Module Federation shares bare names only) no longer mixes its copy with the SDK's link. `@orpc/contract`
+  still imports its own `@orpc/client` (installed with it); the SDK's calls don't go through that copy. `@orpc/contract` stays a dependency (apps implement
+  servers from the contract objects); `zod` stays the one peer.
 - **Fix: `ownerClient` (and so `appClient`) keeps an encoded refusal's kind when the app's bundler splits oRPC.**
   Module Federation shares `@orpc/client` but not `@orpc/client/fetch`, so the link's `ORPCError` came from another copy
   and failed `instanceof`: a proven refusal read as `unknown` and a 401 as `unavailable` (found in the dashboard's built

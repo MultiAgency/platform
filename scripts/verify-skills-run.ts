@@ -18,7 +18,8 @@ import { newReport, readRequest, revision, send } from "./examples/payee-workflo
 import { connectAgent, revokeAll } from "./examples/payee-workflows-4.ts";
 import { platformFor } from "./examples/app-server-1.ts";
 import { connect } from "./examples/app-server-2.ts";
-import { payOnce } from "./examples/app-server-3.ts";
+import { ownerAction } from "./examples/app-server-3.ts";
+import { payOnce } from "./examples/app-server-4.ts";
 
 const listen = async (handle: (req: IncomingMessage, res: ServerResponse) => void) => {
   const server = createServer(handle);
@@ -216,9 +217,20 @@ ok(platformFor("https://platform.test", "tap_test"), "the setup example construc
 const appSent: { path: string; authorization: string | null; body: string }[] = [];
 let dropConsent = 1;
 const requested: unknown[] = [];
+const appSubmitted: unknown[] = [];
 const appRouter = { payouts: {
   request: os.handler(({ input }) => { requested.push(input); throw new Error("reply lost"); }),
   status: os.handler(({ input }) => ({ requestId: (input as { requestId: string }).requestId, state: "held", status: "PENDING_APPROVAL", correlationId: "op-1", code: null })),
+}, owner: {
+  // A freeze comes back NEP-366, so as a confirm link; a grant revocation comes back readable.
+  prepare: os.handler(({ input }) => {
+    const base = { preview: { summary: "s" }, expiresAt: new Date(Date.now() + 600_000).toISOString(), digest: null };
+    return (input as { action: { type: string } }).action.type === "agent_freeze"
+      ? { ...base, correlationId: "c-freeze", confirm: { url: "https://platform.test/confirm/AAAAAAAAAAAAAAAAAAAAAA", expiresAt: base.expiresAt } }
+      : { ...base, correlationId: "c-revoke", intent: nep413 };
+  }),
+  submit: os.handler(({ input }) => { appSubmitted.push(input); return { status: "PENDING" }; }),
+  status: os.handler(({ input }) => ({ stage: "submitted", status: (input as { correlationId: string }).correlationId === "c-revoke" ? "SUCCESS" : "PENDING" })),
 } };
 const appHandler = new RPCHandler(appRouter);
 const platform = await listen(async (req, res) => {
@@ -250,11 +262,21 @@ equal(submissions[0]!.body, submissions[1]!.body, "with the same signed body");
 ok(appSent.every(s => s.authorization === "Bearer tap_test"), "every call carries the deployment's credential");
 ran.appConnect = "identity, consent signed once, lost answer resubmitted with the same body";
 
+const opened: string[] = [];
+const signReadable = async (intent: typeof nep413) => ({ ...intent, public_key: "ed25519:k", signature: "s" });
+const freezing = await ownerAction(app, "org_1", "payout", { type: "agent_freeze" }, signReadable, url => opened.push(url));
+deepStrictEqual([freezing, opened], [{ ok: true, value: { stage: "submitted", status: "PENDING" } }, ["https://platform.test/confirm/AAAAAAAAAAAAAAAAAAAAAA"]]);
+equal(appSubmitted.length, 0, "a NEP-366 action is signed on the platform's page, never submitted by the app");
+const revoked = await ownerAction(app, "org_1", "payout", { type: "grant_revoke", grantId: "g" }, signReadable, url => opened.push(url));
+deepStrictEqual([revoked, opened.length], [{ ok: true, value: { stage: "submitted", status: "SUCCESS" } }, 1]);
+deepStrictEqual(appSubmitted, [{ correlationId: "c-revoke", signedData: { ...nep413, public_key: "ed25519:k", signature: "s" } }]);
+ran.appOwnerAction = "NEP-366 opened on the confirm page; NEP-413 signed and submitted by the app";
+
 const terms = { requestId: "wo-1", asset: "nep141:usdc", recipient: "payee.near", amount: "1", expectedPolicy: { revision: 1, digest: `sha256:${"0".repeat(64)}` } };
 const payout = await payOnce(app, "org_1", "payout", terms);
 deepStrictEqual(payout, { ok: true, value: { requestId: "wo-1", state: "held", status: "PENDING_APPROVAL", correlationId: "op-1", code: null } });
 equal(requested.length, 1, "a lost payout request is read by its requestId, never sent again");
-deepStrictEqual(appSent.filter(s => s.path.startsWith("/apps/v1/o/")).map(s => s.path.replace("/apps/v1/o/org_1/a/payout/rpc/", "")), ["payouts/request", "payouts/status"]);
+deepStrictEqual(appSent.filter(s => s.path.startsWith("/apps/v1/o/org_1/a/payout/rpc/payouts/")).map(s => s.path.replace("/apps/v1/o/org_1/a/payout/rpc/", "")), ["payouts/request", "payouts/status"]);
 ran.appPayout = "request sent once; its lost answer read by payouts/status";
 await platform.close();
 console.log(JSON.stringify(ran));

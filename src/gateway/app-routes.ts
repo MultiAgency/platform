@@ -5,12 +5,16 @@ import { readJson, sendJson as json } from "../http.js";
 import { chainKeyState, hourlyLimit, type KeyLookup, type KeyStateLookup } from "../signin.js";
 import { appendSynced } from "../synced.js";
 import type { AgentEntry } from "./config.js";
-import { consentKeyHolds, AppConsents, AppCredentials, appMayCall, appMayPrepare, appMayRelease, setupConsent, UNBORN, verifyConsent, verifySetup, type ConsentRecord } from "./app-access.js";
+import { ownerPrepareOutput } from "../contract/owner-outputs.js";
+import { consentKeyHolds, AppConsents, AppCredentials, appMayCall, appMayPrepare, setupConsent, submittedCorrelation, UNBORN, verifyConsent, verifySetup, type ConsentRecord } from "./app-access.js";
+import { AppConfirms } from "./app-confirm.js";
 import { AuthorityUnanswered, resolveWalletAuthority } from "./machine-authority.js";
 import { forwardRpc } from "./rpc-proxy.js";
 
 const ROOT = ".app-access";
 const credentials = new AppCredentials(ROOT), consents = new AppConsents(ROOT);
+export const confirms = new AppConfirms(ROOT);
+export const APP_ROOT = ROOT;
 const mayUse = hourlyLimit(1_200);
 const publicConsent = ({ message: _m, nonce: _n, signature: _s, ...record }: ConsentRecord) => record;
 
@@ -135,6 +139,7 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   const [, organization, name, path] = call as unknown as [string, string, string, string];
   const agent = selected.find(a => a.name === name && reachable(a, credential.deployment, organization));
   const live = agent ? consents.live({ deployment: credential.deployment, host, organization, agent: name }).filter(c => c.owner === agent.owner) : [];
+  // The scope check below would refuse this too; refusing here spares the ownership lookup's provider and chain reads.
   if (!agent || !live.length) { json(res, 403, { error: "No live owner consent covers this Organization and agent" }); return true; }
   const input = await readJson(req);
   // Only the owner's own wallet signs through the app (no DAO path until DAO consent exists), and only what it
@@ -142,7 +147,12 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   const prepared = path === "owner/prepare" ? appMayPrepare(input) : undefined;
   if (prepared === null) {
     json(res, 403, { error: "Through an app, the owner's wallet (signer \"wallet\") signs only: agent creation without payees, freeze, " +
-      "unfreeze, grants, and policy edits to destinations and budget. Other owner actions are signed on the platform." }); return true;
+      "unfreeze, grants, policy edits and votes on held payouts." }); return true;
+  }
+  // An action held for the confirm page is signed and submitted there only; an unreadable body is the agent's to refuse.
+  const submitted = path === "owner/submit" ? submittedCorrelation(input) : null;
+  if (submitted !== null && confirms.holds(submitted)) {
+    json(res, 403, { error: "This owner action is signed on the platform's confirm page, not through the app." }); return true;
   }
   const body = JSON.stringify(input);
   const authority = await resolveWalletAuthority(agent.owner, agent);
@@ -157,24 +167,42 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   let holds: boolean;
   try { holds = await consentKeyHolds(consents, consent, keyState); }
   catch { json(res, 503, { error: "The consent's signing key couldn't be checked. Nothing was forwarded; reading again is safe." }); return true; }
+  // The re-check before forwarding would also refuse this call (the consent is now revoked); refusing here says why.
   if (!holds) { json(res, 403, { error: "The key that signed this consent was removed from its owner's account, so the consent was revoked" }); return true; }
   // The owner key a created agent answers to is the one that signed (and was checked full-access for) this consent.
   if (prepared?.type === "agent_create" && prepared.owner?.public_key !== consent.publicKey) {
     json(res, 403, { error: "Create the agent with the key that signed the setup" }); return true;
   }
+  // The checks above waited on the chain: a credential or consent revoked meanwhile, or a stop begun, refuses here.
   if (stopping() || !credentials.authenticate(req.headers.authorization, host) ||
     !consents.live({ deployment: credential.deployment, host, organization, agent: name }).some(c => c.id === consent.id)) {
     json(res, 403, { error: "Access ended before forwarding" }); return true;
   }
   appendSynced(join(ROOT, "access.jsonl"), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
     event: "call", consent: consent.id, organization, owner: agent.owner, agent: name, agentId: authority.agentId, path });
-  // A policy edit that turns out to need on-chain (NEP-366) signing isn't released: the provider expires its intent unsigned.
+  // A readable (NEP-413) intent goes to the app: its text is one the owner's wallet can show. A NEP-366 intent is held here for the
+  // owner to sign on the platform's confirm page; the app gets the link, not the bytes. Anything else isn't released.
   const release = prepared && ((reply: unknown) => {
-    if (appMayRelease(prepared.type, reply)) return null;
-    appendSynced(join(ROOT, "access.jsonl"), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
-      event: "withheld", consent: consent.id, organization, owner: agent.owner, agent: name, action: prepared.type,
-      correlationId: (reply as { json?: { correlationId?: unknown } }).json?.correlationId ?? null });
-    return "This owner action needs on-chain signing, which the app can't show the owner readably. It wasn't released and expires unsigned; sign it on the platform.";
+    const raw = reply as { json?: unknown; meta?: unknown };
+    const output = ownerPrepareOutput.safeParse(raw.json);
+    const standard = output.success ? output.data.intent?.standard : undefined;
+    if (standard === "nep413") return null;
+    const log = (event: string) => appendSynced(join(ROOT, "access.jsonl"), { at: new Date().toISOString(), deployment: credential.deployment,
+      credential: credential.id, event, consent: consent.id, organization, owner: agent.owner, agent: name, action: prepared.type,
+      correlationId: (raw.json as { correlationId?: unknown } | undefined)?.correlationId ?? null });
+    if (!output.success || standard !== "nep366" || output.data.signer?.type !== "near") {
+      log("withheld");
+      return "This owner action came back in a form the platform can't show the owner. It wasn't released and expires unsigned.";
+    }
+    const { intent, signer, ...answer } = output.data;
+    const { token } = confirms.hold({ deployment: credential.deployment, host: host.toLowerCase(), organization, owner: agent.owner, agent: name,
+      agentId: authority.agentId, consent: consent.id, correlationId: answer.correlationId, type: prepared.type, action: prepared,
+      policy: answer.policy ?? null, summary: answer.preview.summary ?? null, expiresAt: answer.expiresAt,
+      intent: intent as never, signer: signer as never });
+    log("confirm");
+    // The serializer's notes about the withheld intent go with it.
+    const meta = Array.isArray(raw.meta) ? raw.meta.filter(entry => !(Array.isArray(entry) && entry[1] === "intent")) : [];
+    return { answer: { json: { ...answer, confirm: { url: `https://${host.toLowerCase()}/confirm/${token}`, expiresAt: answer.expiresAt } }, meta } };
   });
   forwardRpc(req, res, agent, path, undefined, body, `app:${credential.deployment}:${organization}`, release || undefined);
   return true;

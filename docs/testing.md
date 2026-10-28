@@ -176,17 +176,20 @@ later sends are blocked until it is reviewed.
 App access (`test/e2e/app-access.spec.mjs`): an app deployment's server (the dashboard's, as the first app) on the real stack, using the
 published oRPC client. The operator CLI issues its service credential; the owner signs a consent with the simulated
 wallet; overview is read; freeze, unfreeze, a payee added to a non-empty list and a budget edit are each prepared through
-`/apps/v1`, signed and submitted. A provider-enforced edit, payees at creation, an approval vote and DAO signing are
-refused before any intent is generated. Removing the last payee (which also turns transfers off) is prepared by the
-agent, made NEP-366 by the simulator, and withheld with a `withheld` log line; the policy stays unchanged. A signed
+`/apps/v1`, signed and submitted. Payees at creation and DAO signing are refused before any intent is generated. A
+provider-enforced edit (`owner_approval` off) is made NEP-366 by the simulator: the app receives only a confirm link;
+reading it gives the app the terms but not the bytes, and its own `owner/submit` is refused. In a browser the page
+shows the field before and after, the simulated wallet signs the link's text and then the delegate, the policy
+changes, and the log records `confirm` then `confirmed`. A signed
 setup reserves the Organization's own payables agent beside the owner's configured one, its creation is relayed
 under the setup consent, and a consent naming the created agent's ID then relays a grant. Here the simulator signs
 provider-enforced policy edits as NEP-366 (`onChainPolicyEdits`), following the provider's docs, not observation. A second
 case requests payouts through the app's `payout` consent on the Organization's own hosted agent (its grant and payee
-signed by the owner, its funding simulated; the first payee is a fixture step there, since per the provider's docs it is
-signed on chain): one request is held for the owner, asked again and read by `requestId` without a second send, other
+signed by the owner through the app, its funding simulated; policy edits stay NEP-413 in that environment): one request is held for the owner, asked again and read by `requestId` without a second send, other
 terms under its `requestId` are refused, a second request with the same payee and amount while the first is held is
-refused before sending, and a lost reply reads `unknown`, is never resent and blocks new requests.
+refused before sending, the owner's vote on the held one is relayed by the app (prepared with the terms the platform
+proved, signed by the simulated wallet) and the payout reads `succeeded` once the simulator settles it, with nothing
+sent again, and a lost reply reads `unknown`, is never resent and blocks new requests.
 
 Owner contract conformance (`test/e2e/conformance.mjs`): in the Payables, Treasury, work-order and example specs, every
 owner RPC answer the page receives, including each streamed event, is decoded with oRPC's serializer and must parse

@@ -9,6 +9,7 @@
  * oRPC RPC serializer, not plain JSON. Each such place is marked "serializer:" below.
  */
 import { z } from "zod";
+import { appConfirm } from "./app-access.js";
 import { ownerCompensationView } from "../compensation-contract.js";
 import { RecordingSchema } from "./run-log-schema.js";
 // Server modules with filesystem, crypto or AG-UI dependencies stay out of this browser-safe package: their shapes are
@@ -570,10 +571,19 @@ export const ownerPrepareOutput = z.looseObject({
   expiresAt: z.string(),
   /** mandate.ts mandateDigest of a policy_update's requested policy; null otherwise. */
   digest: z.string().nullable(),
-  /** Wallet signer only. */
+  /** Creation and policy edits: the policy this server asked the provider to sign, and the one in force it replaces
+   * (null for a creation). */
+  policy: z.looseObject({ current: policy.nullable(), requested: policy }).optional(),
+  /** Wallet signer only; absent through an app when the intent is NEP-366 (see `confirm`). */
   intent: intent.optional(),
+  /** App routes only: a NEP-366 intent held on the platform for the owner to sign on its confirm page (`appConfirm`). */
+  confirm: appConfirm.optional(),
   /** Wallet signer only. */
   signer: ownerWallet.optional(),
+  /** Approval votes only: the held payout it releases or rejects; for approve, the transfer's terms as proven against
+   * the provider's request hash (payment-approval.ts), null for a reject. */
+  payment: z.looseObject({ correlationId: z.string(), verdict: z.enum(["approve", "reject"]),
+    terms: z.looseObject({ recipient: z.string(), asset: z.string(), amount: z.string() }).nullable() }).optional(),
   /** DAO signer only. */
   dao: z.looseObject({
     owner: z.string(),
