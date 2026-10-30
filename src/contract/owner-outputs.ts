@@ -137,7 +137,7 @@ const op = z.looseObject({
   at: z.string(),
   idempotencyKey: z.string(),
   kind: z.string(),
-  method: z.enum(["swap", "transfer", "shield", "unshield"]).optional(),
+  method: z.enum(["swap", "transfer", "shield", "unshield", "withdraw"]).optional(),
   request: record,
   journalVersion: z.literal(2).optional(),
   invoiceId: z.string().optional(),

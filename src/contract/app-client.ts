@@ -73,7 +73,7 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
     agent(organization: string, agent: string) {
       const owner = ownerClient({ base: `${root}/apps/v1/o/${encodeURIComponent(organization)}/a/${encodeURIComponent(agent)}`, fetch: authorized });
       return {
-        call<P extends AppProcedure>(path: P, ...[input, options]: AppInputs[P] extends undefined ? [input?: undefined, options?: OwnerCallOptions] : [input: AppInputs[P], options?: OwnerCallOptions]): Promise<OwnerResult<OwnerOutput<P>>> {
+        call<P extends AppProcedure>(path: P, ...[input, options]: undefined extends AppInputs[P] ? [input?: AppInputs[P], options?: OwnerCallOptions] : [input: AppInputs[P], options?: OwnerCallOptions]): Promise<OwnerResult<OwnerOutput<P>>> {
           return (owner.call as (path: P, input?: unknown, options?: OwnerCallOptions) => Promise<OwnerResult<OwnerOutput<P>>>)(path, input, options);
         },
       };

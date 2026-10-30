@@ -3,7 +3,7 @@ import { api, waitForStatus } from "./api.js";
 import { agentId, executes } from "./env.js";
 import { assertCanDispatch, assertMoneyLock, type MoneyLock, withMoneyLock } from "./lock.js";
 import { mandateDigest, type ReviewedPolicy } from "./mandate.js";
-import { recipientState } from "./recipients.js";
+import { recipientState, registrationFor } from "./recipients.js";
 import { AuthorizationHeld, claimSubmission, isHeld, provenRefusal, readOps, record, submittedSwapValues } from "./ops.js";
 import { recordSubmissionEvidence } from "./submission-evidence.js";
 import { authorize, type Case, type Purpose } from "./authorize.js";
@@ -30,7 +30,8 @@ export type Action =
   | { method: "swap"; request: Parameters<Grant["swap"]>[1] }
   | { method: "transfer"; request: Parameters<Grant["transfer"]>[1] }
   | { method: "shield"; request: Parameters<Grant["shield"]>[1] }
-  | { method: "unshield"; request: Parameters<Grant["unshield"]>[1] };
+  | { method: "unshield"; request: Parameters<Grant["unshield"]>[1] }
+  | { method: "withdraw"; request: Parameters<Grant["withdraw"]>[1] };
 
 /** First submissions only. Remote deduplication semantics are not assumed. */
 const FIRST_SUBMISSION = Symbol("first submission in this dispatch");
@@ -58,6 +59,8 @@ export async function send(action: Action, idempotencyKey: string, lock: MoneyLo
       return grant.shield(id, action.request, options);
     case "unshield":
       return grant.unshield(id, action.request, options);
+    case "withdraw":
+      return grant.withdraw(id, action.request, options);
   }
 }
 
@@ -65,7 +68,8 @@ export async function send(action: Action, idempotencyKey: string, lock: MoneyLo
  * A strategy send: a saved plan's leg being sent (`null` for a sweep, which has no plan), whether the
  * autopilot sends it, and the clock it is judged by.
  */
-export type Sending = { planned: { plan: Plan; leg: PlannedAction } | null; autopilot: boolean; now: () => Date; onSubmitted?: (method: Action["method"], correlationId: string) => void };
+export type Sending = { planned: { plan: Plan; leg: PlannedAction } | null; autopilot: boolean; now: () => Date;
+  onSubmitted?: (method: Exclude<Action["method"], "withdraw">, correlationId: string) => void };
 
 /**
  * Sends one money action under the money lock and follows it to a stable status. The request is
@@ -84,17 +88,23 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
   if (preparedKey && !invoiceOperations().some((op) => op.idempotencyKey === preparedKey && op.submissionState === "PREPARED"))
     throw new Error("Invoice operation is not prepared; replay is blocked");
   assertCanDispatch(lock);
-  const payee = action.method === "transfer" ? action.request.recipient : null;
+  // A payout (a transfer, or a withdrawal to chain `near`) is read against the confidential balance it is paid from, and
+  // its payee must exist on NEAR.
+  const payee = action.method === "transfer" || (action.method === "withdraw" && action.request.chain === "near") ? action.request.recipient : null;
+  const paysOut = payee !== null;
   const [view, tokens, grants, shielded, recipient] = await Promise.all([
     api.getPolicy(agentId()), api.getTokens(), api.listGrants(agentId()),
     // A payout's funds, so `authorize` can refuse one the wallet can't cover before it goes to a vote.
-    action.method === "transfer" ? api.getBalances(agentId(), { source: "confidential" }) : undefined,
-    payee === null ? "exists" as const : recipientState(payee),
+    paysOut ? api.getBalances(agentId(), { source: "confidential" }) : undefined,
+    payee === null ? "exists" as const : recipientState(payee, action.method === "withdraw" ? registrationFor(action.request.asset) : null),
   ]);
-  // A recipient that doesn't exist on NEAR, or that the chain couldn't confirm, is refused before anything is recorded:
-  // the provider's own refusal would arrive after the send claim, where it can't yet prove nothing was sent.
+  // A recipient that doesn't exist on NEAR, isn't registered on the token it is withdrawn to, or that the chain couldn't
+  // confirm, is refused before anything is recorded: the provider's own refusal, or a failed delivery, would arrive after
+  // the send claim, where it can't yet prove nothing was sent.
   if (recipient === "absent") throw new LocalRefusal("recipient_not_found", `${payee} is not an account on NEAR. Nothing was sent.`);
-  if (recipient === "unchecked") throw new LocalRefusal("recipient_unchecked", "Whether the recipient exists on NEAR couldn't be checked. Nothing was sent; try again.");
+  if (recipient === "unregistered") throw new LocalRefusal("recipient_not_registered",
+    `${payee} isn't registered on this token's contract, so a withdrawal to it would fail. Nothing was sent; the payee registers (storage_deposit) and the request is asked again.`);
+  if (recipient === "unchecked") throw new LocalRefusal("recipient_unchecked", "Whether the recipient can receive this on NEAR couldn't be checked. Nothing was sent; try again.");
   const { policy, revision } = view;
   const policyDigest = policy ? mandateDigest(policy) : null;
   const asset = action.method === "swap" ? action.request.origin_asset : action.request.asset;
@@ -137,10 +147,11 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
   const grant = liveGrant(grants, process.env.AGENT_GRANT_TOKEN);
   const orderProblem = workOrderDispatchProblem(action, preparedKey, policy, grant, now);
   if (orderProblem) refuseLocally("work_order_binding", orderProblem);
-  // A payout or invoices grant only transfers: anything else it sends is judged, and refused, as treasury work.
+  // A payout or invoices grant only pays out (a transfer or a withdrawal): anything else it sends is judged, and refused,
+  // as treasury work.
   const payoutGrant = grant?.label === "payout" || grant?.label === "invoices";
   const purpose: Purpose = preparedKey ? "invoice"
-    : payoutGrant && action.method === "transfer" ? "payout"
+    : payoutGrant && (action.method === "transfer" || action.method === "withdraw") ? "payout"
     : sending?.autopilot ? "autopilot"
     : "treasury";
   // A payout request is a payout, judged as one, or nothing: under a grant for other work it would skip the payout checks.
@@ -180,7 +191,8 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
   }
   record({ idempotencyKey, correlation_id: sent.correlation_id, status: "SENT" });
   // Observational callback only, after durable acceptance evidence. Never let UI logging alter recovery.
-  try { sending?.onSubmitted?.(action.method, sent.correlation_id); }
+  // A strategy send never withdraws; only strategy sends report progress.
+  try { if (action.method !== "withdraw") sending?.onSubmitted?.(action.method, sent.correlation_id); }
   catch { console.warn("Submission progress unavailable; following the recorded operation."); }
   // Once accepted, even a non-retryable status-read error cannot prove the action was refused.
   const settled = await waitForStatus(sent.correlation_id).catch((cause: unknown) => {

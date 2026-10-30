@@ -25,7 +25,7 @@ export const mainnet = {
 /** Read-only NEAR access for the treasury view; owner signing builds its own client in owner.ts. */
 const near = new Near(mainnet);
 
-const contractOf = (asset: string) => asset.replace(/^nep141:/, "");
+export const contractOf = (asset: string) => asset.replace(/^nep141:/, "");
 
 export type DaoPolicy = {
   /** Attached to every add_proposal, exactly (yoctoNEAR). */
@@ -144,6 +144,16 @@ export async function accountExists(accountId: string, options?: { finality: "fi
     if (error instanceof AccountDoesNotExistError) return false;
     throw error;
   }
+}
+
+/**
+ * Whether the account is registered (NEP-145) on a token contract: `null` from `storage_balance_of` means it isn't
+ * (USDC, mainnet RPC, 2026-10-29T14:44Z: an existing unregistered account, and a missing one). A failed read, or an empty answer, throws.
+ */
+export async function storageRegistered(contract: string, accountId: string, options?: { finality: "final" }) {
+  const balance = await near.view(contract, "storage_balance_of", { account_id: accountId }, options);
+  if (balance === undefined) throw new Error(`${contract} gave no storage balance answer`);
+  return balance !== null;
 }
 
 const STORAGE_DEPOSIT = "1250000000000000000000"; // 0.00125 NEAR: one NEP-145 registration

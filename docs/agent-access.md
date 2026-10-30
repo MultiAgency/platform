@@ -279,7 +279,9 @@ reachable. Each
 consent, call and revocation is appended to `.app-access/access.jsonl`.
 
 Limits: wallet owners only (DAO consent and DAO setup are not available, and `signer: "dao"` is refused); payout requests
-are confidential USDC only (wNEAR withdrawn to NEAR is designed, not built); the owner can't revoke on the platform directly
+pay confidential USDC through `intents`, or withdraw wNEAR (arriving as native NEAR) or USDC to an agreed NEAR account
+(not mainnet-observed), and a held withdrawal can only be rejected (approving one isn't available until its approval is
+verified); the owner can't revoke on the platform directly
 (the deployment or the operator can, and removing the signing key ends it once a call or `check-keys` observes the
 removal: a key removed and re-added with no call or sweep in between goes unnoticed); a wallet that signs a callback URL into
 NEP-413 can't consent; owner actions are limited to the list above, and NEP-366 ones are signed on the platform's

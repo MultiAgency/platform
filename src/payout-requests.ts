@@ -19,7 +19,9 @@ import { PublicError } from "./public-error.js";
 export const requestKey = (actor: string, requestId: string) =>
   `request:${createHash("sha256").update(`${actor}\n${requestId}`).digest("hex").slice(0, 32)}`;
 
-type Terms = { recipient: string; asset: string; amount: string; confidential: boolean };
+/** What is recorded and sent: a confidential transfer, or a withdrawal to chain `near` from the confidential balance. */
+type Terms = { method: "transfer"; request: { recipient: string; asset: string; amount: string; confidential: true } }
+  | { method: "withdraw"; request: { asset: string; amount: string; chain: "near"; recipient: string; confidential: true } };
 const UNKNOWN = new Set(["UNCERTAIN", "NEEDS_REVIEW"]);
 
 /** What the journal proves about one request, never more. */
@@ -49,13 +51,17 @@ const find = (key: string) => readOps().find((op) => op.idempotencyKey === key);
 export async function requestPayout(actor: string | undefined, input: { requestId: string; asset: string; delivery: "intents" | { chain: string };
   recipient: string; amount: string; expectedPolicy: ReviewedPolicy }) {
   const key = requestKey(callerOf(actor), input.requestId);
-  // A withdrawal has no send path yet: refused before anything is recorded. Which assets an intents transfer may pay is
-  // `authorize`'s decision, recorded like any refusal.
-  if (input.delivery !== "intents") throw new PublicError("Payouts by withdrawal to a chain aren't available yet. Nothing was sent.");
-  const terms: Terms = { recipient: input.recipient, asset: input.asset, amount: input.amount, confidential: true };
+  // A withdrawal goes only to chain `near`; any other chain is refused before anything is recorded. Which assets and
+  // payees are allowed is `authorize`'s decision, recorded like any refusal.
+  if (input.delivery !== "intents" && input.delivery.chain !== "near")
+    throw new ORPCError("BAD_REQUEST", { message: "Payouts withdraw only to chain near. Nothing was sent.", data: { kind: "refused", code: "chain_not_supported" } });
+  const { recipient, asset, amount } = input;
+  const terms: Terms = input.delivery === "intents"
+    ? { method: "transfer", request: { recipient, asset, amount, confidential: true } }
+    : { method: "withdraw", request: { asset, amount, chain: "near", recipient, confidential: true } };
   const recorded = () => {
     const op = find(key);
-    if (op && JSON.stringify(op.request) !== JSON.stringify(terms))
+    if (op && (op.method !== terms.method || JSON.stringify(op.request) !== JSON.stringify(terms.request)))
       throw new ORPCError("CONFLICT", { message: "This requestId was already used for other terms. Nothing was sent.", data: { kind: "refused", code: "request_conflict" } });
     return op;
   };
@@ -63,7 +69,7 @@ export async function requestPayout(actor: string | undefined, input: { requestI
   if (recorded()) return answer(input.requestId, recorded());
   try {
     // A request recorded meanwhile can't be recorded again: the journal refuses a second preparation of one key.
-    await withMoneyLock((lock) => dispatch(lock, "payout", { method: "transfer", request: terms }, undefined, undefined, input.expectedPolicy, key));
+    await withMoneyLock((lock) => dispatch(lock, "payout", terms, undefined, undefined, input.expectedPolicy, key));
   } catch (error) {
     // Recorded: the journal holds the outcome (a refusal, or none proven). Not recorded: nothing reached the send site,
     // and a refusal made before recording keeps its code, so the same requestId can be asked again.

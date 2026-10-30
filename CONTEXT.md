@@ -174,8 +174,12 @@ the same `requestId` are refused. `processing` and `unknown` block the agent's s
 (FAILED or REFUNDED) doesn't prove nothing moved, so a person checks before a new attempt; a new attempt is a new
 `requestId`, after `refused` or that check. An approve-only copy answers no request. A named recipient that doesn't exist
 on NEAR is refused `recipient_not_found` before anything is recorded (every transfer, not only requests), and
-`recipient_unchecked` when the chain didn't answer; neither consumes the `requestId`. A request names `asset` and `delivery` (`intents` or a chain); only
-confidential USDC through `intents` is paid yet.
+`recipient_unchecked` when the chain didn't answer; neither consumes the `requestId`. A request names `asset` and `delivery`: `intents`, a
+confidential USDC transfer to an agreed payee, or `{ chain: "near" }`, a withdrawal of wNEAR (arriving as native NEAR,
+per the provider's docs) or USDC, an asset the policy allows, from the confidential balance to a NEAR account the policy
+agrees to pay by withdrawal; a USDC withdrawal's recipient must be registered on the USDC contract, else it is refused
+`recipient_not_registered` before anything is recorded (wNEAR arrives as native NEAR and needs none). A withdrawal is public on chain and may arrive less a route fee; a held one can be rejected,
+not approved, until its approval is verified.
 Offline- and stack-tested, not deployed or mainnet-observed.
 _Avoid_: retry (for a new attempt)
 

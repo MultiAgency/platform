@@ -43,6 +43,10 @@ export async function checkPaymentApproval(input: Pick<PaymentApproval, "approva
       !Number.isFinite(Date.parse(approval.expires_at)) || !approval.request_hash)
     throw new AuthorizationHeld("approval does not identify this pending agent payment");
   let binding: PaymentApproval = { approvalId: input.approvalId, correlationId: input.correlationId, verdict: input.verdict, requestHash: approval.request_hash };
+  // A held withdrawal can be rejected (that releases nothing), not approved: its approval's terms and hash aren't
+  // observed yet, so what an approval would release can't be proven (docs/enforcement.md).
+  if (approving && status.type !== "transfer")
+    throw new AuthorizationHeld("approving a held withdrawal isn't available yet: its approval can't be verified. Reject it, or wait.");
 
   // Rejecting releases nothing, so it needs no more than the identity checks above.
   let invoiceId: string | undefined;

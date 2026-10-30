@@ -87,6 +87,43 @@ test("a payout agent's first payee changes only its destinations: it was created
   assert.deepEqual(request.policy.destinations.list, [{ action: "transfer", address: "payee.near", confidential: true }]);
 });
 
+test("withdrawal payees switch withdrawals on and off; withdrawal destinations the platform doesn't manage are kept", async () => {
+  current = payoutPolicy(["payee.near"]);
+  const reviewed = () => ({ revision: 1, digest: mandateDigest(current) });
+  const added = (await policyChange({ withdrawals: [{ address: "worker.near" }] }, reviewed())).request.policy;
+  assert.deepEqual(added.actions, ["transfer", "withdraw"]);
+  assert.deepEqual(added.destinations.list, [
+    { action: "transfer", address: "payee.near", confidential: true },
+    { action: "withdraw", chain: "near", address: "worker.near", memo: null },
+  ]);
+  current = { ...added, destinations: { mode: "only", list: [...added.destinations.list, { action: "withdraw", chain: "base", address: "0xabc", memo: null }] } };
+  const kept = (await policyChange({ withdrawals: [] }, reviewed())).request.policy;
+  assert.deepEqual(kept.destinations.list, [
+    { action: "withdraw", chain: "base", address: "0xabc", memo: null },
+    { action: "transfer", address: "payee.near", confidential: true },
+  ], "the platform's own withdrawal payees are removed; another chain's is kept");
+  assert.deepEqual(kept.actions, ["transfer", "withdraw"], "withdrawals stay on while any withdrawal destination remains");
+  current = { ...added };
+  const removed = (await policyChange({ withdrawals: [] }, reviewed())).request.policy;
+  assert.deepEqual(removed.actions, ["transfer"], "removing the last withdrawal payee turns withdrawals off");
+  const untouched = (await policyChange({ budget: { daily_usd: "10", weekly_usd: null, monthly_usd: null } }, reviewed())).request.policy;
+  assert.deepEqual(untouched.destinations.list, added.destinations.list, "an edit that doesn't name withdrawals keeps them");
+});
+
+test("an edit that doesn't name withdrawals leaves them exactly as they are, on or off", async () => {
+  const budget = { budget: { daily_usd: "10", weekly_usd: null, monthly_usd: null } };
+  const payees = payoutPolicy(["payee.near"]);
+  for (const [actions, destinations] of [
+    [["transfer"], [{ action: "withdraw", chain: "near", address: "worker.near", memo: null }]],
+    [["transfer"], [{ action: "withdraw", chain: "base", address: "0xabc", memo: null }]],
+    [["transfer", "withdraw"], []],
+  ] as const) {
+    current = { ...payees, actions: [...actions], destinations: { mode: "only", list: [...payees.destinations.list, ...destinations] } };
+    const edited = (await policyChange(budget, { revision: 1, digest: mandateDigest(current) })).request.policy;
+    assert.deepEqual(edited.actions, [...actions], JSON.stringify(destinations));
+  }
+});
+
 test("a field sent as undefined stays as it is in force, never dropped from the requested policy", async () => {
   const result = await policyRequest({ owner_approval: undefined, max_actions_per_hour: 5 }, expected);
   assert.equal(result.policy.owner_approval, original.owner_approval);

@@ -38,13 +38,13 @@ export async function held({ complete = false }: { complete?: boolean } = {}) {
 
 /**
  * One of this agent's payments as the provider sees it now: reads only, so an approve-only copy can
- * follow a payment its executor sent. Anything that isn't provably this agent's transfer is refused,
+ * follow a payment its executor sent. Anything that isn't provably this agent's transfer or withdrawal is refused,
  * since every agent on the API key shares one status lookup: `readStatus` refuses another agent's
  * operation, but only when the provider names one, and owner intents (an agent's creation) are no payment.
  */
 export async function paymentStatus(correlationId: string, waitMs?: number) {
   const s = await readStatus(correlationId, waitMs);
-  if (s.type !== "transfer" || s.agent_id !== agentId()) throw new Error("Not a payment of this agent");
+  if ((s.type !== "transfer" && s.type !== "withdraw") || s.agent_id !== agentId()) throw new Error("Not a payment of this agent");
   // Read-only review: reconstruct terms from the same provider approval after a browser reload.
   // A failed detail read must not erase a successfully read payment status.
   const local = readOps().find((op) => op.correlationId === correlationId);
@@ -52,7 +52,9 @@ export async function paymentStatus(correlationId: string, waitMs?: number) {
   const approvalId = s.details?.approval_id ?? null;
   let expiresAt: string | null = null;
   let detailError: string | null = null;
-  if (approvalId) {
+  // Terms are rebuilt from an approval only for a transfer: a withdrawal's approval data isn't observed yet, so its terms
+  // come from this copy's journal or not at all.
+  if (approvalId && s.type === "transfer") {
     try {
       const approval = await api.getApproval(agentId(), approvalId, { signal: AbortSignal.timeout(10_000) });
       const data = approval.request_data;
@@ -66,7 +68,10 @@ export async function paymentStatus(correlationId: string, waitMs?: number) {
     request, approvalId, expiresAt, detailError, evidence: paymentEvidence(s.details) };
 }
 
-/** Transfers waiting for approval in the API's history, newest first, from the approval window. */
+/**
+ * Transfers waiting for approval in the API's history, newest first, from the approval window. Held withdrawals are
+ * listed from this copy's journal only: their approval data isn't observed yet, so their terms aren't rebuilt from it.
+ */
 async function heldElsewhere() {
   const since = Date.now() - APPROVAL_TTL_MS;
   const found = [];
@@ -97,7 +102,7 @@ export async function paymentHistory() {
   for (let pageIndex = 0; pageIndex < 5; pageIndex++) {
     const page = await api.getHistory(agentId(), { limit: 50, ...(cursor && { cursor }) }, { signal: AbortSignal.timeout(10_000) });
     for (const entry of page.data) {
-      if (entry.agent_id !== agentId() || entry.type !== "transfer" || !entry.details?.approval_id || !(Date.parse(entry.created_at) >= since)) continue;
+      if (entry.agent_id !== agentId() || (entry.type !== "transfer" && entry.type !== "withdraw") || !entry.details?.approval_id || !(Date.parse(entry.created_at) >= since)) continue;
       items.set(entry.correlation_id, { correlationId: entry.correlation_id, at: entry.created_at });
     }
     if (!page.next_cursor) return { items: [...items.values()], complete: true };

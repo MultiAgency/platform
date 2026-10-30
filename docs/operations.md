@@ -316,7 +316,7 @@ has no test network) with its own state and test agents, never the live demo hos
 6. Rollback: redeploy the previous image; state stays on the staging volume. Nothing here touches proto.multiagency.ai
    or invoices.multiagency.ai.
 
-### Staging evidence on a test agent (prepared, not run)
+### Staging evidence on a test agent (run 2026-10-28: [mainnet log](mainnet-log.md#app-access-on-platform-staging-2026-10-28-utc))
 
 User-run, on mainnet, with a small amount of the user's own USDC; never scheduled. It shows the app path end to end:
 setup, creation on the confirm page, consent, a payout request held for the owner, and the owner's vote relayed by an
@@ -364,6 +364,40 @@ with any remaining funds under the signed policy; the consent ends when it expir
 Record each step's outcome in `docs/mainnet-log.md` with the date (UTC) and the deployment id; op ids, transaction
 hashes, amounts and payees go only in the private release record.
 
+### Staging withdrawals on the same test agent (prepared, not run)
+
+User-run, on mainnet, with small amounts of the user's own wNEAR and USDC; never scheduled. It shows what is offline-
+and stack-tested only: a withdrawal to a NEAR account arriving (wNEAR as native NEAR, USDC as USDC), the fee 1Click
+takes, the registration refusal, and what a held withdrawal's approval carries. The stand-in drives it, as above.
+
+Before starting: staging deployed from a candidate that includes withdrawals and the registration check; the test agent
+from the run above, with its consent, grant and payee; the payee registered on the USDC contract (`storage_balance_of`
+answers an object, not `null`); a second NEAR account that exists and is not registered on USDC (`null`); no other
+staging run in progress.
+
+1. Start the stand-in as above and enter the agent's name. Each policy edit below opens the confirm page: check the
+   fields it shows before and after, then sign twice. Read the owner status until `SUCCESS`.
+2. Agree the payee for withdrawal ("Agree payee for withdrawal"). Expect `actions` to gain `withdraw` and `destinations`
+   a `withdraw` entry on chain `near` with no memo. The edit names the whole withdrawal list: agreeing another account
+   this way replaces the first.
+3. Allow wNEAR with a small cap ("Allow wNEAR", in yoctoNEAR). Expect `assets` to gain `nep141:wrap.near` and `limits` a
+   wNEAR cap per payout, day and month, every other cap unchanged.
+4. Turn owner approval off. Every payout within the policy is then paid without a vote, transfers included, until
+   step 9.
+5. Fund wNEAR: "Deposit address" with asset wNEAR, then send wNEAR as the answer says.
+6. Request a small wNEAR withdrawal (delivery "withdraw to chain near"). Expect `succeeded`. Record the payee's native
+   NEAR received against the amount (the fee), and how long it took.
+7. Request a small USDC withdrawal to the same payee. Expect `succeeded`; record the USDC received against the amount.
+8. Request a USDC withdrawal to the unregistered account. Expect the refusal `recipient_not_registered`, with nothing
+   recorded (`payouts/status` reads `not_found`) and nothing sent.
+9. Turn owner approval on. Request a small wNEAR withdrawal: expect `held`. Record what `held` and the owner status show
+   for it. Vote approve: expect it refused before the wallet is asked (approving a held withdrawal isn't available).
+   Vote reject (signed in the stand-in): expect `failed` and nothing paid.
+
+Stop rules as above. Record each outcome in `docs/mainnet-log.md`; amounts, fees and payees go only in the private
+release record. What step 9 shows decides whether approving a held withdrawal can be bound and enabled
+([enforcement](enforcement.md)).
+
 ## Payout executor
 
 The payout executor now serves both the private dashboard and public invoice page. Stop an existing
@@ -399,6 +433,11 @@ been tested against records written by it (shared payout mode, required `approve
 build against older approved records without `approvedAmount`. Treat a payout-executor rollback below SDK 0.1.0, after
 its first compensation record, as unsupported until a compatibility test exists. A rollback to r2 leaves all
 compensation and agent-connection state unread.
+A journal line with method `withdraw` (a payout request's withdrawal, since P3b, written before `authorize` runs, so
+also for a refused one) is unreadable to a build before it: that build refuses the whole journal ("unsupported record
+shape"), so it sends nothing for that agent and its reads of that journal (status, held payouts, the dashboard) fail
+too. That fails closed, but rolling an executor back past P3b after its first withdrawal request needs the
+compatibility review first; hosted agents are executors.
 
 **Deploy on Railway** (`Dockerfile.payouts`, selected by `railway.json`, one replica, one executor host per agent):
 

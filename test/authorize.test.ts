@@ -115,6 +115,32 @@ test("payouts, invoices and approvals are confidential USDC transfers", () => {
   }
 });
 
+test("a payout may withdraw wNEAR or USDC to an agreed NEAR account, from the confidential balance; invoices and approvals never withdraw", () => {
+  const withdrawing: Policy = { ...payout, actions: ["transfer", "withdraw"], assets: [ASSETS.USDC, ASSETS.wNEAR],
+    destinations: { mode: "only", list: [...payout.destinations.list, { action: "withdraw", chain: "near", address: "payee.near", memo: null }] } };
+  const view = policyView(withdrawing, 11);
+  const withdraw = (change: Record<string, unknown> = {}): Action =>
+    ({ method: "withdraw", request: { asset: ASSETS.wNEAR, amount: "1000", chain: "near", recipient: "payee.near", confidential: true, ...change } as never });
+  const payoutCode = (action: Action, available = "5000") => code("payout", action, { view, available });
+  assert.equal(payoutCode(withdraw()), "ok");
+  assert.equal(payoutCode(withdraw({ asset: ASSETS.USDC })), "ok");
+  for (const [change, why] of [[{ chain: "eth" }, "another chain"], [{ confidential: false }, "the public balance"], [{ memo: "x" }, "a memo"],
+    [{ asset: "nep141:other.near" }, "another asset"]] as const)
+    assert.equal(payoutCode(withdraw(change)), "withdraw_not_allowed", why);
+  assert.equal(payoutCode(withdraw({ recipient: "other.near" })), "payee_not_agreed");
+  const memoed: Policy = { ...withdrawing, destinations: { mode: "only", list: [{ action: "withdraw", chain: "near", address: "payee.near", memo: "m" }] } };
+  assert.equal(code("payout", withdraw(), { view: policyView(memoed, 11), available: "5000" }), "payee_not_agreed", "a destination with a memo isn't this payee");
+  const except: Policy = { ...withdrawing, destinations: { mode: "except", list: [] } };
+  assert.equal(code("payout", withdraw(), { view: policyView(except, 11), available: "5000" }), "payee_not_agreed", "only an only-mode policy agrees to anyone");
+  assert.equal(payoutCode(withdraw(), "999"), "insufficient_balance");
+  assert.equal(code("payout", withdraw(), { view, available: "5000", heldPayouts: [{ recipient: "payee.near", asset: ASSETS.wNEAR, amount: "1000" }] }), "duplicate_held_payout");
+  for (const purpose of ["invoice", "approval"] as const) assert.equal(code(purpose, withdraw(), { view }), "transfer_not_allowed", purpose);
+  const usdcOnly: Policy = { ...withdrawing, assets: [ASSETS.USDC] };
+  assert.equal(code("payout", withdraw(), { view: policyView(usdcOnly, 11), available: "5000" }), "asset_not_allowed", "an asset outside the policy is refused before sending");
+  assert.equal(code("payout", withdraw(), { view: policyView({ ...withdrawing, assets: "any" }, 11), available: "5000" }), "ok");
+  for (const purpose of ["treasury", "autopilot"] as const) assert.equal(code(purpose, withdraw()), "withdraw_not_allowed", purpose);
+});
+
 test("an approval releasing a payee the policy no longer agrees to is refused; sends leave payees to the provider", () => {
   assert.equal(code("approval", pay("stranger.near")), "payee_not_agreed");
   for (const purpose of ["payout", "invoice"] as const) assert.equal(code(purpose, pay("stranger.near")), "ok", purpose);

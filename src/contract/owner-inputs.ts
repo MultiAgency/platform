@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import type { agreementCommand, compensationSend, paymentPreparation, reviewCommand } from "../compensation-contract.js";
-import type { executePlanInput, ownerAction, ownerPrepareInput, ownerStatusInput, ownerSubmitInput, payoutRequestInput, payoutStatusInput } from "./inputs.js";
+import type { depositInput, executePlanInput, ownerAction, ownerPrepareInput, ownerStatusInput, ownerSubmitInput, payoutRequestInput, payoutStatusInput } from "./inputs.js";
 
 /**
  * Owner procedure inputs as the router accepts them (before server-side parsing). Procedures in the owner contract
@@ -22,7 +22,7 @@ export type OwnerInputs = {
   "compensation/list": undefined; "workOrders/list": undefined; "workOrders/get": { id: string }; "workOrders/status": { id: string; correlationId: string };
   // Mutations
   pay: { recipient: string; asset: string; amount: string; confidential: boolean; expectedPolicy: ReviewedPolicy };
-  deposit: undefined; recover: undefined; cancelPreparedInvoice: { id: string }; "inbox/dismiss": { id: string };
+  deposit: In<typeof depositInput>; recover: undefined; cancelPreparedInvoice: { id: string }; "inbox/dismiss": { id: string };
   "owner/prepare": In<typeof ownerPrepareInput>; "owner/submit": In<typeof ownerSubmitInput>;
   "payouts/request": In<typeof payoutRequestInput>; "payouts/status": In<typeof payoutStatusInput>;
   "agreements/propose": { id: string; until: string }; "agreements/offer": { payee: string; amount: string; note: string; until: string }; "agreements/decline": { id: string };

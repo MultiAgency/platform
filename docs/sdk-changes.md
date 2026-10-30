@@ -20,8 +20,14 @@ All additive. Nothing on the existing wire changes.
   `owner/status`. A prepared vote answers `payment` with the held payout and, for approve, its recipient, asset and
   amount as the platform proved them against the provider's request hash (`ownerPrepareOutput`).
 - **Payout requests:** `payouts/request` (`requestId`, `asset`, `delivery` (`"intents"` or `{ chain }`),
-  recipient, amount, reviewed policy; only confidential USDC through `intents` is paid yet: another asset is refused
-  `transfer_not_allowed`, a chain delivery before anything is recorded) and `payouts/status`, answering `payoutRequestOutput` (`state`: `succeeded`, `failed`, `held`, `processing`,
+  recipient, amount, reviewed policy): confidential USDC through `intents` (another asset is refused
+  `transfer_not_allowed`), or a withdrawal with `{ chain: "near" }` of wNEAR (arriving as native NEAR, per the provider's
+  docs) or USDC that the policy's `assets` include, from the confidential balance, to a NEAR account the policy's
+  `withdrawals` agree to pay (never a `nearcom:` address); another chain is refused `chain_not_supported` before anything
+  is recorded, and a USDC withdrawal to an account not registered on the USDC contract `recipient_not_registered`
+  (wNEAR needs none). A held withdrawal can be rejected, not approved, for now, so a withdrawal is paid only under a policy
+  without owner approval. Policy edits take `withdrawals: [{ address }]`; `deposit` takes an optional `asset` (USDC or wNEAR). A procedure
+  whose input may be left out (`deposit`) is called with or without one. And `payouts/status`, answering `payoutRequestOutput` (`state`: `succeeded`, `failed`, `held`, `processing`,
   `refused`, `unknown`, `not_found`; `failed` doesn't prove nothing moved). A request is sent at most once per caller and `requestId`; asked again it sends nothing; other
   terms under the same `requestId` are refused (`refused`, code `request_conflict`). Owners reach them with `ownerClient`
   (capability `payables-payout-requests-v1`), apps with `payout` consent (`APP_PAYOUT`, which also covers `deposit`: a

@@ -149,8 +149,20 @@ and terms, which sends at most once). `processing` and `unknown` block that agen
 `payouts/status` later; never pay that request another way meanwhile. Other terms under a used `requestId` are refused
 (`code: "request_conflict"`). A named recipient that doesn't exist on NEAR is refused before anything is recorded
 (`recipient_not_found`: fix the payee, then a new `requestId`); `recipient_unchecked` means the chain didn't answer:
-ask again with the same `requestId`. These two come back as a refused result, not a state. Today only confidential
-USDC through `intents` is paid.
+ask again with the same `requestId`. These two come back as a refused result, not a state.
+
+To pay a NEAR account directly, the owner first agrees it as a withdrawal payee (a `policy_update` with
+`withdrawals: [{ address }]`; the first one turns withdrawals on, an on-chain edit signed on the confirm page). To pay
+wNEAR, the owner also adds `nep141:wrap.near` to the policy's `assets` and sets its per-asset `limits` (the payout
+template has USDC only; without a limit only the USD budget caps it). Then request with `delivery: { chain: "near" }` and
+`asset` wNEAR (arriving as native NEAR, per the provider's docs) or USDC; an asset the policy doesn't include is refused
+`asset_not_allowed` before sending. It is paid from the confidential balance, is public on chain, and may arrive less a
+route fee. A USDC withdrawal's recipient must be registered on the USDC contract (a one-time `storage_deposit` the payee
+makes from any wallet): otherwise it is refused `recipient_not_registered` before anything is recorded, and the same
+`requestId` can be asked again once it is. A `nearcom:` address is never a withdrawal recipient; any other chain is refused `chain_not_supported`. A held
+withdrawal can be rejected, not approved, for now: show the owner the reject choice only. Under the payout template every
+payout is held, so a withdrawal is paid only once the owner turns `owner_approval` off. Fund wNEAR with `deposit` and
+`{ asset: "nep141:wrap.near" }`.
 
 ## Common mistakes
 
@@ -162,6 +174,7 @@ USDC through `intents` is paid.
 - **Showing your own summary instead of the signed text** (HIGH): the owner must read what the wallet signs.
 - **Asking the owner to sign the confirm page's text ("Open a MultiAgency confirm page.") in your app** (CRITICAL): it
   is the owner's proof to the platform's page; signed elsewhere, it hands out the bytes for a blind signature.
+- **Withdrawing to a `nearcom:` address** (CRITICAL): it is not on any chain; near.com users are paid through `intents`.
 - **Showing your own record of a held payout when asking for a vote** (HIGH): show the prepared vote's
   `payment.terms`, which the platform proved; your record may name another payout than the one the vote releases.
 

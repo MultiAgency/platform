@@ -64,6 +64,14 @@ export function agreedPayees(policy: Policy) {
   return new Set(policy.destinations.list.flatMap((d) => d.action === "transfer" && d.confidential ? [d.address] : []));
 }
 
+/** NEAR accounts the owner agreed to pay by withdrawal: exact `withdraw` destinations on chain `near`, without a memo, of an `only` policy. */
+export function agreedWithdrawals(policy: Policy) {
+  if (policy.destinations.mode !== "only") return new Set<string>();
+  return new Set(policy.destinations.list.flatMap((d) => d.action === "withdraw" && d.chain === "near" && d.memo === null ? [d.address] : []));
+}
+/** What a payout may withdraw to NEAR: wNEAR (it arrives as native NEAR) and USDC. */
+export const WITHDRAWN = new Set<string>([ASSETS.wNEAR, ASSETS.USDC]);
+
 /** Which grant labels may send for each purpose. Approval votes need no grant. */
 function grantAllows(purpose: Purpose, label: string, strategy?: Strategy) {
   switch (purpose) {
@@ -105,7 +113,19 @@ export function authorize(action: Action, c: Case): Refusal | null {
   if (buys) return refuse("asset_out_not_allowed", buys);
 
   if (purpose === "payout" || purpose === "invoice" || purpose === "approval") {
-    if (action.method !== "transfer" || action.request.asset !== ASSETS.USDC || !action.request.confidential)
+    // A payout request may also withdraw to an agreed NEAR account, from the confidential balance it is funded in.
+    // Invoices and approvals stay confidential USDC transfers.
+    if (action.method === "withdraw" && purpose === "payout") {
+      const { chain, asset, confidential, memo, recipient } = action.request;
+      if (chain !== "near" || !confidential || memo !== undefined || !WITHDRAWN.has(asset))
+        return refuse("withdraw_not_allowed", "Payout withdrawals are wNEAR or USDC to chain near, from the confidential balance, without a memo");
+      // The provider refuses an asset outside the policy under a code not proven here, which would leave the operation
+      // unknown and block the agent's sends: refused before anything is sent instead.
+      if (policy.assets !== "any" && !policy.assets.includes(asset))
+        return refuse("asset_not_allowed", "The policy doesn't permit this asset: the owner adds it to the policy's assets first");
+      if (!agreedWithdrawals(policy).has(recipient))
+        return refuse("payee_not_agreed", `${recipient} is not a NEAR account this policy agrees to pay by withdrawal`);
+    } else if (action.method !== "transfer" || action.request.asset !== ASSETS.USDC || !action.request.confidential)
       return refuse("transfer_not_allowed", "Payouts are confidential USDC transfers");
     // The provider checked payee and cap when the payment was requested, under the policy then; the
     // owner signs now, so what the policy no longer allows is refused here.
@@ -133,6 +153,8 @@ export function authorize(action: Action, c: Case): Refusal | null {
   }
 
   if (c.purpose === "treasury" || c.purpose === "autopilot") {
+    // Only a payout request withdraws.
+    if (action.method === "withdraw") return refuse("withdraw_not_allowed", "Only a payout request withdraws");
     const { plan: sending, strategy, tokens } = c.facts;
     if (c.purpose === "autopilot" && action.method === "swap" && sending?.leg.type !== "swap")
       return refuse("valuation_unavailable", "An automatic swap needs a plan-bound valuation");

@@ -9,6 +9,7 @@ import { mandateDigest } from "../src/mandate.js";
 import { opsLog, readOps, record } from "../src/ops.js";
 import { readFileSync } from "node:fs";
 import { payoutStatus, requestKey, requestPayout } from "../src/payout-requests.js";
+import { payoutRequestInput } from "../src/contract/inputs.js";
 import { ASSETS, payoutPolicy } from "../src/policy.js";
 import { PublicError } from "../src/public-error.js";
 import { freshDirectory, offline } from "./fixtures/harness.js";
@@ -188,12 +189,103 @@ test("a request recorded by another caller between the early answer and the writ
   assert.equal(readOps().filter(op => op.idempotencyKey === key).length, 1);
 });
 
-test("only confidential USDC is paid yet: another asset is refused by authorize, a chain delivery before anything is recorded", async () => {
-  const other = await requestPayout(APP, { ...request("r-1"), asset: "nep141:wrap.near" });
+test("through intents only confidential USDC is paid; a withdrawal goes only to chain near, other chains refused before anything is recorded", async () => {
+  const other = await requestPayout(APP, { ...request("r-1"), asset: ASSETS.wNEAR });
   assert.deepEqual([other.state, other.code], ["refused", "transfer_not_allowed"]);
-  await assert.rejects(requestPayout(APP, { ...request("r-2"), delivery: { chain: "near" } }), PublicError);
+  await assert.rejects(requestPayout(APP, { ...request("r-2"), delivery: { chain: "eth" } }), (error: unknown) =>
+    error instanceof ORPCError && (error.data as { code?: string }).code === "chain_not_supported");
   assert.equal((await payoutStatus(APP, "r-2")).state, "not_found");
   assert.equal(sends.length, 0);
+});
+
+/** A payout policy that also withdraws, to `payee.near`, wNEAR and USDC. */
+const withdrawing = (): Policy => {
+  const base = payoutPolicy(["payee.near"]);
+  // Auto-pay, so the provider settles without a vote (a held withdrawal can only be rejected for now).
+  return { ...base, owner_approval: false, actions: ["transfer", "withdraw"], assets: [ASSETS.USDC, ASSETS.wNEAR],
+    destinations: { mode: "only", list: [...base.destinations.list, { action: "withdraw", chain: "near", address: "payee.near", memo: null }] } };
+};
+const withdrawal = (requestId: string, asset: string = ASSETS.wNEAR, recipient = "payee.near", amount = "1000000") =>
+  ({ requestId, asset, delivery: { chain: "near" }, recipient, amount, expectedPolicy: reviewed() });
+
+test("a withdrawal to an agreed NEAR account is sent once, from the confidential balance, through the one send site", async () => {
+  policy = withdrawing();
+  const sent: unknown[] = [];
+  const withdraw = async (_id: string, body: unknown, { idempotencyKey }: { idempotencyKey: string }) => { sent.push({ idempotencyKey, body }); return { correlation_id: `op_w${sent.length}` }; };
+  mock.method(api, "forGrant", () => ({ withdraw, transfer: assert.fail, swap: assert.fail, shield: assert.fail, unshield: assert.fail }));
+  mock.method(api, "getBalances", async (_id: string, { source }: { source: string }) => ({ near_account_id: "w", source,
+    balances: [{ asset_id: ASSETS.wNEAR, balance_raw: "5000000" }, { asset_id: ASSETS.USDC, balance_raw: "5000000" }] }));
+  for (const [id, asset] of [["w-near", ASSETS.wNEAR], ["w-usdc", ASSETS.USDC]] as const) {
+    const first = await requestPayout(APP, withdrawal(id, asset));
+    assert.deepEqual([first.state, first.code], ["succeeded", null], id);
+    assert.deepEqual(await requestPayout(APP, withdrawal(id, asset)), first, "asking again sends nothing");
+  }
+  assert.deepEqual(sent, [
+    { idempotencyKey: requestKey(APP, "w-near"), body: { asset: ASSETS.wNEAR, amount: "1000000", chain: "near", recipient: "payee.near", confidential: true } },
+    { idempotencyKey: requestKey(APP, "w-usdc"), body: { asset: ASSETS.USDC, amount: "1000000", chain: "near", recipient: "payee.near", confidential: true } },
+  ]);
+  assert.deepEqual(readOps().filter(op => op.idempotencyKey.startsWith("request:")).map(op => op.method), ["withdraw", "withdraw"], "the journal records the method");
+  await assert.rejects(requestPayout(APP, { ...withdrawal("w-near"), delivery: "intents" }), (error: unknown) =>
+    error instanceof ORPCError && (error.data as { code?: string }).code === "request_conflict", "the same requestId can't switch to a transfer");
+});
+
+test("a withdrawal is refused unless its payee is an agreed withdrawal account, its asset wNEAR or USDC, and the balance covers it", async () => {
+  policy = withdrawing();
+  mock.method(api, "forGrant", () => ({ withdraw: assert.fail, transfer: assert.fail, swap: assert.fail, shield: assert.fail, unshield: assert.fail }));
+  mock.method(api, "getBalances", async (_id: string, { source }: { source: string }) => ({ near_account_id: "w", source,
+    balances: [{ asset_id: ASSETS.wNEAR, balance_raw: "5000000" }] }));
+  const refused = async (input: ReturnType<typeof withdrawal>) => { const r = await requestPayout(APP, input); return [r.state, r.code]; };
+  assert.deepEqual(await refused(withdrawal("a", ASSETS.wNEAR, "other.near")), ["refused", "payee_not_agreed"], "a transfer payee is not a withdrawal payee");
+  policy = { ...withdrawing(), destinations: { mode: "only", list: [{ action: "transfer", address: "payee.near", confidential: true }] } };
+  assert.deepEqual(await refused(withdrawal("b")), ["refused", "payee_not_agreed"], "an agreed transfer payee isn't agreed for withdrawals");
+  policy = withdrawing();
+  assert.deepEqual(await refused(withdrawal("c", "nep141:other.near")), ["refused", "withdraw_not_allowed"]);
+  assert.deepEqual(await refused(withdrawal("d", ASSETS.wNEAR, "payee.near", "6000000")), ["refused", "insufficient_balance"]);
+  assert.deepEqual(await refused(withdrawal("e", ASSETS.USDC)), ["refused", "insufficient_balance"], "the balance is per asset");
+});
+
+test("a withdrawal to a named account that doesn't exist on NEAR is refused before anything is recorded or sent", async () => {
+  policy = { ...withdrawing(), destinations: { mode: "only", list: [{ action: "withdraw", chain: "near", address: "ghost.near", memo: null }] } };
+  mock.method(api, "forGrant", () => ({ withdraw: assert.fail, transfer: assert.fail, swap: assert.fail, shield: assert.fail, unshield: assert.fail }));
+  const { recipientChain } = await import("../src/recipients.js");
+  mock.method(recipientChain, "exists", async () => false);
+  await assert.rejects(requestPayout(APP, withdrawal("g-1", ASSETS.USDC, "ghost.near")), (error: unknown) =>
+    error instanceof ORPCError && (error.data as { code?: string }).code === "recipient_not_found");
+  assert.equal((await payoutStatus(APP, "g-1")).state, "not_found");
+});
+
+test("a USDC withdrawal to an account not registered on the USDC contract is refused before anything is recorded; wNEAR needs no registration", async () => {
+  policy = withdrawing();
+  const sent: unknown[] = [];
+  const send = async () => { sent.push(1); return { correlation_id: `op_r${sent.length}` }; };
+  mock.method(api, "forGrant", () => ({ withdraw: send, transfer: send, swap: assert.fail, shield: assert.fail, unshield: assert.fail }));
+  mock.method(api, "getBalances", async (_id: string, { source }: { source: string }) => ({ near_account_id: "w", source,
+    balances: [{ asset_id: ASSETS.wNEAR, balance_raw: "5000000" }, { asset_id: ASSETS.USDC, balance_raw: "5000000" }] }));
+  const { recipientChain } = await import("../src/recipients.js");
+  const read = mock.method(recipientChain, "registered", async () => false);
+  await assert.rejects(requestPayout(APP, withdrawal("u-1", ASSETS.USDC)), (error: unknown) =>
+    error instanceof ORPCError && (error.data as { kind?: string; code?: string }).kind === "refused" && (error.data as { code?: string }).code === "recipient_not_registered");
+  assert.deepEqual(read.mock.calls.map(call => call.arguments), [[ASSETS.USDC.replace(/^nep141:/, ""), "payee.near"]], "read on the token's own contract");
+  assert.equal((await payoutStatus(APP, "u-1")).state, "not_found", "nothing recorded, so the requestId is kept");
+  assert.equal((await requestPayout(APP, withdrawal("n-1", ASSETS.wNEAR))).state, "succeeded", "wNEAR arrives as native NEAR");
+  assert.equal(read.mock.callCount(), 1, "no registration read for wNEAR");
+  assert.equal((await requestPayout(APP, request("t-1"))).state, "succeeded", "a transfer stays inside NEAR Intents");
+  assert.equal(read.mock.callCount(), 1, "no registration read for a transfer");
+  read.mock.mockImplementation(async () => { throw new Error("rpc down"); });
+  await assert.rejects(requestPayout(APP, withdrawal("u-2", ASSETS.USDC)), (error: unknown) =>
+    error instanceof ORPCError && (error.data as { code?: string }).code === "recipient_unchecked");
+  read.mock.mockImplementation(async () => true);
+  assert.equal((await requestPayout(APP, withdrawal("u-1", ASSETS.USDC))).state, "succeeded", "once registered, the same requestId is sent once");
+  assert.equal(sent.length, 3, "wNEAR, the transfer, and u-1 once registered");
+});
+
+test("a withdrawal's recipient must be a NEAR account: a nearcom: address is refused by the request's schema", () => {
+  const parse = (recipient: string, delivery: "intents" | { chain: string }) =>
+    payoutRequestInput.safeParse({ requestId: "r", asset: ASSETS.wNEAR, delivery, recipient, amount: "1", expectedPolicy: reviewed() });
+  assert.equal(parse("nearcom:0xabc0000000000000000000000000000000000000", { chain: "near" }).success, false);
+  const viaIntents = parse("nearcom:0xABC0000000000000000000000000000000000000", "intents");
+  assert.equal(viaIntents.success && viaIntents.data.recipient, "0xabc0000000000000000000000000000000000000", "through intents it is the bare account");
+  assert.equal(parse("payee.near", { chain: "near" }).success, true);
 });
 
 test("reading a request that hasn't moved writes nothing to the journal", async () => {

@@ -111,7 +111,7 @@ export function ownerClient({ base = "", fetch: send = globalThis.fetch }: { bas
 
   return {
     /** One read or non-stream mutation; the answer is validated against the published output schema. */
-    async call<P extends Exclude<OwnerProcedure, Stream>>(path: P, ...[input, options]: OwnerInputs[P] extends undefined ? [input?: undefined, options?: OwnerCallOptions] : [input: OwnerInputs[P], options?: OwnerCallOptions]): Promise<OwnerResult<OwnerOutput<P>>> {
+    async call<P extends Exclude<OwnerProcedure, Stream>>(path: P, ...[input, options]: undefined extends OwnerInputs[P] ? [input?: OwnerInputs[P], options?: OwnerCallOptions] : [input: OwnerInputs[P], options?: OwnerCallOptions]): Promise<OwnerResult<OwnerOutput<P>>> {
       const identity = (input ?? {}) as Identity;
       let output: unknown;
       let status: number | undefined;

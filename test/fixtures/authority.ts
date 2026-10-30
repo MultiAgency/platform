@@ -15,8 +15,10 @@ export function fixtureGrant(label = `treasury:${strategyLabelSuffix(loadStrateg
       network: "mainnet" as const, issued_at_ms: Date.now(), expires_at_ms: expires, owner_epoch: 1, nonce: "fixture", recipient: "fixture" } };
 }
 export function authorityFixture(purpose: "treasury" | "payout" = "payout") {
-  // Named payout recipients exist on NEAR in this offline world; a test that needs otherwise mocks `recipientChain.exists`.
+  // Named payout recipients exist on NEAR, and are registered on every token, in this offline world; a test that needs
+  // otherwise mocks `recipientChain`.
   recipientChain.exists = async () => true;
+  recipientChain.registered = async () => true;
   return {
     getAgent: async () => ({ id: process.env.AGENT_ID!, status: "ACTIVE", archived: false, deleted: false, owner: fixtureOwner, wallet: fixtureWallet }),
     getWallet: async () => fixtureWallet,

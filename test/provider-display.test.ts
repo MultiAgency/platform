@@ -90,3 +90,13 @@ test("metadata on an ambiguous error cannot turn it into a refusal", async () =>
   await assert.rejects(pay({ recipient: "payee.near", asset: ASSETS.USDC, amount: "1000000", confidential: true }));
   assert.equal(readOps().some(blocksDispatch), true);
 });
+
+test("a deposit address is for USDC unless wNEAR is asked for; nothing else", async () => {
+  const asked: string[] = [];
+  mock.method(api, "deposit", async (_id: string, body: { origin_asset: string }) => { asked.push(body.origin_asset);
+    return { correlation_id: "op_d", details: { deposit_address: "a".repeat(64), memo: null } }; });
+  await client.deposit();
+  await client.deposit({ asset: ASSETS.wNEAR });
+  assert.deepEqual(asked, [ASSETS.USDC, ASSETS.wNEAR]);
+  await assert.rejects(client.deposit({ asset: "nep141:other.near" } as never));
+});

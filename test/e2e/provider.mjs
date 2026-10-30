@@ -80,12 +80,15 @@ export async function provider(directory, { treasury = false, account = OWNER, p
   let unavailable = false, outageRefusals = 0;
   let dropSwapAt = 0, observationGate;
 
-  const status = payment => ({ correlation_id: payment.correlation, agent_id: payment.agent, type: 'transfer', status: payment.status,
+  const status = payment => ({ correlation_id: payment.correlation, agent_id: payment.agent, type: payment.type ?? 'transfer', status: payment.status,
     created_at: payment.at, updated_at: payment.at, failure_code: payment.failure ?? null, details: { approval_id: payment.approval } });
+  // A held withdrawal's approval shape isn't observed on mainnet: modelled here as OutLayer's `Withdraw` op, only so a
+  // reject has an approval to name. The platform never approves one.
   const approval = payment => {
-    const data = { amount: payment.body.amount, chain: 'near', flow: 'transfer', kind: 'confidential', to: payment.body.recipient, token: payment.body.asset };
+    const data = payment.type === 'withdraw' ? { amount: payment.body.amount, kind: 'withdraw', to: payment.body.recipient, token: payment.body.asset }
+      : { amount: payment.body.amount, chain: 'near', flow: 'transfer', kind: 'confidential', to: payment.body.recipient, token: payment.body.asset };
     return { approval_id: payment.approval, wallet_id: agents.get(payment.agent).wallet.wallet_id, status: payment.status === 'PENDING_APPROVAL' ? 'PENDING' : payment.failure === 'rejected_by_owner' ? 'REJECTED' : 'APPROVED',
-      expires_at: expires, request_type: 'confidential', request_data: data,
+      expires_at: expires, request_type: payment.type === 'withdraw' ? 'withdraw' : 'confidential', request_data: data,
       request_hash: createHash('sha256').update(JSON.stringify(data)).digest('hex') };
   };
   let dropNextTransfer = false, dropNextSignature = false, ownerOutcomeUnavailable = false;
@@ -116,6 +119,11 @@ export async function provider(directory, { treasury = false, account = OWNER, p
             : { jsonrpc: '2.0', id: requestId, error: { name: 'HANDLER_ERROR', cause: { name: 'UNKNOWN_ACCOUNT', info: { requested_account_id: params.account_id } }, code: -32000, message: 'Server error' } });
         if (params.request_type === 'call_function' && params.method_name === 'ft_balance_of')
           return json(res, { jsonrpc: '2.0', id: requestId, result: { result: [...Buffer.from(JSON.stringify('0'))], logs: [], block_height: 1, block_hash: '11111111111111111111111111111111' } });
+        // Token registration (NEP-145) for a withdrawal's recipient: the declared accounts are registered on every token.
+        if (params.request_type === 'call_function' && params.method_name === 'storage_balance_of') {
+          const { account_id } = JSON.parse(Buffer.from(params.args_base64, 'base64').toString());
+          return view(known.includes(account_id) ? { total: '1250000000000000000000', available: '0' } : null);
+        }
         throw new Error(`Undeclared chain request: ${JSON.stringify(params)}`);
       }
       if (unavailable) { outageRefusals++; return json(res, { error: 'Declared local provider outage' }, 503); }
@@ -187,6 +195,16 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         const payment = { agent: agent.id, body, key: entry.key, correlation: randomUUID(), approval: randomUUID(), status: 'PENDING_APPROVAL', at: new Date().toISOString() };
         transfers.push(payment);
         if (dropNextTransfer) { dropNextTransfer = false; return res.destroy(); }
+        return json(res, { correlation_id: payment.correlation });
+      }
+      // A withdrawal to chain near from the confidential balance, held for the owner like a transfer.
+      if (agent && req.method === 'POST' && route === '/withdraw') {
+        if (!liveGrant(agent, req.headers['x-grant-token']) || !entry.key) throw new Error('Missing grant or operation identity');
+        const allowed = agent.policy.actions.includes('withdraw') && agent.policy.destinations.list.some(d => d.action === 'withdraw' && d.chain === 'near' && d.address === body.recipient && d.memo === null);
+        if (!allowed || body.asset !== USDC || body.chain !== 'near' || body.confidential !== true || body.memo !== undefined) throw new Error('Unexpected withdrawal terms');
+        if (BigInt(body.amount) > BigInt(agent.policy.limits.per_transaction[USDC]) || BigInt(body.amount) > agent.funded - spent(agent)) throw new Error('Withdrawal exceeds policy limit or funded balance');
+        const payment = { type: 'withdraw', agent: agent.id, body, key: entry.key, correlation: randomUUID(), approval: randomUUID(), status: 'PENDING_APPROVAL', at: new Date().toISOString() };
+        transfers.push(payment);
         return json(res, { correlation_id: payment.correlation });
       }
       if (req.method === 'POST' && url.pathname === '/v1/generate-intent') {
@@ -270,7 +288,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
     /** Simulated inbound deposit to the payout agent's own confidential balance (its one-time setup funding). */
     fundPayout(amount) { agents.get(id).funded += BigInt(amount); },
     /** The payout agent's current policy and revision (for assertions). */
-    payoutPolicy: () => ({ policy: agents.get(id).policy, revision: agents.get(id).revision }),
+    payoutPolicy: (agentId = id) => ({ policy: agents.get(agentId).policy, revision: agents.get(agentId).revision }),
     setUnavailable(value) { unavailable = value; },
     /** Provider requests refused by a declared outage: the witness that a call reached the provider. */
     outageRefusals: () => outageRefusals,

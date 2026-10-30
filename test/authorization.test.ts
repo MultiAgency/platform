@@ -91,7 +91,7 @@ function heldPayment(to: string) {
     .update(canonical({ ...terms, chain: "near", flow: "transfer", kind: "confidential" })).digest("hex");
   mock.method(api, "getApproval", async () => ({ approval_id: "approval", wallet_id: fixtureWallet.wallet_id, status: "PENDING",
     expires_at: new Date(Date.now() + 3_600_000).toISOString(), request_hash, request_type: "confidential", request_data: terms }));
-  mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, agent_id: process.env.AGENT_ID,
+  mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, agent_id: process.env.AGENT_ID, type: "transfer",
     status: "PENDING_APPROVAL", details: { approval_id: "approval" } }));
   return { approvalId: "approval", correlationId: "op_held", verdict: "approve" as const };
 }
@@ -99,4 +99,13 @@ function heldPayment(to: string) {
 test("an approval releasing a payee an except-mode policy doesn't agree to is refused", async () => {
   policy = except(["forbidden.near"]);
   await assert.rejects(checkPaymentApproval(heldPayment("other.near")), /payee_not_agreed/);
+});
+
+test("a held withdrawal can be rejected but not approved: its approval's terms and hash aren't observed yet", async () => {
+  policy = payoutPolicy(["payee.near"]);
+  const vote = heldPayment("payee.near");
+  mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, agent_id: process.env.AGENT_ID, type: "withdraw",
+    status: "PENDING_APPROVAL", details: { approval_id: "approval" } }));
+  await assert.rejects(checkPaymentApproval(vote), /approving a held withdrawal isn't available yet/);
+  assert.equal((await checkPaymentApproval({ ...vote, verdict: "reject" })).binding.verdict, "reject");
 });

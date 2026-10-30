@@ -77,12 +77,18 @@ const PAGE = `<!doctype html><html lang="en"><meta charset="utf-8"><title>Step 8
 <button data-run="create">Create the agent</button> <button data-run="consent">Sign consent (owner, payout, read)</button>
 <button data-run="grant">Issue payout grant</button><br>Payee: <input id="payee" placeholder="payee.near"> <button data-run="payee">Add payee</button>
 <button data-run="freeze">Freeze</button> <button data-run="unfreeze">Unfreeze</button><br>Correlation ID: <input id="correlation"> <button data-run="status">Owner status</button></fieldset>
-<fieldset><legend>3. Payout request and vote</legend>Request ID: <input id="requestId" placeholder="step8-1"><br>Amount (USDC base units, 6 decimals): <input id="amount" placeholder="100000">
-<br><button data-run="fund">Deposit address</button> <button data-run="pay">Request payout</button> <button data-run="payStatus">Payout status</button> <button data-run="held">Held</button> <button data-run="vote">Vote approve on the held payout</button></fieldset>
+<fieldset><legend>3. Withdrawals to a NEAR account (each a policy edit on the confirm page)</legend>
+<button data-run="withdrawals">Agree payee for withdrawal</button> wNEAR cap per payout, day and month (yoctoNEAR): <input id="wnearCap" placeholder="100000000000000000000000">
+<button data-run="allowNear">Allow wNEAR</button><br><button data-run="approvalOff">Owner approval off (auto-pay)</button> <button data-run="approvalOn">Owner approval on</button></fieldset>
+<fieldset><legend>4. Payout request and vote</legend>Asset: <select id="asset"><option value="USDC">USDC (6 decimals)</option><option value="wNEAR">wNEAR (24 decimals)</option></select>
+ Delivery: <select id="delivery"><option value="intents">intents (confidential transfer)</option><option value="near">withdraw to chain near</option></select>
+<br>Request ID: <input id="requestId" placeholder="step8-1"><br>Amount (base units): <input id="amount" placeholder="100000">
+<br><button data-run="fund">Deposit address</button> <button data-run="pay">Request payout</button> <button data-run="payStatus">Payout status</button> <button data-run="held">Held</button> <button data-run="vote">Vote approve on the held payout</button> <button data-run="reject">Vote reject</button></fieldset>
 <pre id="out"></pre>
 <script type="module">
 import { NearConnector } from "/near-connect.js";
-const USDC = "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
+const ASSETS = { USDC: "nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", wNEAR: "nep141:wrap.near" };
+const asset = () => ASSETS[$("asset").value];
 const $ = id => document.getElementById(id), out = v => { $("out").textContent = JSON.stringify(v, null, 2); return v; };
 const api = async (op, input = {}) => (await fetch("/api/" + op, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) })).json();
 const config = await api("config");
@@ -115,6 +121,21 @@ async function owner(action, check = () => null) {
   out({ prepared: prepared.value.payment ?? null, submitted: await api("call", { agent: $("agent").value, path: "owner/submit",
     input: { correlationId: prepared.value.correlationId, signedData: { ...intent, public_key: signed.publicKey, signature: signed.signature } } }) });
 }
+/** Votes on this request's held payout. */
+async function vote(verdict) {
+  const held = await api("call", { agent: $("agent").value, path: "held" });
+  const status = await api("call", { agent: $("agent").value, path: "payouts/status", input: { requestId: $("requestId").value } });
+  const entry = held.ok && status.ok && held.value.find(h => h.correlationId === status.value.correlationId);
+  if (!entry) return out({ error: "No held payout for this request ID", held, status });
+  // The vote's own text names no payee or amount: approving checks the terms the platform proved against this request.
+  // Rejecting releases nothing, so it carries no terms.
+  await owner({ type: "approval_vote", approvalId: entry.approvalId, verdict, correlationId: entry.correlationId }, prepared => {
+    if (verdict === "reject") return null;
+    const terms = prepared.payment?.terms;
+    return terms && terms.recipient === $("payee").value && terms.amount === $("amount").value && terms.asset === asset() ? null
+      : "The proven terms don't match this request's payee, amount and asset. Not signed.";
+  });
+}
 const runs = {
   setup: async () => {
     const { message } = await api("setupText", { owner: account.accountId, area: "payables" });
@@ -126,25 +147,28 @@ const runs = {
   consent: async () => { const text = await api("consentText", { agent: $("agent").value, scopes: ["owner", "payout", "read"] }); if (!text.message) return out(text); out(await api("consent", { submission: await signText(text.message) })); },
   grant: () => owner({ type: "grant_issue", label: "payout" }),
   payee: () => owner({ type: "policy_update", expectedPolicy: "current", changes: { destinations: [{ address: $("payee").value, confidential: true }] } }),
+  withdrawals: () => owner({ type: "policy_update", expectedPolicy: "current", changes: { withdrawals: [{ address: $("payee").value }] } }),
+  // Adds wNEAR to the assets and caps it per payout, day and month, keeping every other cap (an edit replaces \`limits\` whole).
+  allowNear: async () => {
+    const overview = await api("call", { agent: $("agent").value, path: "overview" });
+    const policy = overview.ok && overview.value.policy.policy;
+    if (!policy || !/^[1-9][0-9]*$/.test($("wnearCap").value)) return out({ error: "Needs the agent's policy and a wNEAR cap", overview });
+    if (!Array.isArray(policy.assets)) return out({ error: "This policy allows any asset; nothing to add", policy });
+    const cap = $("wnearCap").value, limits = { ...policy.limits };
+    for (const window of ["per_transaction", "daily", "monthly"]) limits[window] = { ...limits[window], [ASSETS.wNEAR]: cap };
+    await owner({ type: "policy_update", expectedPolicy: "current", changes: { assets: [...new Set([...policy.assets, ASSETS.wNEAR])], limits } });
+  },
+  approvalOff: () => owner({ type: "policy_update", expectedPolicy: "current", changes: { owner_approval: false } }),
+  approvalOn: () => owner({ type: "policy_update", expectedPolicy: "current", changes: { owner_approval: true } }),
   freeze: () => owner({ type: "agent_freeze" }), unfreeze: () => owner({ type: "agent_unfreeze" }),
   status: async () => out(await api("call", { agent: $("agent").value, path: "owner/status", input: { correlationId: $("correlation").value } })),
-  fund: async () => out(await api("call", { agent: $("agent").value, path: "deposit" })),
-  pay: async () => out(await api("call", { agent: $("agent").value, path: "payouts/request", input: { requestId: $("requestId").value, asset: USDC,
-    delivery: "intents", recipient: $("payee").value, amount: $("amount").value, expectedPolicy: "current" } })),
+  fund: async () => out(await api("call", { agent: $("agent").value, path: "deposit", input: { asset: asset() } })),
+  pay: async () => out(await api("call", { agent: $("agent").value, path: "payouts/request", input: { requestId: $("requestId").value, asset: asset(),
+    delivery: $("delivery").value === "near" ? { chain: "near" } : "intents", recipient: $("payee").value, amount: $("amount").value, expectedPolicy: "current" } })),
   payStatus: async () => out(await api("call", { agent: $("agent").value, path: "payouts/status", input: { requestId: $("requestId").value } })),
   held: async () => out(await api("call", { agent: $("agent").value, path: "held" })),
-  vote: async () => {
-    const held = await api("call", { agent: $("agent").value, path: "held" });
-    const status = await api("call", { agent: $("agent").value, path: "payouts/status", input: { requestId: $("requestId").value } });
-    const entry = held.ok && status.ok && held.value.find(h => h.correlationId === status.value.correlationId);
-    if (!entry) return out({ error: "No held payout for this request ID", held, status });
-    // The vote's own text names no payee or amount: the terms the platform proved are checked here, against this request.
-    await owner({ type: "approval_vote", approvalId: entry.approvalId, verdict: "approve", correlationId: entry.correlationId }, prepared => {
-      const terms = prepared.payment?.terms;
-      return terms && terms.recipient === $("payee").value && terms.amount === $("amount").value && terms.asset === USDC ? null
-        : "The proven terms don't match this request's payee, amount and USDC. Not signed.";
-    });
-  },
+  vote: () => vote("approve"),
+  reject: () => vote("reject"),
 };
 for (const button of document.querySelectorAll("[data-run]")) button.onclick = () => runs[button.dataset.run]().catch(error => out({ error: String(error) }));
 </script></html>`;

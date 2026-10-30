@@ -221,3 +221,41 @@ An agreed payee who isn't a DAO member filed an invoice on invoices.multiagency.
 Reading the code afterwards found why the payment timeline can't follow it to the end there: it lists held
 payments, and a settled payment sent from the invoice host isn't in the approve-only copy's activity, so it drops
 out once paid. The next build keeps a payment in view through to Paid.
+
+## App access on platform staging, 2026-10-28 (UTC)
+
+The first run of an app's path on mainnet: platform staging at api.dev.multiagency.ai (Railway deployment
+`23f3687e`, release candidate `9564c37a`, commit `12cf37b`), driven by the local app stand-in
+(`scripts/staging-app.ts`) with a wallet-owned payout agent created for one Organization. The provider host is
+api.demo.agentsonintents.com, whose `/v1/network` reported mainnet on 2026-10-13. The amount was small; the
+payee was the owner's own second account.
+
+| Check | Result |
+|---|---|
+| Creation goes to the platform's confirm page | The provider answered the creation as NEP-366; the app received only a confirm link. The page showed the deployment, Organization and the payout policy at creation; the owner signed its opening text and then the action there, and the agent was created |
+| A NEP-413 owner action is readable in the wallet | The payout grant's prompt showed its full text (agent, label, expiry, network), the recipient and the requesting page; signed in the app, it applied |
+| The first payee is a NEP-413 edit | Adding the first payee came back NEP-413 and was signed in the app, not on the confirm page; it applied (`SUCCESS`) |
+| An app funds the agent | A deposit address taken through the app (payout consent) was funded; the payout request then found the balance |
+| A payout request waits for the owner | The request was held (`PENDING_APPROVAL`) and read `held` |
+| The owner's vote, relayed by the app | The prepared vote carried the payee, asset and amount proven against the provider's request hash, matching the request; the owner signed it in the app; the provider answered `PROCESSING`, then `SUCCESS`, and the request read `succeeded` |
+| Nothing public at the payee | The payee holds no public NEAR Intents tokens afterwards (`mt_tokens_for_owner`, block 222032482) |
+
+Not checked: the payee's receipt in near.com; what the wallet displayed for the vote (the recorded format is
+`approve:{approval_id}:{wallet_pubkey}:{request_hash}`, with no payee or amount); asking the same request again
+(the stack E2E shows it answers without sending). Found on the way and fixed before the payout: the provider's
+API #51 (2026-10-27) reports an uncapped budget window's spend as `null`, which the agent's overview refused
+([enforcement](enforcement.md#recovery-limitation)).
+
+## Token registration reads on the USDC contract, 2026-10-29T14:44Z
+
+Read-only RPC calls (`storage_balance_of` on the USDC contract, final finality), no funds moved. They back the
+registration check before a USDC withdrawal ([enforcement](enforcement.md)).
+
+| Account | Answer |
+|---|---|
+| Existing accounts known to hold or have held USDC | An object (`total` 0.00125 NEAR, `available` 0) |
+| An existing account never registered on USDC | `null` |
+| An account that doesn't exist on NEAR | `null` |
+
+Not observed: what a confidential withdrawal of USDC to an unregistered account does (whether 1Click registers it, or
+how the failure is reported).

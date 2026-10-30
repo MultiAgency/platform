@@ -234,9 +234,15 @@ of maintaining separate requirement statuses.
 - Agent connections exist only for a contractor's own reports and are offline-tested and stack-tested, not deployed.
   A connection token is a bearer: whoever holds it can act within its permissions until it expires (at most 24 hours)
   or is revoked. Owner connections are not built. See [agent access](docs/agent-access.md#agent-connections-contractor-reports).
-- App access (`/apps/v1`) covers reads, wallet-signed owner actions and payout requests (confidential USDC, sent at most
-  once per `requestId`), offline- and stack-tested with a simulated provider, not deployed or mainnet-observed. Consents
-  and hosted agent setup work for wallet-owned agents only; DAO consent and setup, and wNEAR payouts, are not built. Hosted
+- App access (`/apps/v1`) covers reads, wallet-signed owner actions and payout requests (sent at most once per
+  `requestId`): confidential USDC transfers, mainnet-observed on staging 2026-10-28 ([mainnet log](docs/mainnet-log.md));
+  and withdrawals of wNEAR (arriving as native NEAR, per the provider's docs) or USDC to agreed NEAR accounts (USDC only
+  to an account registered on the USDC contract, else refused before sending): USDC
+  stack-tested with a simulated provider (held, then rejected), wNEAR only offline, neither mainnet-observed. A held
+  withdrawal can be rejected, not approved, until its approval's terms are observed and bound; so under the payout
+  template, which holds every payout for the owner, a withdrawal is paid only once the owner turns that off
+  ([enforcement](docs/enforcement.md)). Consents and hosted agent setup work for wallet-owned
+  agents only; DAO consent and setup are not built. Hosted
   agents an app sets up belong to that deployment and Organization (one per owner and area), and nothing else reaches
   them; each is its own process, at most 32 per host, so many Organizations need more hosts. With `owner` scope an app
   receives an owner intent only when it is NEP-413 (a text the wallet can show); a NEP-366 one (creation, freeze, unfreeze,

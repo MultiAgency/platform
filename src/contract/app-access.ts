@@ -15,7 +15,8 @@ export const APP_OWNER = ["owner/prepare", "owner/submit", "owner/status", "owne
 /**
  * Payout requests with `payout` consent: each sent at most once under the app's `requestId`, within the owner-signed
  * policy, and held for the owner's vote when the policy says so. `held` shows what waits for that vote. `deposit` gives a
- * one-time address that credits USDC to the agent's confidential balance, so the app can fund it; it moves nothing out.
+ * one-time address that credits USDC, or wNEAR, to the agent's confidential balance, so the app can fund it; it moves
+ * nothing out.
  */
 export const APP_PAYOUT = ["payouts/request", "payouts/status", "held", "deposit"] as const;
 export type AppProcedure = (typeof APP_READS)[number] | (typeof APP_OWNER)[number] | (typeof APP_PAYOUT)[number];

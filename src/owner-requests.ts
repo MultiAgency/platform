@@ -28,6 +28,9 @@ export const ownerRequests = {
 
 /** A transfer destination in the policy: the treasury funds may return to, or an agreed payee. */
 type TransferDestination = { address: string; confidential: boolean };
+/** A NEAR account the agent pays by withdrawal to chain `near`, without a memo. */
+type WithdrawalDestination = { address: string };
+const nearWithdrawal = (d: Policy["destinations"]["list"][number]) => d.action === "withdraw" && d.chain === "near" && d.memo === null;
 
 /** What the owner may change in one update; anything left out keeps its current value. */
 export type PolicyChanges = Partial<Pick<Policy, "assets" | "owner_approval" | "limits" | "max_actions_per_hour" | "budget">> & {
@@ -35,19 +38,23 @@ export type PolicyChanges = Partial<Pick<Policy, "assets" | "owner_approval" | "
   swap?: boolean;
   /** The treasury it may return funds to and the payees in its agreement. */
   destinations?: TransferDestination[];
+  /** The NEAR accounts it pays by withdrawal. */
+  withdrawals?: WithdrawalDestination[];
 };
 
 /**
- * The agent's current policy with `changes` applied. After an edit, transfers are on exactly while the destination list
- * has an entry, so funds cannot leave without a destination the owner signed. A payout agent is created with transfers on
- * and no payees (`payoutPolicy`), so its first payee changes only `destinations`; removing the last turns transfers off.
+ * The agent's current policy with `changes` applied. After an edit, transfers are on exactly while there is a transfer
+ * destination, so funds cannot leave without a destination the owner signed; an edit naming `withdrawals` turns
+ * withdrawals on exactly while there is a withdrawal destination, and any other edit leaves them as they are. A payout agent is created with transfers on and no payees (`payoutPolicy`), so its
+ * first payee changes only `destinations`; removing the last turns transfers off. Its first withdrawal payee turns
+ * withdrawals on (an on-chain edit, signed on the confirm page through an app).
  */
 export async function policyRequest(changes: PolicyChanges, expectedPolicy: ReviewedPolicy) {
   return (await policyChange(changes, expectedPolicy)).request;
 }
 
 /** The provider request for a reviewed policy edit, and the policy in force it replaces. */
-export async function policyChange({ swap, destinations, ...asked }: PolicyChanges, expectedPolicy: ReviewedPolicy) {
+export async function policyChange({ swap, destinations, withdrawals, ...asked }: PolicyChanges, expectedPolicy: ReviewedPolicy) {
   // A field sent as undefined (the serializer keeps the key) leaves it as it is in force.
   const fields = Object.fromEntries(Object.entries(asked).filter(([, value]) => value !== undefined));
   const id = agentId();
@@ -56,20 +63,27 @@ export async function policyChange({ swap, destinations, ...asked }: PolicyChang
   if (!expectedPolicy || expectedPolicy.revision !== revision || expectedPolicy.digest !== mandateDigest(policy))
     throw new PublicError("The policy changed since review. Refresh the policy and review all changes before signing.");
   const transfers = destinations ?? policy.destinations.list.flatMap((d) => (d.action === "transfer" ? [d] : []));
+  const toNear = withdrawals ?? policy.destinations.list.flatMap((d) => (nearWithdrawal(d) ? [{ address: d.address }] : []));
+  // Withdrawal destinations the platform doesn't manage (another chain, a memo) are kept as they are. Withdrawals change
+  // only when the edit names `withdrawals`: any other edit leaves them exactly as they are, on or off.
+  const others = policy.destinations.list.filter((d) => d.action !== "transfer" && !nearWithdrawal(d));
+  const withdraws = withdrawals === undefined ? policy.actions.includes("withdraw") : toNear.length > 0 || others.some((d) => d.action === "withdraw");
   const swaps = swap ?? policy.actions.includes("swap");
   const next: Policy = {
     ...policy,
     ...fields,
     actions: [
-      ...policy.actions.filter((a) => a !== "swap" && a !== "transfer"),
+      ...policy.actions.filter((a) => a !== "swap" && a !== "transfer" && a !== "withdraw"),
       ...(swaps ? (["swap"] as const) : []),
       ...(transfers.length ? (["transfer"] as const) : []),
+      ...(withdraws ? (["withdraw"] as const) : []),
     ],
     destinations: {
       mode: "only",
       list: [
-        ...policy.destinations.list.filter((d) => d.action !== "transfer"),
+        ...others,
         ...transfers.map(({ address, confidential }) => ({ action: "transfer" as const, address, confidential })),
+        ...toNear.map(({ address }) => ({ action: "withdraw" as const, chain: "near", address, memo: null })),
       ],
     },
   };

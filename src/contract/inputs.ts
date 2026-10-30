@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { intentsAccount, validIntentsAccount } from "./intents-account.js";
+import { intentsAccount, isNearcomAddress, validIntentsAccount } from "./intents-account.js";
 
 /**
  * Owner procedure inputs: the one source the server implements (src/rpc/*) and clients are typed from
@@ -10,6 +10,8 @@ export const account = z.string().trim().min(2).max(64);
 // Only owner-entered Intents destinations: owner identities and provider evidence stay unchanged.
 export const transferAccount = z.string().transform(intentsAccount).refine(validIntentsAccount, "Enter a NEAR Intents account or nearcom: address");
 export const units = z.string().regex(/^[0-9]{1,40}$/, "an atomic integer amount");
+/** A NEAR account paid by withdrawal to chain `near`: never a `nearcom:` address, which is not on any chain. */
+export const nearAccount = z.string().trim().refine((value) => !isNearcomAddress(value) && validIntentsAccount(value), "Enter a NEAR account");
 /** A USD amount in the policy's budget; null leaves that window uncapped. */
 export const usdAmount = z.string().regex(/^\d+(\.\d+)?$/).nullable();
 /** Per-asset caps in raw units. */
@@ -47,6 +49,8 @@ export const ownerAction = z.discriminatedUnion("type", [
     changes: z.object({
       swap: z.boolean().optional(),
       destinations: z.array(z.object({ address: transferAccount, confidential: z.boolean() })).max(64).optional(),
+      /** NEAR accounts paid by withdrawal to chain `near` (no memo); withdrawals are on exactly while there is one. */
+      withdrawals: z.array(z.object({ address: nearAccount })).max(64).optional(),
       assets: z.union([z.literal("any"), z.array(z.string())]).optional(),
       owner_approval: z.boolean().optional(),
       max_actions_per_hour: z.number().int().positive().nullable().optional(),
@@ -76,15 +80,24 @@ export const payoutRequestInput = z.object({
   /** The token paid, as the provider names it (for example `nep141:…`). The agent's signed policy decides which are allowed. */
   asset: z.string().min(1).max(256),
   /**
-   * How it reaches the payee: `intents`, a confidential transfer inside NEAR Intents to an agreed payee, or `{ chain }`,
-   * a withdrawal to that chain. Today only confidential USDC through `intents` is paid; anything else is refused.
+   * How it reaches the payee: `intents`, a confidential transfer inside NEAR Intents to an agreed payee (confidential
+   * USDC), or `{ chain: "near" }`, a withdrawal from the confidential balance to an agreed NEAR account (wNEAR arrives as
+   * native NEAR, or USDC). Other chains are refused before anything is recorded.
    */
   delivery: z.union([z.literal("intents"), z.object({ chain: z.string().min(1).max(64) })]),
-  recipient: transferAccount,
+  /** A NEAR Intents account or `nearcom:` address for `intents`; a NEAR account for a withdrawal (never `nearcom:`). */
+  recipient: z.string().trim().min(1).max(80),
   amount: units,
   expectedPolicy: reviewedPolicy,
-});
+}).superRefine((input, ctx) => {
+  const valid = input.delivery === "intents" ? validIntentsAccount(intentsAccount(input.recipient))
+    : !isNearcomAddress(input.recipient) && validIntentsAccount(input.recipient);
+  if (!valid) ctx.addIssue({ code: "custom", path: ["recipient"],
+    message: input.delivery === "intents" ? "Enter a NEAR Intents account or nearcom: address" : "Enter a NEAR account: a nearcom: address is not on any chain" });
+}).transform((input) => input.delivery === "intents" ? { ...input, recipient: intentsAccount(input.recipient) } : input);
 export const payoutStatusInput = z.object({ requestId: payoutRequestId });
+/** A deposit address for the asset to fund (default USDC); wNEAR funds withdrawals that arrive as native NEAR. */
+export const depositInput = z.object({ asset: z.enum(["nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", "nep141:wrap.near"]).optional() }).optional();
 export const ownerSubmitInput = z.object({ correlationId: z.string(), signedData: z.record(z.string(), z.unknown()) });
 export const ownerStatusInput = z.object({ correlationId: z.string() });
 export const executePlanInput = z.object({ planId: z.uuid() });

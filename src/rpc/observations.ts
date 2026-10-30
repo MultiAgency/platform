@@ -23,7 +23,7 @@ import { status } from "../owner-intents.js";
 import { agreed } from "../invoices.js";
 import { os, owner } from "./base.js";
 import { readOutput } from "./read-output.js";
-import { run, account } from "../contract/inputs.js";
+import { run, account, depositInput } from "../contract/inputs.js";
 import { unresolvedEvidence } from "../contract/owner-outputs.js";
 
 /** The agent's ops log, one row per action, newest first: the request as sent, the mandate (policy revision and digest) and plan it ran under, and how it settled or was refused. */
@@ -118,7 +118,7 @@ export const observationsRoutes = {
       digest: r.policy ? mandateDigest(r.policy) : null,
     }));
   }),
-  deposit: os.handler(() => depositAddress(ASSETS.USDC)),
+  deposit: os.input(depositInput).handler(({ input }) => depositAddress(input?.asset ?? ASSETS.USDC)),
   activity: owner.activity.use(readOutput("activity")).handler(() => activity()),
   /**
    * Money actions without a proven outcome: each blocks every new one until resolved. Those held for

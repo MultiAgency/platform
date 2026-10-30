@@ -18,7 +18,7 @@ export function opsLog() {
   return join(".ops", `${id}.jsonl`);
 }
 
-export type Method = "swap" | "transfer" | "shield" | "unshield";
+export type Method = "swap" | "transfer" | "shield" | "unshield" | "withdraw";
 
 /** What a request line records beside the request: the mandate it ran under and what it was worth. */
 type Context = {
@@ -120,7 +120,8 @@ const identity = { idempotencyKey: nonempty, at: z.string().optional() };
 const noOutcome = { correlation_id: z.never().optional(), status: z.never().optional(), refused: z.never().optional(), submissionState: z.never().optional() };
 const preparationLine = z.object({ ...identity, ...noOutcome, at: z.string(), kind: nonempty, request: z.record(z.string(), z.unknown()),
     authorization: z.never().optional(),
-    method: z.enum(["swap", "transfer", "shield", "unshield"]).optional(), journalVersion: z.literal(2).optional(),
+    // `withdraw` since P3b: a build before it can't read a journal holding one (docs/operations.md, rollback).
+    method: z.enum(["swap", "transfer", "shield", "unshield", "withdraw"]).optional(), journalVersion: z.literal(2).optional(),
     policyRevision: z.number().nullable().optional(), policyDigest: z.string().nullable().optional(),
     usdIn: z.number().nullable().optional(), planId: z.string().optional() });
 const outcome = { ...identity, ...noOutcome, request: z.never().optional(), journalVersion: z.never().optional(), authorization: z.never().optional() };

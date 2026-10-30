@@ -32,7 +32,9 @@ no work-order lifecycle has been observed on mainnet.
 the provider call. Before the record, a transfer's named recipient must exist on NEAR (`recipients.ts`, read at final
 finality): otherwise it is refused `recipient_not_found`, or `recipient_unchecked` when the chain didn't answer, with
 nothing recorded or sent. NEAR Intents credits any id, and the provider's own refusal would arrive after the send claim,
-where this server can't yet prove nothing moved. Implicit ids need no account and aren't read. `test/send-path.test.ts` fails if any other file sends. The callers are
+where this server can't yet prove nothing moved. Implicit ids need no account and aren't read. A withdrawal of an asset a payout
+may withdraw, other than wNEAR (arriving as native NEAR), also needs its recipient registered on the token contract,
+else `recipient_not_registered`, since such a delivery fails per the NEAR Intents docs. `test/send-path.test.ts` fails if any other file sends. The callers are
 `invoices.ts` (an invoice's payment), `payout-requests.ts` (a payout an app or owner asks for under its own
 `requestId`), `treasury.ts` and `plans.ts` (shields, swaps, sweeps) and `agent.ts`'s own `pay` (a payment by hand).
 
