@@ -35,7 +35,8 @@ owner signs `consentMessage(...)` (or `setupMessage(...)` for a hosted agent) wi
 it. A consent reaches the listed reads (`APP_READS`) and owner actions (`APP_OWNER`) and, for `owner/prepare`, only
 actions the owner can read when signing or that platform code builds entirely (`AppOwnerAction`); everything else is
 refused. The app never asks an owner to sign the platform's sign-in text. See the platform's `docs/agent-access.md`,
-"App access".
+"App access". The `/apps/v1` routes are not yet deployed on any hosted MultiAgency host; they run on the SDK repository's
+local stack (`pnpm test:e2e:stack --app <deployment>`), with a simulated provider, chain and wallet.
 
 An agent connection permits its contributor's reports and compensation reads only. It cannot file invoices, approve payments, sign owner actions or manage connections. Treasury machine access is a separate existing route and credential; Payables owner delegation and DAO machine delegation are unavailable.
 

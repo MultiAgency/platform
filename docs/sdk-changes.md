@@ -5,7 +5,7 @@ wire change all apps must update for together. The first change after a release 
 version, so a package staged or packed from changed sources never carries a released version's number. The release
 candidate dates the heading. Under 0.x, any public-interface change bumps at least the minor version.
 
-## 0.3.0 (not released)
+## 0.3.0 (2026-10-30)
 
 All additive. Nothing on the existing wire changes.
 

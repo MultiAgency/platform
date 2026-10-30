@@ -26,7 +26,8 @@ sources:
 Read getting-started and owner-workflows first. `appClient` runs on your server with the deployment's service credential
 (`tap_…`), issued by the platform operator: a server secret, never sent to a browser. A call reaches an agent only
 under a live owner consent for that Organization and agent, and only within the consent's scopes: `read`, `owner`, and
-`payout`.
+`payout`. The `/apps/v1` routes are not yet deployed on any hosted MultiAgency host; until they are, run them on the SDK
+repository's local stack (`pnpm test:e2e:stack --app <deployment>`).
 
 ## Setup
 
