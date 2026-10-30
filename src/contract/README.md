@@ -9,12 +9,12 @@ Start with one supported workflow. A product may provide its own screens, naviga
 The SDK is published on npm under the Apache-2.0 license:
 
 ```text
-pnpm add @multiagency/sdk zod@4.6.7
+pnpm add @multiagency/sdk zod@^4.6.5
 ```
 
 Each package carries `provenance.json`: the source commit it was packed from, any uncommitted paths in that tree, and a digest for every file it was built from. One version number identifies one package: npm does not let a published version be republished with different contents (per npm's documented policy). The package's own README, skills and `CHANGES.md` describe that exact version.
 
-Zod is the one peer: a product's schemas and the SDK's share one Zod. The owner entry (`@multiagency/sdk`) bundles its own `@orpc/client` 2.0.0-beta.47 (licenses in `THIRD-PARTY-NOTICES`) and depends on `@orpc/contract` 2.0.0-beta.47 and `@ag-ui/core` 1.0.3, so a product on another oRPC version keeps it; its bundle then carries both oRPC clients. The contributor entry never loads them. The installed package's dependencies and peerDependencies are authoritative for that package. The supported Node target is Node 24. TypeScript consumers use ESM with NodeNext resolution and the ES2023 and DOM libraries for the clients' web request types. The Node-only release-server entry also needs Node typings.
+Zod is the one peer: a product's schemas and the SDK's share one Zod. The owner entry (`@multiagency/sdk`) bundles its own `@orpc/client` 2.0.0-beta.47 (licenses in `THIRD-PARTY-NOTICES`) and loads no other oRPC package, so a product on another oRPC version, or a host that shares its own as a Module Federation singleton, keeps it; its bundle then carries both oRPC clients. `@multiagency/sdk/contract` (`ownerContract`, for an app implementing a server from the contract) loads `@orpc/contract` 2.0.0-beta.47, a dependency, as does nothing else. The owner entry also depends on `@ag-ui/core` 1.0.3. The contributor entry loads none of them. The installed package's dependencies and peerDependencies are authoritative for that package. The supported Node target is Node 24. TypeScript consumers use ESM with NodeNext resolution and the ES2023 and DOM libraries for the clients' web request types. The Node-only release-server entry also needs Node typings.
 
 For development against unreleased SDK source, install an SDK repository checkout's dependencies and run `pnpm sdk:dev --once` there, then link your product to its generated `packages/sdk` directory. Use `pnpm sdk:dev` to watch changes. The generated directory is not source and is intentionally absent from Git. A linked checkout can differ from the published package of the same version, so record which one a release was built with, and keep local paths out of portable release inputs.
 

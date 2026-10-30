@@ -16,7 +16,6 @@ export * from "./app-consent.js";
 export * from "./app-access.js";
 export * from "./app-client.js";
 export type { OwnerInputs, OwnerAction } from "./owner-inputs.js";
-export { ownerContract, ownerErrors, type OwnerContract } from "./owner-contract.js";
 export * from "./inputs.js";
 export { ASSETS } from "./assets.js";
 export { intentsAccount, isNearcomAddress, validIntentsAccount } from "./intents-account.js";

@@ -256,6 +256,10 @@ of maintaining separate requirement statuses.
   another signature. See [agent access](docs/agent-access.md#app-access-server-to-server). An app service
   credential is a bearer: whoever holds it acts within the consents owners gave that deployment until it expires or is
   revoked. See [agent access](docs/agent-access.md#app-access-server-to-server).
+- A provider failure while preparing an owner action is reported as `unknown`, and its code is neither returned nor
+  logged (`src/rpc/base.ts`: after a mutation, only a proven refusal keeps its code), so its cause can't be found.
+  Preparing signs and sends nothing, so nothing moved; retrying prepares a new intent. Seen on staging 2026-10-30: an
+  `owner_approval` edit failed once this way and succeeded on retry, with nothing recorded for the failure.
 - Payables' frontend (`97ddec7`, re-checked 2026-10-16) passes the source contract preflight now that
   Proto serves `compensation`; this is a source-type check only. Its build is not yet exercised in the
   real-stack E2E suite, and owner-app builds are not checked for compatibility at runtime.

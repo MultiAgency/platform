@@ -9,6 +9,8 @@ import * as contract from "../src/contract/index.js";
 
 export const root = join(import.meta.dirname, "..");
 export const { name, version } = contract.contractPackage;
+/** The oldest zod the SDK is tested on (offline suite and typecheck on 4.6.5, 2026-10-30), not the repository's own. */
+export const ZOD_PEER = "^4.6.5";
 /** The release server's command. */
 export const releaseServerBins = { "multiagency-release-server": "bin/release-server.mjs" };
 
@@ -23,7 +25,7 @@ export function writeTsconfig(path: string, staging: string) {
   writeFileSync(path, JSON.stringify({
     compilerOptions: { target: "ES2023", lib: ["ES2023", "DOM"], module: "NodeNext", moduleResolution: "NodeNext", strict: true, noUncheckedIndexedAccess: true,
       skipLibCheck: true, types: [], declaration: true, rootDir: join(root, "src"), outDir: join(staging, "dist") },
-    files: [join(root, "src/contract/index.ts"), join(root, "src/contract/payee-entry.ts")],
+    files: [join(root, "src/contract/index.ts"), join(root, "src/contract/payee-entry.ts"), join(root, "src/contract/owner-contract.ts")],
   }, null, 2));
 }
 
@@ -95,11 +97,14 @@ export function stage(staging: string, tsconfig: string) {
     // The bin path has no leading "./": npm 11 publish drops such a bin as invalid (pnpm pack keeps it).
     exports: { ".": { types: "./dist/contract/index.d.ts", default: "./dist/contract/index.js" },
       "./payee": { types: "./dist/contract/payee-entry.d.ts", default: "./dist/contract/payee-entry.js" },
+      // The contract objects, for an app implementing a server from them: the only entry that loads @orpc/contract, so
+      // the main entry runs beside a host that shares its own @orpc/contract (a Module Federation singleton).
+      "./contract": { types: "./dist/contract/owner-contract.d.ts", default: "./dist/contract/owner-contract.js" },
       "./schemas/*": "./schemas/*", "./release-server": { types: "./bin/release-server.d.mts", default: "./bin/release-server.mjs" } }, bin: releaseServerBins,
     files: ["dist", "bin", "schemas", "skills", "!skills/_artifacts", "CHANGES.md", "README.md", "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES", "provenance.json"],
     // The oRPC client is bundled (`bundleOrpcClient`); the contract objects and AG-UI are dependencies. zod is the one
     // peer: the app's schemas and the SDK's must be one instance.
     dependencies: { "@orpc/contract": dependencies["@orpc/contract"], "@ag-ui/core": dependencies["@ag-ui/core"] },
-    peerDependencies: { zod: dependencies.zod } }, null, 2) + "\n");
+    peerDependencies: { zod: ZOD_PEER } }, null, 2) + "\n");
   return sources;
 }

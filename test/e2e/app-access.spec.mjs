@@ -115,6 +115,9 @@ test('an app server relays readable owner actions, sends NEP-366 ones to the pla
     expect(await payout.call('owner/submit', { correlationId: held.correlationId, signedData: { standard: 'nep366' } }))
       .toMatchObject({ ok: false, kind: 'forbidden', source: 'gateway' });
     const wallet = await browserContext(browser, stack, OWNER);
+    // Traced for a failure only: a full-suite run once stalled with the button visible and never clicked (2026-10-30).
+    await wallet.context.tracing.start({ screenshots: true, snapshots: true });
+    let signed = false;
     try {
       const page = await wallet.context.newPage();
       await page.goto(held.confirm.url);
@@ -125,16 +128,21 @@ test('an app server relays readable owner actions, sends NEP-366 ones to the pla
       // The owner's wallet may already be connected; otherwise connect it, choosing it if near-connect asks.
       const sign = page.getByRole('button', { name: 'Sign and submit' }), connect = page.getByRole('button', { name: `Connect ${OWNER}` });
       await expect(sign.or(connect)).toBeVisible();
+      // Bounded actions: a stall fails here with Playwright's actionability log instead of at the test timeout.
       if (await connect.isVisible()) {
-        await connect.click();
+        await connect.click({ timeout: 15_000 });
         const chooser = page.getByText('Local test wallet', { exact: true });
-        await Promise.race([chooser.waitFor().then(() => chooser.click()).catch(() => {}), sign.waitFor()]);
+        await Promise.race([chooser.waitFor({ timeout: 15_000 }).then(() => chooser.click({ timeout: 15_000 })).catch(() => {}), sign.waitFor({ timeout: 15_000 })]);
       }
-      await sign.click();
+      await sign.click({ timeout: 15_000 });
       await expect(page.getByText(/Submitted\. The app follows the outcome/)).toBeVisible();
       expect(wallet.signatures.filter(s => s.delegate)).toHaveLength(1);
       expect(wallet.signatures.filter(s => !s.delegate).map(s => s.message.split('\n')[0]), 'first the link\'s readable text').toEqual(['Open a MultiAgency confirm page.']);
-    } finally { await wallet.context.close(); }
+      signed = true;
+    } finally {
+      await wallet.context.tracing.stop(signed ? undefined : { path: info.outputPath('confirm-trace.zip') });
+      await wallet.context.close();
+    }
     await expect.poll(async () => value(await payout.call('owner/status', { correlationId: held.correlationId })).status).toBe('SUCCESS');
     expect(stack.simulated.payoutPolicy()).toMatchObject({ revision: 4, policy: { owner_approval: false } });
     const log = readFileSync(join(gateway, '.app-access/access.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
