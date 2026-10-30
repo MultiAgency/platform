@@ -22,7 +22,7 @@ export const ownerCapabilities = {
   "payables-work-orders-v1": { routes: [], procedures: ["workOrders/list", "workOrders/get", "workOrders/status", "workOrders/create", "workOrders/prepare", "workOrders/submit", "workOrders/deposit", "workOrders/file"] },
   "payables-compensation-v1": { routes: [], procedures: ["compensation/list", "compensation/agreement", "compensation/review", "compensation/prepare", "compensation/send"] },
   "payables-recovery-v1": { routes: [], procedures: ["recover"] },
-  /** Temporary: guide inference stays in Proto until its extraction (recorded migration gap). */
+  /** Temporary: guide inference stays in the platform until its extraction (recorded migration gap). */
   "payables-guide-v1": { routes: [], procedures: ["demoGuide/compose"] },
 } as const satisfies Record<string, { routes: readonly string[]; procedures: readonly string[] }>;
 export type OwnerCapability = keyof typeof ownerCapabilities;

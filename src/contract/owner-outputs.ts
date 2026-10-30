@@ -71,7 +71,7 @@ const budgetWindow = z.looseObject({ limit_usd: z.string().nullable(), spent_usd
 const policyView = z.looseObject({
   wallet_id: z.string(),
   revision: z.number().nullable(),
-  // Provider evidence neither Proto nor the apps use: tolerated when absent, so its omission cannot fail every read.
+  // Provider evidence neither the platform nor the apps use: tolerated when absent, so its omission cannot fail every read.
   policy_hash: z.string().nullable().optional(),
   status: z.enum(["NONE", "SIGNED", "APPLIED", "FAILED"]),
   applied_at: z.string().nullable().optional(),

@@ -1,4 +1,4 @@
-// Types for release-server.mjs (shipped as `@multiagency/sdk/release-server` and the `proto-release-server` bin).
+// Types for release-server.mjs (shipped as `@multiagency/sdk/release-server` and the `multiagency-release-server` bin).
 import type { Server } from "node:http";
 
 /** A release's `contract.json`, as the server reads it. Unknown keys are kept. */

@@ -38,6 +38,9 @@ All additive. Nothing on the existing wire changes.
   `@orpc/client` (Module Federation shares bare names only) no longer mixes its copy with the SDK's link. `@orpc/contract`
   still imports its own `@orpc/client` (installed with it); the SDK's calls don't go through that copy. `@orpc/contract` stays a dependency (apps implement
   servers from the contract objects); `zod` stays the one peer.
+- **The release server's command is `multiagency-release-server`** (was `proto-release-server`). Calls through
+  `@multiagency/sdk/release-server` or the `bin/release-server.mjs` file are unchanged. The README and type comments name
+  the platform, not its former name, Proto.
 - **oRPC 2.0.0-beta.47** (from beta.46), for the bundled client and `@orpc/contract`: its transport moves to
   standard-server 0.13. Its breaking changes are in `@orpc/openapi` and the Effect integration, which the SDK doesn't use
   (oRPC's release notes, 2026-10-27). Offline-tested.

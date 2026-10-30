@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, test } from "node:test";
 import { activate, releaseServer, stage } from "../src/contract/release-server.mjs";
+import { releaseServerBins } from "../scripts/sdk-stage.js";
 
 const scratch = mkdtempSync(join(tmpdir(), "release-server-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -97,12 +98,14 @@ test("activation refuses incomplete, altered, conflicting or escaping releases; 
   try { assert.equal((await fetch(origin + "/")).status, 503); } finally { await close(); }
 });
 
-// Run directly, and through a symlink as npm links the `proto-release-server` bin.
-for (const via of ["path", "bin link"]) test(`the release server runs as its own process with only HOST, PORT and RELEASES_ROOT (${via})`, async () => {
+// Run directly, and through a symlink as npm links the package's bin.
+test("the package's release server command runs release-server.mjs", () =>
+  assert.deepEqual(releaseServerBins, { "multiagency-release-server": "bin/release-server.mjs" }));
+for (const via of ["path", ...Object.keys(releaseServerBins)]) test(`the release server runs as its own process with only HOST, PORT and RELEASES_ROOT (${via})`, async () => {
   const root = freshRoot();
   activate(root, stage(root, build({ "contract.json": contract({ product: "p", entries: { "/": "index.html" } }), "index.html": "ok" })));
   let entry = fileURLToPath(new URL("../src/contract/release-server.mjs", import.meta.url));
-  if (via === "bin link") { const link = join(scratch, `bin-${n++}`); symlinkSync(entry, link); entry = link; }
+  if (via !== "path") { const link = join(scratch, `${via}-${n++}`); symlinkSync(entry, link); entry = link; }
   const child = spawn(process.execPath, [entry],
     { cwd: tmpdir(), env: { HOST: "127.0.0.1", PORT: "0", RELEASES_ROOT: root }, stdio: ["ignore", "pipe", "inherit"] });
   try {

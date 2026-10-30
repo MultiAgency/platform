@@ -72,7 +72,7 @@ it may retry.
 - `@multiagency/sdk/payee`: `payeeClient` with `Result`/`Failure`, payee and compensation schemas, agent-connection
   schemas, `payeeContract` and `compatiblePayeeFrontend`. Peer: zod only.
 - `@multiagency/sdk/release-server`: `stage`, `activate`, `readRelease`, `digest` and `releaseServer` for app
-  releases, and the `proto-release-server` command. Node only: its types use `@types/node`.
+  releases, and the `multiagency-release-server` command. Node only: its types use `@types/node`.
 - `@multiagency/sdk/schemas/*`: JSON Schemas of the payee and compensation wire for non-JavaScript consumers.
 
 Other exports (the owner contract object, server input schemas, capability helpers the gateway uses) are available,

@@ -1,6 +1,6 @@
 /**
- * @multiagency/sdk: the platform contract apps compile against instead of copying Proto.
- * Proto's own handlers import these modules; the package is packed from the same files.
+ * @multiagency/sdk: the platform contract apps compile against instead of copying the platform.
+ * The platform's own handlers import these modules; the package is packed from the same files.
  * `@multiagency/sdk/payee` is the payee side alone (zod only), for apps without owner procedures.
  */
 export { contractPackage } from "./package-version.js";

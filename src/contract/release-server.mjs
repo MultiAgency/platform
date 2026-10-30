@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// One release asset server for app frontends behind the Proto gateway (P2 D5). Presentation only:
-// GET/HEAD, no API, no outbound calls, no Proto configuration. Environment: HOST, PORT, RELEASES_ROOT.
+// One release asset server for app frontends behind the platform gateway (P2 D5). Presentation only:
+// GET/HEAD, no API, no outbound calls, no platform configuration. Environment: HOST, PORT, RELEASES_ROOT.
 //   serve                     (default) serve RELEASES_ROOT/<ACTIVE>/
 //   stage <built-dir>         copy a complete build to RELEASES_ROOT/<digest>/ and print the id
 //   activate <id>             verify that release, then switch ACTIVE atomically
 // A release is a directory whose contract.json declares { version, product, required, optional?, entries,
-// fallback?, strip?, assetPrefix? }. Its id is the digest of the directory (the Proto E2E runner's digest()).
+// fallback?, strip?, assetPrefix? }. Its id is the digest of the directory (the platform E2E runner's digest()).
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';

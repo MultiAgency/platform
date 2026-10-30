@@ -1,6 +1,6 @@
 # MultiAgency SDK
 
-Build a product interface or an external agent that uses Proto's existing agreements, contribution reports, payments and Treasury workflows. The SDK supplies clients, response schemas and recovery outcomes. Proto keeps identity, authorization, authoritative records and guarded execution.
+Build a product interface or an external agent that uses the MultiAgency platform's existing agreements, contribution reports, payments and Treasury workflows. The SDK supplies clients, response schemas and recovery outcomes. The platform keeps identity, authorization, authoritative records and guarded execution.
 
 Start with one supported workflow. A product may provide its own screens, navigation, drafts and preferences while calling the same platform. A new server-side domain or authority model needs a platform extension; importing this package does not create one.
 
@@ -28,7 +28,7 @@ For development against unreleased SDK source, install an SDK repository checkou
 | Treasury external agent | `ownerClient` with an absolute machine base and a `fetch` that adds the bearer | An existing wallet-owner-issued Treasury credential with the required scopes; see owner-workflows |
 | An app's server (for example the MultiAgency dashboard) | `appClient({ base, credential })` from `@multiagency/sdk` | The deployment's operator-issued service credential, plus a live owner consent per Organization and agent |
 
-The Proto operator configures a browser product's host, reachable agents and frontend release. Browser products use that host's gateway and session. A custom frontend does not receive a provider key or grant, and cannot choose another host's agents.
+The platform operator configures a browser product's host, reachable agents and frontend release. Browser products use that host's gateway and session. A custom frontend does not receive a provider key or grant, and cannot choose another host's agents.
 
 An app's server reaches agents under `/apps/v1` and never from a browser: the service credential is a server secret. The
 owner signs `consentMessage(...)` (or `setupMessage(...)` for a hosted agent) with NEP-413 in the app; the server submits

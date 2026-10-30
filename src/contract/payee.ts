@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { agreementRecord, compensationView, requestRecord } from "../compensation-contract.js";
 
-/** Payee HTTP responses under the instance base. Proto's handlers are tested against these schemas. */
+/** Payee HTTP responses under the instance base. The platform's handlers are tested against these schemas. */
 export const invoiceStatus = z.enum(["needs_agreement", "refused", "busy", "prepared", "waiting", "paying", "paid", "failed", "unknown", "needs_review"]);
 export const agreementStatus = z.enum(["requested", "proposed", "agreed", "filed", "declined"]);
 

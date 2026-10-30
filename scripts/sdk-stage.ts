@@ -1,4 +1,4 @@
-// Stages @multiagency/sdk into a package directory from the same src/contract files Proto's handlers import. Used by
+// Stages @multiagency/sdk into a package directory from the same src/contract files the platform's handlers import. Used by
 // contract-pack.ts (the per-release-candidate tarball) and sdk-dev.ts (the local `link:` directory apps develop against).
 import { spawnSync } from "node:child_process";
 import { buildSync } from "esbuild";
@@ -9,6 +9,8 @@ import * as contract from "../src/contract/index.js";
 
 export const root = join(import.meta.dirname, "..");
 export const { name, version } = contract.contractPackage;
+/** The release server's command. */
+export const releaseServerBins = { "multiagency-release-server": "bin/release-server.mjs" };
 
 export const run = (command: string, args: string[], cwd = root) => {
   const result = spawnSync(command, args, { cwd, encoding: "utf8" });
@@ -93,7 +95,7 @@ export function stage(staging: string, tsconfig: string) {
     // The bin path has no leading "./": npm 11 publish drops such a bin as invalid (pnpm pack keeps it).
     exports: { ".": { types: "./dist/contract/index.d.ts", default: "./dist/contract/index.js" },
       "./payee": { types: "./dist/contract/payee-entry.d.ts", default: "./dist/contract/payee-entry.js" },
-      "./schemas/*": "./schemas/*", "./release-server": { types: "./bin/release-server.d.mts", default: "./bin/release-server.mjs" } }, bin: { "proto-release-server": "bin/release-server.mjs" },
+      "./schemas/*": "./schemas/*", "./release-server": { types: "./bin/release-server.d.mts", default: "./bin/release-server.mjs" } }, bin: releaseServerBins,
     files: ["dist", "bin", "schemas", "skills", "!skills/_artifacts", "CHANGES.md", "README.md", "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES", "provenance.json"],
     // The oRPC client is bundled (`bundleOrpcClient`); the contract objects and AG-UI are dependencies. zod is the one
     // peer: the app's schemas and the SDK's must be one instance.
