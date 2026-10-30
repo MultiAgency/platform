@@ -52,7 +52,7 @@ export async function paymentStatus(correlationId: string, waitMs?: number) {
   const approvalId = s.details?.approval_id ?? null;
   let expiresAt: string | null = null;
   let detailError: string | null = null;
-  // Terms are rebuilt from an approval only for a transfer: a withdrawal's approval data isn't observed yet, so its terms
+  // Terms are rebuilt from an approval only for a transfer: a withdrawal's approval isn't verified yet (its hash is observed, verifying it isn't built), so its terms
   // come from this copy's journal or not at all.
   if (approvalId && s.type === "transfer") {
     try {
@@ -70,7 +70,7 @@ export async function paymentStatus(correlationId: string, waitMs?: number) {
 
 /**
  * Transfers waiting for approval in the API's history, newest first, from the approval window. Held withdrawals are
- * listed from this copy's journal only: their approval data isn't observed yet, so their terms aren't rebuilt from it.
+ * listed from this copy's journal only: their approval isn't verified yet, so their terms aren't rebuilt from it.
  */
 async function heldElsewhere() {
   const since = Date.now() - APPROVAL_TTL_MS;

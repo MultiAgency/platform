@@ -238,8 +238,9 @@ of maintaining separate requirement statuses.
   `requestId`): confidential USDC transfers, mainnet-observed on staging 2026-10-28 ([mainnet log](docs/mainnet-log.md));
   and withdrawals of wNEAR (arriving as native NEAR, per the provider's docs) or USDC to agreed NEAR accounts (USDC only
   to an account registered on the USDC contract, else refused before sending): USDC
-  stack-tested with a simulated provider (held, then rejected), wNEAR only offline, neither mainnet-observed. A held
-  withdrawal can be rejected, not approved, until its approval's terms are observed and bound; so under the payout
+  both mainnet-observed on staging 2026-10-30, paid without a vote, rejected when held, and the USDC refusal of an
+  unregistered account ([mainnet log](docs/mainnet-log.md)). A held withdrawal can be rejected, not approved: its
+  approval's hash is now observed, but approving one isn't built yet; so under the payout
   template, which holds every payout for the owner, a withdrawal is paid only once the owner turns that off
   ([enforcement](docs/enforcement.md)). Consents and hosted agent setup work for wallet-owned
   agents only; DAO consent and setup are not built. Hosted
@@ -257,7 +258,9 @@ of maintaining separate requirement statuses.
   credential is a bearer: whoever holds it acts within the consents owners gave that deployment until it expires or is
   revoked. See [agent access](docs/agent-access.md#app-access-server-to-server).
 - A provider failure while preparing an owner action is reported as `unknown`, and its code is neither returned nor
-  logged (`src/rpc/base.ts`: after a mutation, only a proven refusal keeps its code), so its cause can't be found.
+  logged (`src/rpc/base.ts`: after a mutation, only a proven refusal keeps its code), so its cause can't be found. A
+  vote the platform's own approval check refuses before preparing anything (`AuthorizationHeld`, for example approving
+  a held withdrawal) also reaches the app as `unknown`, not `refused` (seen on staging 2026-10-30).
   Preparing signs and sends nothing, so nothing moved; retrying prepares a new intent. Seen on staging 2026-10-30: an
   `owner_approval` edit failed once this way and succeeded on retry, with nothing recorded for the failure.
 - Payables' frontend (`97ddec7`, re-checked 2026-10-16) passes the source contract preflight now that

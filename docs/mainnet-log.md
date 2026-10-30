@@ -246,6 +246,28 @@ Not checked: the payee's receipt in near.com; what the wallet displayed for the 
 API #51 (2026-10-27) reports an uncapped budget window's spend as `null`, which the agent's overview refused
 ([enforcement](enforcement.md#recovery-limitation)).
 
+## Payout withdrawals on platform staging, 2026-10-30 (UTC)
+
+Withdrawals to a NEAR account through the app path, on mainnet: platform staging at api.dev.multiagency.ai (Railway
+deployment `ddbf9361`, release candidate `d1d37e12`, commit `2e620f9`), the same agent as on 2026-10-28, driven by the
+local app stand-in. Amounts were small; the withdrawal payee was another of the owner's own accounts, which existed
+and was at first not registered on USDC.
+
+| Check | Result |
+|---|---|
+| Edits to on-chain policy fields go to the confirm page | Agreeing the first withdrawal payee (`actions` gains `withdraw`), adding wNEAR to `assets` with its `limits`, and turning `owner_approval` off and back on each came back NEP-366, reached the app only as a confirm link, and applied (`SUCCESS`, revisions 3 to 6). The first `owner_approval` prepare failed as `unknown` with nothing recorded and succeeded when asked again |
+| A wNEAR deposit through the app | It credited the payout agent's confidential balance directly (wNEAR; USDC was seen on 2026-10-28) |
+| A wNEAR withdrawal, owner approval off | Sent once and read `succeeded`; the payee's account received the exact amount as native NEAR, with no fee, within about three minutes (account balance, `view_account`) |
+| A USDC withdrawal to an account not registered on USDC | Refused `recipient_not_registered` before anything was recorded (`payouts/status` read `not_found`) |
+| The same request after the payee registered | Sent once and read `succeeded`; the payee holds the exact amount of USDC, with no fee (`ft_balance_of`) |
+| A held withdrawal's approval (read on the host with the provider API) | `request_type` `confidential`; `request_data` has `to`, `chain`, `token`, `amount` and `destination_asset`; its `request_hash` is sha256 of the canonical `{ amount, chain: "near", flow: "withdraw", kind: "confidential", to, token }`. `destination_asset` is not in the hash |
+| Approving a held withdrawal | Refused before anything was prepared, as built; the app received `unknown` rather than `refused` (found here; [Not done yet](../README.md#not-done-yet)) |
+| Rejecting it | The provider answered `FAILED` (`rejected`); the payee's balance was unchanged |
+
+Not checked: a confidential withdrawal of an asset whose `destination_asset` differs from its `token`; how a failed
+delivery is reported; whether 1Click would have registered an unregistered USDC receiver (the platform refuses before
+sending, so it is never tried).
+
 ## Token registration reads on the USDC contract, 2026-10-29T14:44Z
 
 Read-only RPC calls (`storage_balance_of` on the USDC contract, final finality), no funds moved. They back the

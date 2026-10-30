@@ -178,9 +178,9 @@ on NEAR is refused `recipient_not_found` before anything is recorded (every tran
 confidential USDC transfer to an agreed payee, or `{ chain: "near" }`, a withdrawal of wNEAR (arriving as native NEAR,
 per the provider's docs) or USDC, an asset the policy allows, from the confidential balance to a NEAR account the policy
 agrees to pay by withdrawal; a USDC withdrawal's recipient must be registered on the USDC contract, else it is refused
-`recipient_not_registered` before anything is recorded (wNEAR arrives as native NEAR and needs none). A withdrawal is public on chain and may arrive less a route fee; a held one can be rejected,
-not approved, until its approval is verified.
-Offline- and stack-tested, not deployed or mainnet-observed.
+`recipient_not_registered` before anything is recorded (wNEAR arrives as native NEAR and needs none). A withdrawal is public on chain and may arrive less a route fee (none was taken on 2026-10-30); a held one can be
+rejected, not approved, until its approval is verified.
+Mainnet-observed on platform staging (transfers 2026-10-28, withdrawals 2026-10-30); not in production.
 _Avoid_: retry (for a new attempt)
 
 **Held payout**:
