@@ -59,9 +59,10 @@ createServer(async (req, res) => {
     if (!op) { res.writeHead(404).end(); return; }
     // Only this page: a cross-site page can't make this process act with the credential.
     if (req.headers.origin !== `http://127.0.0.1:${port}`) { res.writeHead(403).end(); return; }
-    const answer = await op(await read(req));
-    console.log(req.url, JSON.stringify(answer).slice(0, 400));
-    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer, (_k, v) => typeof v === "bigint" ? v.toString() : v));
+    // Some answers carry bigint balances (owner-outputs.ts): sent, and logged, as decimal strings.
+    const answer = JSON.stringify(await op(await read(req)), (_k, v) => typeof v === "bigint" ? v.toString() : v);
+    console.log(req.url, answer.slice(0, 400));
+    res.writeHead(200, { "content-type": "application/json" }).end(answer);
   } catch (error) {
     res.writeHead(500, { "content-type": "application/json" }).end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }));
   }
