@@ -118,12 +118,18 @@ mkdirSync(invoices);
 for (const name of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', 'src', 'Dockerfile.payouts', 'railway.json']) cpSync(join(snapshot, name), join(invoices, name), { recursive: true });
 writeFileSync(join(invoices, '.dockerignore'), 'node_modules\n');
 if (digest(join(out, 'dao/web/dist'), []) !== record.frontend.build) throw new Error('The packaged frontend differs from the tested build');
+// The platform: the headless engine, with the confirm page's files alone, each byte-equal to the tested build's.
+execFileSync(process.execPath, ['scripts/package-platform.mjs', join(out, 'platform')], { cwd: snapshot, stdio: 'inherit' });
+const platformFiles = JSON.parse(readFileSync(join(out, 'platform/manifest.json'), 'utf8')).files;
+for (const [file, hash] of Object.entries(platformFiles))
+  if (file.startsWith('web/dist/') && hash !== sha256(join(snapshot, file))) throw new Error(`The platform package's ${file} differs from the tested build`);
 
 record.runDigest = runDigest;
 record.snapshot = snapshot;
 record.inputs = Object.fromEntries(required.filter(name => !name.endsWith('-change')).map(name => [name.slice(2), { path: flag(name), digest: digest(flag(name), []) }]));
 record.changes = { payables: inputs[inputs.indexOf('--payables-change') + 1], treasury: inputs[inputs.indexOf('--treasury-change') + 1] };
 record.packages = { dao: { path: join(out, 'dao'), manifestSha256: sha256(join(out, 'dao/manifest.json')), treasury: digest(shipped.treasury, []), payables: digest(shipped.payables, []) },
+  platform: { path: join(out, 'platform'), manifestSha256: sha256(join(out, 'platform/manifest.json')) },
   invoices: { path: invoices, sourceDigest: digest(invoices, []) } };
 if (sdk) {
   const pack = readdirSync(join(snapshot, '.test-artifacts/contract')).find(name => name.endsWith('.tgz'));

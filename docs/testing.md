@@ -233,7 +233,8 @@ for the payout agent's starting balance, `--treasury` to add the Treasury agent 
 `stack/app-credential`, mode 0600, never into `state.json`; self-service setup of the deployment's own Payables agents),
 `--headed` or `--no-browser`) builds the same isolated stack for app-owned workflow
 recipes and filming, and keeps it running. `stack/state.json` lists the application URLs, CDP endpoint,
-owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`), with `--treasury` the portfolio's access page and
+owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`: the stack clicks a button named exactly
+"Connect wallet" and, if near-connect asks which wallet to use, picks the local test wallet), with `--treasury` the portfolio's access page and
 machine base, with `--app` the deployment, base and credential file, the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
 refreshed every 250 ms. Write `stack/controls/<name>.json` whole (write another name, then rename) with a `command` of `fund`, `fundPayout`, `settle`,
 `dropTransferResponse`, `dropSignatureResponse`, `revealOwnerOutcome`, `setUnavailable`, `signOwner`
@@ -244,7 +245,8 @@ signs in with the fixture key and issues a `portfolio` credential); its result a
 pages: a page it opens itself has no local test wallet, and its own CDP connection must accept the local certificate. Signatures, deposits and settlement are simulated.
 `stack-app.spec.mjs` runs this entry point as a builder would (`--no-browser --treasury --app`): a separate server's
 setup, consent, payout request held and released by the owner's vote, and a read-only machine credential, through the
-control files and `state.json`. The routes' own behaviour is asserted in `app-access.spec.mjs` and `agent-access.spec.mjs`.
+control files and `state.json`; a second case serves an app's own build (`--frontend`) whose near-connect asks which wallet
+to use, and the stack still starts signed in. The routes' own behaviour is asserted in `app-access.spec.mjs` and `agent-access.spec.mjs`.
 Page dialogs (such as the payee's filing `confirm()`) are logged in `state.json` `dialogs` and left open
 for the attached client or person to answer; an attached Playwright client must register its own dialog
 handler, or it dismisses the dialog itself. `--accept-dialog '<exact message>'` (repeatable) instead accepts

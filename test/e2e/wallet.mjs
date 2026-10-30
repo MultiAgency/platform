@@ -4,11 +4,14 @@ import { sign, signDelegate, PUBLIC_KEY } from './provider.mjs';
 /**
  * Connects the simulated wallet on an owner page and waits until the gateway session names `account`. Every owner
  * frontend reloads itself once the session is set, so the session is read only after that reload has loaded: a read
- * during the navigation is destroyed with the page (seen under load in the release candidate, 2026-10-30).
+ * during the navigation is destroyed with the page (seen under load in the release candidate, 2026-10-30). A page whose
+ * near-connect asks which wallet to use (an app's default `connect()`) is answered with the local test wallet.
  */
 export async function connectWallet(page, account) {
   const reloaded = page.waitForEvent('load');
   await page.getByRole('button', { name: 'Connect wallet', exact: true }).first().click();
+  const chooser = page.getByText('Local test wallet', { exact: true });
+  await Promise.race([reloaded, chooser.waitFor({ timeout: 15_000 }).then(() => chooser.click()).catch(() => {})]);
   await reloaded;
   const viewer = await page.evaluate(async () => (await (await fetch('/gw/me')).json()).viewer?.account ?? null);
   if (viewer !== account) throw new Error(`The owner page signed in as ${viewer}, not ${account}`);

@@ -80,6 +80,12 @@ existing domain calls. Submission remains centralized in dispatch.
   them. `timeline-payment.tsx` and `timeline-run.tsx` follow one held payment or the latest autopilot
   run step by step, each step read from its own record; they show data only on the instance that holds
   those records (approvals filed there, evidence its executor wrote).
+- **Packages**: every release candidate builds two from the same tested snapshot. `dao`
+  (`scripts/package-shared-frontends.mjs`) is the prototype's full deployment: gateway, owner app, demo hosts and the
+  bundled Treasury and Payables frontends. `platform` (`scripts/package-platform.mjs`) is the engine for apps: the
+  gateway as a headless host (`headless` in its config: `/health`, `/apps/v1` and the confirm page only, app setup per
+  `appSetup`) and the confirm entry's files alone, each byte-equal to the tested build's. Hosted agents run the same
+  agent server in both. Both share `scripts/release-package.mjs` (copy, file hashes, manifest).
 - **Command line**: `create-agent.ts`, `issue-grant.ts`, `revoke-grant.ts`, `update-policy.ts`,
   `archive.ts`, `inspect.ts`, `books.ts`, `smoke.ts`, `run-report.ts`, `report.ts`, `remote.ts`.
 

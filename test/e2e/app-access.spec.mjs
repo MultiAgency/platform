@@ -59,7 +59,7 @@ async function connect(stack) {
 
 test('an app server relays readable owner actions, sends NEP-366 ones to the platform confirm page, and sets up a hosted agent', async ({ browser }, info) => {
   test.setTimeout(180_000);
-  const stack = await environment(info.outputPath('environment'), { secondAccount: true, accounts: [BUILDER], onChainPolicyEdits: true });
+  const stack = await environment(info.outputPath('environment'), { headless: true, secondAccount: true, accounts: [BUILDER], onChainPolicyEdits: true });
   const steps = [];
   try {
     // The operator issues the deployment's service credential on the platform host.
@@ -184,7 +184,7 @@ test('an app requests a payout once under its requestId, follows it by requestId
   test.setTimeout(180_000);
   // The payout agent starts with transfers on and no payees, so its first payee changes only `destinations`: NEP-413 per
   // the provider's docs, relayed by the app. The first test shows an on-chain edit going through the confirm page.
-  const stack = await environment(info.outputPath('environment'), { secondAccount: true, accounts: [BUILDER] });
+  const stack = await environment(info.outputPath('environment'), { headless: true, secondAccount: true, accounts: [BUILDER] });
   const steps = [];
   try {
     const { app, ownerStep, consent, hostedAgent } = await connect(stack);
@@ -241,7 +241,7 @@ test('an app requests a payout once under its requestId, follows it by requestId
     expect(heldWithdrawal.body).toEqual({ asset: USDC, amount: '500000', chain: 'near', recipient: BUILDER, confidential: true });
     const pending = value(await agent.call('held')).find(h => h.correlationId === withdrawn.correlationId);
     const approve = await agent.call('owner/prepare', { action: { type: 'approval_vote', approvalId: pending.approvalId, verdict: 'approve', correlationId: withdrawn.correlationId }, signer: 'wallet' });
-    expect(approve.ok, 'approving a held withdrawal is refused').toBe(false);
+    expect(approve, 'approving a held withdrawal is refused: a refusal, not an unknown outcome').toMatchObject({ ok: false, kind: 'refused', code: 'local_authorization_held' });
     // A vote's status follows the payout it decides: a rejected one ends FAILED.
     const reject = value(await agent.call('owner/prepare', { action: { type: 'approval_vote', approvalId: pending.approvalId, verdict: 'reject', correlationId: withdrawn.correlationId }, signer: 'wallet' }));
     expect(reject.payment).toEqual({ correlationId: withdrawn.correlationId, verdict: 'reject', terms: null });

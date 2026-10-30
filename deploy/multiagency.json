@@ -2,6 +2,7 @@
   "host": "proto.multiagency.ai",
   "walkthroughs": true,
   "selfService": true,
+  "appSetup": ["treasury", "payables"],
   "agents": [],
   "hosts": {
     "proto.multiagency.ai": {

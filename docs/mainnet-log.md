@@ -261,7 +261,7 @@ and was at first not registered on USDC.
 | A USDC withdrawal to an account not registered on USDC | Refused `recipient_not_registered` before anything was recorded (`payouts/status` read `not_found`) |
 | The same request after the payee registered | Sent once and read `succeeded`; the payee holds the exact amount of USDC, with no fee (`ft_balance_of`) |
 | A held withdrawal's approval (read on the host with the provider API) | `request_type` `confidential`; `request_data` has `to`, `chain`, `token`, `amount` and `destination_asset`; its `request_hash` is sha256 of the canonical `{ amount, chain: "near", flow: "withdraw", kind: "confidential", to, token }`. `destination_asset` is not in the hash |
-| Approving a held withdrawal | Refused before anything was prepared, as built; the app received `unknown` rather than `refused` (found here; [Not done yet](../README.md#not-done-yet)) |
+| Approving a held withdrawal | Refused before anything was prepared, as built; the app received `unknown` rather than `refused` (found here; see the README's [Not done yet](../README.md#not-done-yet)) |
 | Rejecting it | The provider answered `FAILED` (`rejected`); the payee's balance was unchanged |
 
 Not checked: a confidential withdrawal of an asset whose `destination_asset` differs from its `token`; how a failed

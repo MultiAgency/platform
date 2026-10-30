@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { closeSync, fsyncSync, openSync, writeSync } from "node:fs";
+import { closeSync, fsyncSync, openSync, readFileSync, writeSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { z } from "zod";
@@ -78,6 +78,16 @@ export class AppConfirms {
     writeAtomic(this.file(record.id), JSON.stringify({ ...record, submittedAt: now }) + "\n", 0o600);
     return true;
   }
+}
+
+/**
+ * The confirm page's own asset paths (scripts, styles, fonts), from the web build's manifest (rsbuild's
+ * `build-manifest.json`): what a headless host serves beside the page. None when the build has no manifest.
+ */
+export function confirmAssets(dist: string): Set<string> {
+  let entry: { initial?: { js?: string[]; css?: string[] }; async?: { js?: string[]; css?: string[] }; assets?: string[] } | undefined;
+  try { entry = JSON.parse(readFileSync(join(dist, "build-manifest.json"), "utf8")).entries?.confirm; } catch { return new Set(); }
+  return new Set([...entry?.initial?.js ?? [], ...entry?.initial?.css ?? [], ...entry?.async?.js ?? [], ...entry?.async?.css ?? [], ...entry?.assets ?? []]);
 }
 
 const opening = z.object({ signature: z.string() });

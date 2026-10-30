@@ -2,6 +2,7 @@
   "host": "proto.multiagency.ai",
   "walkthroughs": true,
   "selfService": true,
+  "appSetup": ["treasury", "payables"],
   "invoices": "https://invoices.multiagency.ai",
   "agents": [
     {

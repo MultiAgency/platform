@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { request as httpsRequest } from 'node:https';
 import { join } from 'node:path';
 import { appClient } from '../../src/contract/app-client.ts';
@@ -17,17 +17,30 @@ import { OWNER, PAYEE, PUBLIC_KEY, USDC } from './provider.mjs';
 const later = days => new Date(Date.now() + days * 86_400_000).toISOString();
 const value = result => { if (!result.ok) throw new Error(JSON.stringify(result)); return result.value; };
 
-test('a separate app server runs a held payout and a Treasury machine read on the running stack', async ({}, info) => {
-  test.setTimeout(240_000);
+/** Runs `stack.mjs` with `args` until `use` returns, then stops it through its stop file and expects a clean exit. */
+async function withStack(info, args, use) {
   const artifacts = info.outputPath('stack-run'), directory = join(artifacts, 'stack');
-  const child = spawn(process.execPath, [join(import.meta.dirname, 'stack.mjs'), '--no-browser', '--treasury', '--app', 'dao-local'],
+  const child = spawn(process.execPath, [join(import.meta.dirname, 'stack.mjs'), ...args],
     { env: { ...process.env, PROTO_E2E_ARTIFACTS: artifacts }, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
   const exited = new Promise(resolve => child.once('exit', code => resolve(code)));
   try {
-    await expect.poll(() => child.exitCode === null ? output.includes('Isolated stack ready') : `exited: ${output.slice(-2_000)}`, { timeout: 120_000 }).toBe(true);
-    const state = () => JSON.parse(readFileSync(join(directory, 'state.json'), 'utf8'));
+    await expect.poll(() => child.exitCode !== null || output.includes('Isolated stack ready'), { timeout: 120_000 }).toBe(true);
+    expect(child.exitCode, output.slice(-2_000)).toBeNull();
+    await use(directory, () => JSON.parse(readFileSync(join(directory, 'state.json'), 'utf8')));
+  } finally {
+    await info.attach('stack-output', { body: output, contentType: 'text/plain' });
+    if (child.exitCode === null) writeFileSync(join(directory, 'stop'), '');
+    await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 30_000))]);
+    if (child.exitCode === null) child.kill('SIGTERM');
+  }
+  expect(await exited, 'the stack stops on its stop file').toBe(0);
+}
+
+test('a separate app server runs a held payout and a Treasury machine read on the running stack', async ({}, info) => {
+  test.setTimeout(240_000);
+  await withStack(info, ['--no-browser', '--treasury', '--app', 'dao-local'], async (directory, state) => {
     const { dashboard, app: appState, treasury } = state(), host = new URL(dashboard).host;
     expect(appState).toMatchObject({ deployment: 'dao-local', base: dashboard });
     expect(treasury.owner, 'one owner for both agents').toBe(OWNER);
@@ -104,11 +117,36 @@ test('a separate app server runs a held payout and a Treasury machine read on th
       headers: { ...Object.fromEntries(new Headers(init?.headers)), authorization: `Bearer ${issued.value.token}` } }) });
     expect(value(await machine.call('overview'))).toMatchObject({ agentId: treasury.agentId, area: 'treasury' });
     expect(await machine.call('held'), 'outside the read scope').toMatchObject({ ok: false, kind: 'forbidden' });
-  } finally {
-    await info.attach('stack-output', { body: output, contentType: 'text/plain' });
-    if (child.exitCode === null) writeFileSync(join(directory, 'stop'), '');
-    await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 30_000))]);
-    if (child.exitCode === null) child.kill('SIGTERM');
-  }
-  expect(await exited, 'the stack stops on its stop file').toBe(0);
+  });
+});
+
+// An app's own build signs in with near-connect's default connect(), which asks which wallet to use; the stack's
+// sign-in answers with its local test wallet. Loaded from the same CDN module the invoice page uses.
+const APP_PAGE = `<!doctype html><meta charset="utf-8"><title>App</title><p id="account">Signed out.</p><button>Connect wallet</button>
+<script type="module">
+import { NearConnector } from "https://cdn.jsdelivr.net/npm/@fastnear/near-connect@0.14.1/+esm";
+const connector = new NearConnector({ network: "mainnet", features: { signMessage: true },
+  manifest: "https://cdn.jsdelivr.net/gh/fastnear/near-connect@d277b41263a8ea0a6892236b22824d46c2c3c377/repository/manifest.json" });
+document.querySelector("button").onclick = async () => {
+  await connector.connect();
+  const { wallet } = await connector.getConnectedWallet();
+  const challenge = await (await fetch("/gw/challenge")).json();
+  const signed = await wallet.signMessage({ message: challenge.message, recipient: challenge.recipient, nonce: Uint8Array.from(atob(challenge.nonce), c => c.charCodeAt(0)) });
+  const session = await fetch("/gw/session", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ accountId: signed.accountId, publicKey: signed.publicKey, signature: signed.signature, nonce: challenge.nonce }) });
+  if (session.ok) location.reload();
+};
+const viewer = (await (await fetch("/gw/me")).json()).viewer?.account;
+if (viewer) document.querySelector("#account").textContent = "Signed in as " + viewer + ".";
+</script>`;
+
+test("the stack signs the owner in on an app's own build that asks which wallet to use", async ({}, info) => {
+  test.setTimeout(180_000);
+  const frontend = info.outputPath('app-build');
+  mkdirSync(frontend, { recursive: true }); writeFileSync(join(frontend, 'index.html'), APP_PAGE);
+  await withStack(info, ['--treasury', '--frontend', frontend], async (_directory, state) => {
+    const { wallets, ownerFrontend } = state();
+    expect(ownerFrontend).toEqual({ dist: frontend });
+    expect(wallets.owner).toMatchObject({ account: OWNER, signedIn: true, blockedRequests: 0 });
+  });
 });

@@ -45,7 +45,7 @@ for (const sharedHosts of [false, true]) test(`${sharedHosts ? "shared hosts" : 
   const old = createServer((_req, res) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ json: { agentId: null, owner: null } })));
   const oldPort = await listen(old);
   const probe = createServer(); const port = await listen(probe); await new Promise(resolve => probe.close(resolve));
-  writeFileSync(join(dir, "dashboard.json"), JSON.stringify({ host: "fixture.test", selfService: true, walkthroughs: true,
+  writeFileSync(join(dir, "dashboard.json"), JSON.stringify({ host: "fixture.test", selfService: true, appSetup: ["treasury", "payables"], walkthroughs: true,
     ...(sharedHosts && { hosts: {
       "fixture.test": { demo: "showcase", agents: ["existing"], hostedAreas: ["treasury", "payables"] },
       "payables.test": { demo: "payables", agents: [], hostedAreas: ["payables"] },

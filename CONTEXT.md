@@ -365,8 +365,8 @@ re-checks ownership and the signing key on every call: once the chain reports th
 `check-keys` sweep), the consent is revoked for good. Scopes today: `read` (a fixed list of reads; no workflow records), `owner` (prepare, submit and follow owner actions,
 which only the owner's own wallet signature completes; the app receives an intent only when it is NEP-413, and a NEP-366
 one only as a confirm page link) and `payout` (payout requests, their status, held payouts and a deposit address to fund the agent). Wallet owners
-only; DAO consent is not available yet. Revocable by the deployment or the operator; a revocation is a permanent tombstone. Offline-tested, not deployed or
-mainnet-observed. See docs/agent-access.md.
+only; DAO consent is not available yet. Revocable by the deployment or the operator; a revocation is a permanent tombstone. Offline- and stack-tested;
+mainnet-observed on platform staging (2026-10-28); not in production. See docs/agent-access.md.
 
 
 **Confirm page**:
@@ -374,19 +374,28 @@ The platform's own page, `/confirm/<token>`, where an owner signs a NEP-366 owne
 holds the intent and gives the app only the link; the page shows the agent's record of the action (requesting
 deployment and Organization, agent, and for a policy edit each field before and after) to whoever holds the link, and
 releases the bytes to sign only after the owner's key signs the link's readable text. It submits only the owner's
-signature over the held bytes, once, before the intent expires. Offline- and stack-tested with a simulated wallet, not
-deployed. See docs/agent-access.md.
+signature over the held bytes, once, before the intent expires. Offline- and stack-tested with a simulated wallet;
+mainnet-observed on platform staging (agent creation 2026-10-28; policy edits 2026-10-30); not in production. See
+docs/agent-access.md.
+
+**Platform host**:
+The platform's own host for apps (`api.dev.multiagency.ai` for staging, later `api.multiagency.ai`), run from the
+`platform` package as a headless gateway: it serves only `/health`, app access (`/apps/v1`) and the confirm page, with
+app setup for the areas its config lists (Payables). It has no sign-in, owner app, owner RPC or machine credentials;
+those stay on the prototype's hosts (the `dao` package). Offline- and stack-tested; not yet deployed (staging still
+runs the `dao` package). See docs/operations.md, "Platform staging".
 
 
 **App setup**:
 A wallet owner's NEP-413 signature over a canonical setup text (host, app deployment, Organization, owner, area;
-at most an hour) asking the platform for a hosted agent. The platform reserves and starts it under the self-service
-rules and stores a setup consent: `owner` scope for that agent only while it isn't created, so the app can
+at most an hour) asking the platform for a hosted agent. The platform reserves and starts it if the host's config lists
+the area in `appSetup` (and, on a demo host, its `hostedAreas`), and stores a setup consent: `owner` scope for that agent only while it isn't created, so the app can
 prepare its creation for the owner's wallet to sign. Once the agent exists, it only reads that agent's owner actions
 until it expires, and an ordinary app consent is needed. A setup for an agent already created is refused; one deployment holds
 at most 16 Organization agents per host.
 An app's setup reserves that deployment and Organization's own agent per owner and area, reachable only by that deployment
-for that Organization; self-service setups stay per owner and area. Offline-tested, not deployed or mainnet-observed.
+for that Organization; self-service setups stay per owner and area. Offline- and stack-tested; mainnet-observed on
+platform staging (2026-10-28); not in production.
 
 
 **External plan**:

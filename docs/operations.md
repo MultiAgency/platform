@@ -288,26 +288,34 @@ settings file before starting it there.
 To stop an agent's sends, freeze its policy by owner vote: the provider refuses every send while the
 executor keeps reconciling. To stop one host from sending, set `EXECUTOR=off` there.
 
-## Platform staging (prepared, not deployed)
+## Platform staging (deployed 2026-10-28)
 
 A `staging` environment in the platform's Railway project serves app access for the dashboard's staging
 (`dev.multiagency.ai`) at `api.dev.multiagency.ai`; production would be `api.multiagency.ai`. Consents and setups name
 this host as their NEP-413 recipient, so it isn't renamed once owners have signed. Staging runs on mainnet (the provider
 has no test network) with its own state and test agents, never the live demo hosts' records.
 
+Staging is meant to run the `platform` package (`scripts/package-platform.mjs`, built by every release candidate beside
+`dao`): the gateway as a headless host (`headless` in its config), which serves `/health`, app access (`/apps/v1`) and
+the confirm page with its own assets, and answers 404 to everything else, before reading any session: no sign-in,
+owner app, owner RPC, machine credentials or demo hosts. App setup is limited to the areas `appSetup` lists (Payables
+only). As of 2026-10-30 it still runs the `dao` package (candidate `d1d37e12`), which also serves the prototype's owner
+app and sign-in there. Switching needs no migration: the state directory, hosted agents and consents are kept, and the
+host is unchanged, so signed consents and setups stay valid.
+
 1. In the platform's Railway project, create `staging` as an empty environment (a duplicate copies production's
    services and variables) and add one empty service, `gateway`, with its own volume at `/data`, one replica,
    healthcheck `/health`.
-2. Variables: `DASHBOARD_FILE=/app/deploy/platform-staging.json` (host `api.dev.multiagency.ai`, `selfService`, no
-   configured agents: every agent is a hosted agent created through app setup), `NEAR_INTENTS_AGENT_API_KEY` (a separate
+2. Variables: `DASHBOARD_FILE=/app/deploy/platform-staging.json` (host `api.dev.multiagency.ai`, `headless`, app setup
+   for Payables, no configured agents: every agent is a hosted agent created through app setup), `NEAR_INTENTS_AGENT_API_KEY` (a separate
    key for staging from the same partner account, so it can be revoked without touching production's), `NEAR_INTENTS_AGENT_API_URL`,
    `FASTNEAR_API_KEY`, and a new `SESSION_SECRET`. No `DAO_ENV`, `PAYOUT_ENV` or `RESTORE_*`.
-3. Build the package from the release candidate's commit, as for production (`scripts/package-shared-frontends.mjs`),
-   and deploy it with `railway up --service gateway --environment staging`. To check before DNS, set
+3. Deploy the release candidate's `platform` package: from `<release>/platform`, `railway up --service gateway
+   --environment staging`. To check before DNS, set
    `DASHBOARD_HOST` to the Railway domain, then point a CNAME for `api.dev.multiagency.ai` (Namecheap) at the domain
    `railway domain status` shows and remove `DASHBOARD_HOST`.
 4. Read-only checks: `/health` 200; `/apps/v1/agents/x` without a credential 401, with a browser `Origin` 403, on another
-   host 421 (shown locally with this configuration on 2026-10-27).
+   host 421; `/`, `/gw/challenge` and `/a/x/access` 404 (offline-tested in `test/platform-host.test.ts`).
 5. On the staging service, the operator issues the dashboard staging's credential from the gateway's own state
    directory (it writes `.app-access/` there, beside the gateway): `cd /data/state && /app/node_modules/.bin/tsx
    /app/src/app-credential.ts issue staging api.dev.multiagency.ai 90 "dashboard staging"`. The token goes only into the
@@ -315,6 +323,10 @@ has no test network) with its own state and test agents, never the live demo hos
    `PLATFORM_DEPLOYMENT=staging`).
 6. Rollback: redeploy the previous image; state stays on the staging volume. Nothing here touches proto.multiagency.ai
    or invoices.multiagency.ai.
+
+Production (`api.multiagency.ai`, not set up) is the same package with `deploy/platform.json`, the image's default
+`DASHBOARD_FILE`: a new service in the platform's Railway project with its own volume, its own provider key and session
+secret, and the production app credentials issued on it. Production's `dao` service is unchanged.
 
 ### Staging evidence on a test agent (run 2026-10-28: [mainnet log](mainnet-log.md#app-access-on-platform-staging-2026-10-28-utc))
 

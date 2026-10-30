@@ -30,7 +30,15 @@ const Config = z.object({
   invoices: z.url().optional(),
   /** Walkthrough entry and bounded self-service provisioning on this single host. */
   walkthroughs: z.boolean().default(false),
+  /** Setup of a hosted agent by an owner signed in on this host (`/gw/agents`). */
   selfService: z.boolean().default(false),
+  /** The areas an app deployment may set up hosted agents for, with the owner's signed setup text (`/apps/v1/setup`). */
+  appSetup: z.array(z.enum(["treasury", "payables"])).default([]),
+  /**
+   * The platform as an engine for apps: this host serves only `/health`, app access (`/apps/v1`) and the confirm page
+   * with its assets. No sign-in, owner app, owner RPC, machine credentials or demo hosts.
+   */
+  headless: z.boolean().default(false),
   /**
    * Each agent's server: with `envFile`, the gateway runs it on `port`; without, one is already
    * running there (only one server may run per agent: each runs that agent's background loops).
@@ -63,7 +71,10 @@ export type AgentEntry = Config["agents"][number];
 
 export function loadConfig(file = process.env.DASHBOARD_FILE ?? "dashboard.json"): Config {
   const config = Config.parse(JSON.parse(readFileSync(file, "utf8")));
-  if (!config.agents.length && !config.selfService) throw new Error("Configure agents or enable self-service setup");
+  if (!config.agents.length && !config.selfService && !config.appSetup.length) throw new Error("Configure agents or enable setup");
+  if (config.headless) for (const field of ["hosts", "invoiceUpstream", "invoices"] as const)
+    if (config[field] !== undefined) throw new Error(`A headless host serves apps only: remove ${field}`);
+  if (config.headless && (config.walkthroughs || config.selfService)) throw new Error("A headless host serves apps only: remove walkthroughs and selfService");
   for (const agent of config.agents)
     if (agent.invoices && agent.area !== "payables") throw new Error("Only a Payables agent may configure a contributor entry");
   const names = new Set(config.agents.map((a) => a.name));

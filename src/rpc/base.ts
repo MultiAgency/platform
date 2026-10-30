@@ -6,7 +6,7 @@ import { refusalDetails } from "../provider-display.js";
 import { PublicError } from "../public-error.js";
 import { MoneyLockBusy, UnresolvedOperations } from "../lock.js";
 import { WorkOrderRefusal } from "../work-order-protocol.js";
-import { provenRefusal } from "../ops.js";
+import { AuthorizationHeld, provenRefusal } from "../ops.js";
 import { READS } from "../contract/permissions.js";
 /**
  * Only explicitly constructed ORPCErrors/PublicErrors are public application messages. Arbitrary exceptions
@@ -22,6 +22,10 @@ function toClientError(error: unknown, procedure: string) {
   if (error instanceof ORPCError) return error;
   if (error instanceof WorkOrderRefusal) return new ORPCError("BAD_REQUEST", { message: error.message, data: { kind: "refused", code: error.code } });
   if (error instanceof PublicError) return new ORPCError("BAD_REQUEST", { message: error.message, data: { kind: "refused" } });
+  // Held by this server's own checks before anything reached the provider (a vote's approval check, a send's local
+  // checks, which the journal records as `local_authorization_held`): proven not to have taken effect.
+  if (error instanceof AuthorizationHeld)
+    return new ORPCError("BAD_REQUEST", { message: error.message, data: { kind: "refused", code: "local_authorization_held" } });
   // A provider failure is a typed refusal only where it cannot hide an effect: on a read, or when the provider's
   // answer proves nothing executed. Anything else after a mutation may follow a submission and stays untyped
   // (the client reports `unknown` with the request's identity and never resends).

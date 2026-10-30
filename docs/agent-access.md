@@ -145,6 +145,12 @@ recorded payment, revocation; mutation challenge `agent-route-unrestricted`). No
 
 ## App access (server to server)
 
+The platform's own host (`api.dev.multiagency.ai` for staging; `api.multiagency.ai` later) runs the `platform` package
+headless: only `/health`, these routes and the confirm page with its own assets, and app setup for Payables agents only
+(`deploy/platform*.json`; offline-tested in `test/platform-host.test.ts`, E2E on a headless stack). Not deployed yet:
+on 2026-10-30 staging still runs the `dao` package, which also serves the prototype's owner app and sign-in there. The
+prototype's hosts (the `dao` package) serve these routes beside their owner app.
+
 An app deployment (for example the MultiAgency dashboard's `staging`) reaches agents under `/apps/v1` with its service
 credential (`Authorization: Bearer
 tap_<id>.<secret>`, no cookies or Origin). The operator issues it on the gateway host: `pnpm app-credential issue
@@ -170,8 +176,8 @@ check), so a signature held for an agent that was since replaced isn't attached 
 
 **Setup.** The owner signs `setupMessage({ host, deployment, organization, owner, area, expiresAt })` (at most an hour;
 the same checks as a consent). Wallet owners only: a DAO owner gets 409. The platform then reserves the hosted agent for
-that owner and area, under the same rules as self-service `/gw/agents` (self-service enabled, the area allowed on this
-host, registry capacity), starts it, and stores a setup consent: `owner` scope with the reserved stand-in agent ID
+that owner and area if the host's config lists the area in `appSetup` (independent of self-service `/gw/agents`; a demo
+host also narrows it to its `hostedAreas`) and the registry has capacity, starts it, and stores a setup consent: `owner` scope with the reserved stand-in agent ID
 `unborn`, which no signed consent may name. It acts only while the agent's server reports no agent created, so it serves the
 owner's `agent_create` (prepared here, signed by the owner's wallet), which must name the key that signed the setup. Once
 the agent exists the setup consent reads `owner/status`, `owner/actions` and `owner/pending` until it expires (at most an

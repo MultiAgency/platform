@@ -1,0 +1,14 @@
+# Build only from scripts/package-platform.mjs output, never the working repository.
+FROM node:24.22.0-slim
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY tsconfig.json ./
+COPY src ./src
+COPY web/dist ./web/dist
+COPY deploy ./deploy
+COPY manifest.json ./release-manifest.json
+ENV NODE_ENV=production DASHBOARD_FILE=/app/deploy/platform.json TRUST_PROXY=true
+EXPOSE 8080
+CMD ["/app/deploy/platform-entrypoint.sh"]

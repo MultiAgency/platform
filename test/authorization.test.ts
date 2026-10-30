@@ -11,6 +11,8 @@ import { readOps, record } from "../src/ops.js";
 import { checkPaymentApproval } from "../src/payment-approval.js";
 import { ASSETS, payoutPolicy } from "../src/policy.js";
 import { freshDirectory, offline } from "./fixtures/harness.js";
+import { createRouterClient, ORPCError } from "@orpc/server";
+import { router } from "../src/router.js";
 
 /** Regressions for the single authorization rule (see CONTEXT.md, "Authorization"), through the real money path. */
 
@@ -101,11 +103,27 @@ test("an approval releasing a payee an except-mode policy doesn't agree to is re
   await assert.rejects(checkPaymentApproval(heldPayment("other.near")), /payee_not_agreed/);
 });
 
-test("a held withdrawal can be rejected but not approved: its approval's terms and hash aren't observed yet", async () => {
+test("a held withdrawal can be rejected but not approved: verifying its approval isn't built", async () => {
   policy = payoutPolicy(["payee.near"]);
   const vote = heldPayment("payee.near");
   mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, agent_id: process.env.AGENT_ID, type: "withdraw",
     status: "PENDING_APPROVAL", details: { approval_id: "approval" } }));
   await assert.rejects(checkPaymentApproval(vote), /approving a held withdrawal isn't available yet/);
   assert.equal((await checkPaymentApproval({ ...vote, verdict: "reject" })).binding.verdict, "reject");
+});
+
+test("a vote the approval check refuses reaches the caller as a refusal, not an unknown outcome: nothing was prepared", async () => {
+  const approvalId = "93d2992b-84ca-4a28-b653-4cfe816c954a";
+  const terms = { to: "payee.near", token: ASSETS.USDC, amount: "1" };
+  mock.method(api, "getApproval", async () => ({ approval_id: approvalId, wallet_id: fixtureWallet.wallet_id, status: "PENDING",
+    expires_at: new Date(Date.now() + 3_600_000).toISOString(), request_type: "confidential", request_data: terms,
+    request_hash: createHash("sha256").update(canonical({ ...terms, chain: "near", flow: "withdraw", kind: "confidential" })).digest("hex") }));
+  mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, agent_id: process.env.AGENT_ID, type: "withdraw",
+    status: "PENDING_APPROVAL", details: { approval_id: approvalId } }));
+  const generate = mock.method(api, "generateIntent", async () => assert.fail("nothing is prepared for a refused vote"));
+  const client = createRouterClient(router);
+  await assert.rejects(client.owner.prepare({ action: { type: "approval_vote", approvalId, verdict: "approve", correlationId: "op_held" }, signer: "wallet" }),
+    (error: unknown) => error instanceof ORPCError && error.code === "BAD_REQUEST" && (error.data as { kind?: string }).kind === "refused"
+      && (error.data as { code?: string }).code === "local_authorization_held" && /approving a held withdrawal/.test(error.message));
+  assert.equal(generate.mock.callCount(), 0);
 });

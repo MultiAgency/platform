@@ -1,5 +1,8 @@
 {
   "host": "api.dev.multiagency.ai",
-  "selfService": true,
+  "headless": true,
+  "appSetup": [
+    "payables"
+  ],
   "agents": []
 }

@@ -15,7 +15,8 @@ export default defineConfig({
     // The Vault mark inline: no image file to ship.
     tags: [{ tag: "link", attrs: { rel: "icon", type: "image/svg+xml", href: `data:image/svg+xml,${encodeURIComponent(VAULT)}` } }],
   },
-  output: { distPath: { root: "dist" } },
+  // The build manifest lists each entry's files, so the platform package carries the confirm page's alone (scripts/package-platform.mjs).
+  output: { distPath: { root: "dist" }, manifest: { filename: "build-manifest.json" } },
   // `pnpm server` answers the RPC calls; the dev server only serves the UI.
   server: { port: 3000, proxy: { "/rpc": "http://127.0.0.1:8787" } },
 });

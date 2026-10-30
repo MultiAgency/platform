@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { environment } from './environment.mjs';
-import { installWallet } from './wallet.mjs';
+import { connectWallet, installWallet } from './wallet.mjs';
 import { OWNER, PAYEE, PUBLIC_KEY, listen } from './provider.mjs';
 import { appCredential, stackControls } from './stack-controls.mjs';
 
@@ -53,16 +53,8 @@ if (!args.includes('--no-browser')) {
     const page = await context.newPage();
     await page.goto(url);
     // The owner page starts signed in through the simulated wallet (the gateway session), ready for an attached client.
-    let signedIn = false;
-    if (role === 'owner') {
-      await page.getByRole('button', { name: 'Connect wallet', exact: true }).first().click();
-      for (let i = 0; i < 100 && !signedIn; i++) {
-        // The app reloads itself once the session is set; a read during that navigation counts as "not yet".
-        signedIn = await page.evaluate(async () => (await (await fetch('/gw/me')).json()).viewer?.account ?? null).catch(() => null) === account;
-        if (!signedIn) await new Promise(r => setTimeout(r, 100));
-      }
-      if (!signedIn) throw new Error(`The owner page did not sign in as ${account}`);
-    }
+    const signedIn = role === 'owner';
+    if (signedIn) await connectWallet(page, account);
     wallets[role] = { account, signedIn, page: page.url(), ...wallet };
   }
 }

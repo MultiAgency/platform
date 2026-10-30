@@ -5,7 +5,7 @@ import { providedCapabilities } from "../contract/owner-capabilities.js";
 import { resolveMachineManagement } from "./machine-authority.js";
 import { machineRoutes } from "./machine-routes.js";
 import { APP_ROOT, appRoutes, confirms } from "./app-routes.js";
-import { confirmRoutes } from "./app-confirm.js";
+import { confirmAssets, confirmRoutes } from "./app-confirm.js";
 import { payeeBase, supplierCookie, supplierEnvironment, payeeRoute } from "./hosted-supplier.js";
 import { demoHost, demoCrossSite, demoSession, invoiceRoute, assignedToHost } from "./demo-hosts.js";
 import { forwardRpc } from "./rpc-proxy.js";
@@ -47,6 +47,8 @@ const HOST = hostOf(process.env.DASHBOARD_HOST || config.host);
 /** Where the app is installed, apart from the working directory, which holds the agents' state. */
 const APP = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const DIST = join(APP, "web/dist");
+/** On a headless host, the only files served beside the confirm page: its own assets. */
+const HEADLESS_ASSETS = config.headless ? confirmAssets(DIST) : new Set<string>();
 // Signs every session: an empty or missing secret would let anyone forge one, so the gateway won't start.
 const SECRET = process.env.SESSION_SECRET ?? "";
 if (SECRET.length < 32) throw new Error("Set SESSION_SECRET to a random value of at least 32 characters before starting the gateway");
@@ -114,6 +116,12 @@ const server = createServer(async (req, res) => {
     const { pathname } = url;
     // Health is public and contains no agent records, including on provider probe hosts.
     if (pathname === "/health" && ["GET", "HEAD"].includes(req.method ?? "")) return json(res, 200, { ok: true });
+    // A headless host is the engine for apps: app access, the confirm page and the page's own assets. Nothing else
+    // exists here, so no session is read and no other route answers, whatever else the web build contains.
+    if (config.headless) {
+      if (HEADLESS_ASSETS.has(pathname) && ["GET", "HEAD"].includes(req.method ?? "")) return serveStatic(res, DIST, pathname);
+      if (!pathname.startsWith("/apps/") && !pathname.startsWith("/confirm/")) return json(res, 404, { error: "Not found" });
+    }
     const site = config.hosts ? demoHost(req, config.hosts) : null;
     if (config.hosts && !site) return json(res, 421, { error: "Unconfigured demo host" });
     const signingHost = site?.host ?? HOST;
@@ -155,10 +163,12 @@ const server = createServer(async (req, res) => {
       && req.headers.host?.toLowerCase() !== signingHost.toLowerCase()) return json(res, 421, { error: "Use the configured host for agent access" });
     if (await machineRoutes(req, res, pathname, signingHost, selected, () => auth.account(req), () => stopping)) return;
     if (await confirmRoutes(req, res, pathname, signingHost, confirms, APP_ROOT, selected, DIST, () => stopping)) return;
-    if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, config.selfService ? { setup: async ({ owner, area, deployment, organization }) => {
-      if (site && !site.hostedAreas?.includes(area)) throw new Error("This area is not available on this host");
+    if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, config.appSetup.length ? { setup: async ({ owner, area, deployment, organization }) => {
+      if (!config.appSetup.includes(area) || (site && !site.hostedAreas?.includes(area))) throw new Error("This area is not available on this host");
       return reserveHosted({ owner, kind: "wallet", area }, { deployment, organization });
     } } : {})) return;
+    // Anything under /apps/ or /confirm/ that neither answered: never the file server's pages.
+    if (config.headless) return json(res, 404, { error: "Not found" });
 
     if (pathname === "/gw/challenge" && req.method === "GET") return json(res, ...challengeAnswer(signingHost, mayChallenge(clientAddress(req))));
     if (pathname === "/gw/session" && req.method === "POST") {

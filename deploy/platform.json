@@ -1,0 +1,8 @@
+{
+  "host": "api.multiagency.ai",
+  "headless": true,
+  "appSetup": [
+    "payables"
+  ],
+  "agents": []
+}
