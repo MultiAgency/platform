@@ -31,7 +31,21 @@ function toClientError(error: unknown, procedure: string) {
   // (the client reports `unknown` with the request's identity and never resends).
   if (error instanceof AgentApiError && (READS.has(procedure) || provenRefusal(error)))
     return new ORPCError("BAD_REQUEST", { message: "The provider could not complete this request. Check the recorded outcome before retrying.", data: { kind: "provider", code: error.code, availableAt: null, ...refusalDetails(error) } });
+  logUnclassified(error, procedure);
   return new ORPCError("INTERNAL_SERVER_ERROR", { message: "The request could not be completed. Check existing records before retrying an action." });
+}
+
+/**
+ * For the operator only (this server's log), what a caller receives as `unknown`: the procedure, the error's class and
+ * where it was thrown, and a provider error's status, code and request ID. Never a message, title, detail or request
+ * body: those can carry credentials or private values.
+ */
+function logUnclassified(error: unknown, procedure: string) {
+  const frame = error instanceof Error ? error.stack?.split("\n").slice(1).find(line => line.includes("/src/") && !line.includes("node_modules")) : undefined;
+  const site = frame?.match(/(src\/[^:()\s]+:\d+)/)?.[1];
+  console.error(JSON.stringify({ event: "unclassified_error", procedure, error: error instanceof Error ? error.constructor.name : typeof error,
+    ...(site && { site }),
+    ...(error instanceof AgentApiError && { provider: { status: error.status, code: error.code, layer: error.layer ?? null, retryable: error.retryable, requestId: error.requestId ?? null } }) }));
 }
 
 /** Converts every failure to its public form, including a stream's, which is thrown after next() resolves. */

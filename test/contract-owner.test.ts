@@ -187,6 +187,23 @@ test("a provider failure that does not prove non-execution leaves a mutation unk
   assert.equal((await client.call("held") as { kind: string }).kind, "provider", "a read has no effect to hide");
 });
 
+test("an unclassified failure is logged for the operator, without its message or detail; the caller still gets unknown", async t => {
+  const { AgentApiError } = await import("@near-intents-agent-api/sdk");
+  const logged: string[] = [];
+  t.mock.method(console, "error", (line: unknown) => { logged.push(String(line)); });
+  const provider = new AgentApiError(502, { errors: [{ status: "502", code: "upstream_failed", title: "title-with-value", detail: "detail-with-secret",
+    meta: { request_id: "req_42" } }] } as never);
+  const { client } = serve({ deposit: throwing(provider), pay: throwing(new Error("message-with-ngt_secret")) });
+  assert.equal((await client.call("deposit") as { kind: string }).kind, "unknown");
+  assert.equal((await client.call("pay", {} as never) as { kind: string }).kind, "unknown");
+  assert.equal(logged.length, 2);
+  for (const line of logged) for (const hidden of ["title-with-value", "detail-with-secret", "message-with-ngt_secret"]) assert.ok(!line.includes(hidden), line);
+  const [deposit, pay] = logged.map(line => JSON.parse(line) as Record<string, unknown>);
+  assert.deepEqual(deposit, { event: "unclassified_error", procedure: "deposit", error: "AgentApiError",
+    provider: { status: 502, code: "upstream_failed", layer: null, retryable: provider.retryable, requestId: provider.requestId ?? null } });
+  assert.deepEqual(pay, { event: "unclassified_error", procedure: "pay", error: "Error" });
+});
+
 // Compile time: Recovery B's diagnostic evidence is declared, so a typed consumer reads its fields without a cast.
 type UnresolvedEvidence = NonNullable<z.output<(typeof ownerOutputs)["unresolved"]>[number]["evidence"]>;
 const evidenceTyped: [UnresolvedEvidence["requestId"], UnresolvedEvidence["httpStatus"], UnresolvedEvidence["providerIds"]] extends [string | null, number, Record<string, string>] ? true : false = true;

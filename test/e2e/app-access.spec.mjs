@@ -128,12 +128,17 @@ test('an app server relays readable owner actions, sends NEP-366 ones to the pla
       // The owner's wallet may already be connected; otherwise connect it, choosing it if near-connect asks.
       const sign = page.getByRole('button', { name: 'Sign and submit' }), connect = page.getByRole('button', { name: `Connect ${OWNER}` });
       await expect(sign.or(connect)).toBeVisible();
-      // Bounded actions: a stall fails here with Playwright's actionability log instead of at the test timeout.
-      if (await connect.isVisible()) {
-        await connect.click({ timeout: 15_000 });
+      // The page may finish connecting the wallet on its own and replace the Connect button while the test reaches for
+      // it (seen 2026-10-30: the click then waited for a button that no longer existed). Whichever comes first wins:
+      // the page signing the owner in, or the test connecting, choosing the local wallet if near-connect asks.
+      if (!(await sign.isVisible())) {
         const chooser = page.getByText('Local test wallet', { exact: true });
-        await Promise.race([chooser.waitFor({ timeout: 15_000 }).then(() => chooser.click({ timeout: 15_000 })).catch(() => {}), sign.waitFor({ timeout: 15_000 })]);
+        const connecting = connect.click({ timeout: 15_000 })
+          .then(() => Promise.race([chooser.waitFor({ timeout: 15_000 }).then(() => chooser.click({ timeout: 15_000 })), sign.waitFor({ timeout: 15_000 })]))
+          .catch(() => {});
+        await Promise.race([connecting, sign.waitFor({ timeout: 30_000 })]);
       }
+      // Bounded: a stall fails here with Playwright's actionability log instead of at the test timeout.
       await sign.click({ timeout: 15_000 });
       await expect(page.getByText(/Submitted\. The app follows the outcome/)).toBeVisible();
       expect(wallet.signatures.filter(s => s.delegate)).toHaveLength(1);

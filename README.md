@@ -257,10 +257,13 @@ of maintaining separate requirement statuses.
   another signature. See [agent access](docs/agent-access.md#app-access-server-to-server). An app service
   credential is a bearer: whoever holds it acts within the consents owners gave that deployment until it expires or is
   revoked. See [agent access](docs/agent-access.md#app-access-server-to-server).
-- A provider failure while preparing an owner action is reported as `unknown`, and its code is neither returned nor
-  logged (`src/rpc/base.ts`: after a mutation, only a proven refusal keeps its code), so its cause can't be found.
-  Preparing signs and sends nothing, so nothing moved; retrying prepares a new intent. Seen on staging 2026-10-30: an
-  `owner_approval` edit failed once this way and succeeded on retry, with nothing recorded for the failure.
+- A provider failure while preparing an owner action is reported as `unknown`: after a mutation, only a proven refusal
+  keeps its code for the caller (`src/rpc/base.ts`). Preparing signs and sends nothing, so nothing moved; retrying
+  prepares a new intent. Seen on staging 2026-10-30: an `owner_approval` edit failed once this way and succeeded on
+  retry, with nothing recorded for the failure. Every failure that reaches a caller as `unknown` is now logged for the
+  operator (`unclassified_error`: procedure, error class, throw site, and a provider error's status, code and request
+  ID; never its message or detail), from source after 2026-10-30; the builds deployed on staging and production log
+  nothing for it.
 - A vote the platform's own checks refuse (for example approving a held withdrawal) reaches the app as `refused`, code
   `local_authorization_held`, from source after 2026-10-30 (offline- and stack-tested). The builds deployed on staging
   and production still answer `unknown` for it (seen on staging 2026-10-30), which there also means nothing reached the
