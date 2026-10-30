@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { environment } from './environment.mjs';
-import { browserContext } from './wallet.mjs';
+import { browserContext, connectWallet } from './wallet.mjs';
 import { OWNER, PAYEE, SECOND, sign } from './provider.mjs';
 import { payablesGeneration, signInAs, payeeApi } from './payables-steps.mjs';
 import { quoteRegion, seedStrategy, signIn } from './treasury-journey.mjs';
@@ -59,7 +59,7 @@ for (const release of ['a', 'b']) test(`Payables shared readers, release ${relea
     const page = await council.context.newPage(), other = await council.context.newPage();
     const rows = traffic(page, '/a/payout');
     await page.goto(`${stack.dashboard}/a/payout/`);
-    await page.getByRole('button', { name: 'Connect wallet', exact: true }).first().click();
+    await connectWallet(page, OWNER);
     await expect(page.getByText(OWNER).first()).toBeVisible();
     // A shared record: the council records an agreement; the contractor submits a report.
     const rpc = (method, input) => page.evaluate(async ({ method, input }) => (await (await fetch(`/a/payout/rpc/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ json: input }) })).json()).json, { method, input });

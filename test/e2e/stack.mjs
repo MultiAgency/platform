@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { environment } from './environment.mjs';
 import { installWallet } from './wallet.mjs';
 import { OWNER, PAYEE, PUBLIC_KEY, listen } from './provider.mjs';
+import { appCredential, stackControls } from './stack-controls.mjs';
 
 // A running isolated stack for app-owned recipes and filming: the same services, simulator and
 // boundaries as the deterministic tests. Simulated provider, chain, signatures and settlement only.
@@ -17,14 +18,18 @@ const payablesDist = values('--payables-release').at(-1);
 // `--builder <account>`: an account on chain that is not yet an agreed payee; the owner adds it through the policy screen.
 // `--payout-funding <raw USDC>`: the payout agent's starting balance (default 100 USDC); fund it later with `fundPayout`.
 const builder = values('--builder').at(-1), payoutFunding = values('--payout-funding').at(-1);
-// `--treasury`: also a Treasury agent, `portfolio`, owned by the payee account (100 simulated USDC). Its owner issues
-// machine credentials at /a/portfolio/access; a server outside the browser reads it at /machine/v1/a/portfolio.
+// `--treasury`: also a Treasury agent, `portfolio`, owned by the owner (100 simulated USDC). The owner issues machine
+// credentials at /a/portfolio/access, or with the `machineCredential` control; a server reads it at /machine/v1/a/portfolio.
 const treasury = args.includes('--treasury');
+// `--app <deployment>`: an app deployment's server reaches /apps/v1 with a service credential issued at startup, and may
+// set up its Organizations' own hosted agents. The owner's signatures come from the `signOwner` control.
+const app = values('--app').at(-1);
 if (frontend && payablesDist) throw new Error('Use --frontend or --payables-release, not both');
 const directory = join(process.env.PROTO_E2E_ARTIFACTS, 'stack'), controls = join(directory, 'controls');
 mkdirSync(controls, { recursive: true });
 const stack = await environment(join(directory, 'environment'), { owner, payees, ...(builder && { accounts: [builder] }), ...(payoutFunding !== undefined && { payoutFunding: BigInt(payoutFunding) }),
-  ...(frontend && { frontendDist: resolve(frontend) }), ...(treasury && { workspace: true }),
+  ...(frontend && { frontendDist: resolve(frontend) }), ...(treasury && { workspace: true, portfolioOwner: owner }),
+  ...(app && { selfService: true, hostedAreas: ['payables'] }),
   ...(payablesDist && { ownerApp: { product: 'payables', a: resolve(payablesDist), b: resolve(payablesDist) } }) });
 const { simulated } = stack;
 // One browser, two wallet contexts (owner, payee) behind the same wallet boundary as the tests. Attach over CDP.
@@ -61,23 +66,19 @@ if (!args.includes('--no-browser')) {
     wallets[role] = { account, signedIn, page: page.url(), ...wallet };
   }
 }
-const commands = {
-  fund: ({ agent, amount }) => simulated.fund(agent, amount),
-  settle: ({ correlation }) => simulated.settle(correlation),
-  dropTransferResponse: () => simulated.dropTransferResponse(),
-  fundPayout: ({ amount }) => simulated.fundPayout(amount),
-  dropSignatureResponse: () => simulated.dropSignatureResponse(),
-  revealOwnerOutcome: () => simulated.revealOwnerOutcome(),
-  setUnavailable: ({ value }) => simulated.setUnavailable(value === true),
-};
+const commands = stackControls(stack, { owner });
+// The app's service credential, readable only by this user: the token is never written to state.json.
+const credentialFile = join(directory, 'app-credential');
+if (app) writeFileSync(credentialFile, await appCredential(stack, app), { mode: 0o600 });
 const state = () => ({
   dashboard: stack.dashboard, owner: `${stack.dashboard}/a/payout/`, payee: stack.invoices, ownerAccount: owner, payees,
   testPublicKey: PUBLIC_KEY, cdp, wallets: Object.fromEntries(Object.entries(wallets).map(([role, w]) => [role, { account: w.account, signedIn: w.signedIn, page: w.page, blockedRequests: w.unexpected.length }])),
   ownerFrontend: payablesDist ? { product: 'payables', release: resolve(payablesDist) } : frontend ? { dist: resolve(frontend) } : 'proto web',
   dialogs, parentAgent: simulated.id, createdAgents: simulated.created(), records: stack.records(), builder: builder ?? null,
   payoutPolicy: simulated.payoutPolicy(),
-  treasury: stack.portfolio ? { agent: 'portfolio', agentId: stack.portfolio.id, owner: PAYEE, access: `${stack.dashboard}/a/portfolio/access`,
+  treasury: stack.portfolio ? { agent: 'portfolio', agentId: stack.portfolio.id, owner, access: `${stack.dashboard}/a/portfolio/access`,
     machineBase: `${stack.dashboard}/machine/v1/a/portfolio` } : null,
+  app: app ? { deployment: app, base: stack.dashboard, credentialFile } : null,
   deposits: simulated.deposits.map(({ agent, correlation_id }) => ({ agent, correlation: correlation_id })),
   transfers: simulated.transfers.map(p => ({ agent: p.agent, correlation: p.correlation, approval: p.approval, status: p.status, recipient: p.body.recipient, amount: p.body.amount })),
   providerErrors: simulated.errors, simulated: ['provider', 'chain', 'wallet signatures', 'deposits', 'settlement'],
@@ -86,15 +87,25 @@ const state = () => ({
 writeFileSync(join(directory, 'state.json'), JSON.stringify(state(), null, 2));
 console.log(`Isolated stack ready: ${join(directory, 'state.json')}`);
 await new Promise(resolve => {
-  const timer = setInterval(() => {
-    for (const name of readdirSync(controls).filter(n => n.endsWith('.json') && !n.endsWith('.result.json'))) {
-      const path = join(controls, name);
-      let result;
-      try { const { command, ...input } = JSON.parse(readFileSync(path, 'utf8')); if (!commands[command]) throw new Error(`Unknown command ${command}`); commands[command](input); result = { ok: true }; }
-      catch (error) { result = { ok: false, error: String(error) }; }
-      unlinkSync(path); writeFileSync(path.replace(/\.json$/, '.result.json'), JSON.stringify(result));
-    }
-    writeFileSync(join(directory, 'state.json'), JSON.stringify(state(), null, 2));
+  // One pass at a time: a command may wait on the stack (signing in, issuing), and a file is answered once.
+  let running = false;
+  const timer = setInterval(async () => {
+    if (running) return;
+    running = true;
+    try {
+      for (const name of readdirSync(controls).filter(n => n.endsWith('.json') && !n.endsWith('.result.json'))) {
+        const path = join(controls, name);
+        let result;
+        try {
+          const { command, ...input } = JSON.parse(readFileSync(path, 'utf8'));
+          if (!Object.hasOwn(commands, command)) throw new Error(`Unknown command ${command}`);
+          const value = await commands[command](input);
+          result = { ok: true, ...(value !== undefined && { value }) };
+        } catch (error) { result = { ok: false, error: String(error) }; }
+        unlinkSync(path); writeFileSync(path.replace(/\.json$/, '.result.json'), JSON.stringify(result));
+      }
+      writeFileSync(join(directory, 'state.json'), JSON.stringify(state(), null, 2));
+    } finally { running = false; }
     if (existsSync(join(directory, 'stop'))) { clearInterval(timer); resolve(); }
   }, 250);
   for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => { clearInterval(timer); resolve(); });

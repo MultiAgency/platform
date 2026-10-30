@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import lockfile from 'proper-lockfile';
 import { environment } from './environment.mjs';
-import { browserContext } from './wallet.mjs';
+import { browserContext, connectWallet } from './wallet.mjs';
 import { OWNER, PAYEE, USDC, sign } from './provider.mjs';
 import { clientConformance } from './conformance.mjs';
 
@@ -28,8 +28,7 @@ test('Payables: every listed procedure through ownerClient equals its raw answer
   try {
     const page = await owner.context.newPage();
     await page.goto(`${stack.dashboard}/a/payout/`);
-    await page.getByRole('button', { name: 'Connect wallet', exact: true }).first().click();
-    await expect.poll(async () => (await page.evaluate(async () => (await fetch('/gw/me')).json())).viewer?.account ?? null).toBe(OWNER);
+    await connectWallet(page, OWNER);
     const { client, check, outage, accepted, report } = clientConformance(page, '/a/payout', LISTED);
     /** Prepare, sign the exact prepared intent, submit once and follow it, through ownerClient. */
     const signAndSubmit = async (prepareProcedure, input, submitProcedure, identity = {}) => {

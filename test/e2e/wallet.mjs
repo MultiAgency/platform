@@ -1,6 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { sign, signDelegate, PUBLIC_KEY } from './provider.mjs';
 
+/**
+ * Connects the simulated wallet on an owner page and waits until the gateway session names `account`. Every owner
+ * frontend reloads itself once the session is set, so the session is read only after that reload has loaded: a read
+ * during the navigation is destroyed with the page (seen under load in the release candidate, 2026-10-30).
+ */
+export async function connectWallet(page, account) {
+  const reloaded = page.waitForEvent('load');
+  await page.getByRole('button', { name: 'Connect wallet', exact: true }).first().click();
+  await reloaded;
+  const viewer = await page.evaluate(async () => (await (await fetch('/gw/me')).json()).viewer?.account ?? null);
+  if (viewer !== account) throw new Error(`The owner page signed in as ${viewer}, not ${account}`);
+}
+
 /** External wallet boundary only: actual app routes and RPC responses are never intercepted. */
 export async function browserContext(browser, env, account, options = {}) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true, serviceWorkers: 'block', ...options });

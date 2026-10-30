@@ -2,6 +2,7 @@ import { expect } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PAYEE, USDC } from './provider.mjs';
+import { connectWallet } from './wallet.mjs';
 
 // Shared steps of Treasury's own interface on the real stack.
 
@@ -14,8 +15,7 @@ export function seedStrategy(stack, wrapBps = 2500) {
 /** The owner signs in once through Treasury's interface. */
 export async function signIn(page, stack) {
   await page.goto(`${stack.dashboard}/a/portfolio/`);
-  await page.getByRole('button', { name: 'Connect wallet', exact: true }).first().click();
-  await expect.poll(async () => (await page.evaluate(async () => (await fetch('/gw/me')).json())).viewer?.account ?? null).toBe(PAYEE);
+  await connectWallet(page, PAYEE);
 }
 
 export const quoteRegion = page => page.getByRole('region', { name: 'Quoted rebalance', exact: true });

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { request as httpsRequest } from 'node:https';
 import { request as httpRequest } from 'node:http';
 import { environment } from './environment.mjs';
-import { browserContext } from './wallet.mjs';
+import { browserContext, connectWallet } from './wallet.mjs';
 import { OWNER, PAYEE } from './provider.mjs';
 
 // The owner's approval screens are Payables'; those steps run against its release A (`--payables-dist`).
@@ -61,8 +61,7 @@ async function fileInvoice(page, note = 'Local E2E work') {
 }
 async function signInOwner(page, stack) {
   await page.goto(`${stack.dashboard}/a/payout/`);
-  await page.getByRole('button', { name: 'Connect wallet', exact: true }).first().click();
-  await expect.poll(async () => page.evaluate(async () => (await (await fetch('/gw/me')).json()).viewer?.account)).toBe(OWNER);
+  await connectWallet(page, OWNER);
 }
 const ownerScreens = () => test.skip(!apps.payables, 'The owner approval screens require --payables-dist and --payables-dist-next');
 

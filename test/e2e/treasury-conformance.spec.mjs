@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import lockfile from 'proper-lockfile';
 import { environment } from './environment.mjs';
-import { browserContext } from './wallet.mjs';
+import { browserContext, connectWallet } from './wallet.mjs';
 import { PAYEE, OWNER, USDC, sign } from './provider.mjs';
 import { clientConformance } from './conformance.mjs';
 
@@ -22,8 +22,7 @@ test('Treasury: every listed procedure through ownerClient equals its raw answer
   try {
     const page = await owner.context.newPage();
     await page.goto(`${stack.dashboard}/a/portfolio/`);
-    await page.getByRole('button', { name: 'Connect wallet', exact: true }).first().click();
-    await expect.poll(async () => (await page.evaluate(async () => (await fetch('/gw/me')).json())).viewer?.account ?? null).toBe(PAYEE);
+    await connectWallet(page, PAYEE);
     const { client, check, outage, accepted, report } = clientConformance(page, '/a/portfolio', LISTED);
 
     // Strategy and a saved plan.

@@ -21,8 +21,10 @@ async function freePort(host = '127.0.0.1') {
  * `daoOwned`: the owner app's agent belongs to the simulated Sputnik DAO, whose council (OWNER) and member (SECOND)
  * can both read it with different permissions (shared-reader scenarios). Test-only: no authorization code changes.
  * `onChainPolicyEdits`: the simulator signs provider-enforced policy edits as NEP-366 (see provider.mjs).
+ * `selfService`: owners (and app deployments, through `/apps/v1/setup`) may set up hosted agents; `hostedAreas` names the
+ * areas a `frontendDist` host may set up.
  */
-export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoOwned = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false } = {}) {
+export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoOwned = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [] } = {}) {
   const daoArea = daoOwned ? ownerApp?.product : undefined;
   if (daoOwned && !['payables', 'treasury'].includes(daoArea)) throw new Error('daoOwned requires an owner app');
   if (daoArea === 'payables') owner = DAO;
@@ -167,8 +169,8 @@ export async function environment(directory, { workspace = false, portfolioOwner
       ...(independentFrontend && { hosts: { [new URL(dashboard).host]: {
         demo: 'treasury', agents: agents.map(a => a.name), frontendDist: frontend } } }),
       // A new prototype's own build on this host, using the existing showcase assignment.
-      ...(frontendDist && { hosts: { [new URL(dashboard).host]: { demo: 'showcase', agents: agents.map(a => a.name), frontendDist } } }),
-      ...(release && { hosts: { [new URL(dashboard).host]: { demo: ownerApp.product, agents: agents.filter(a => a.area === ownerApp.product).map(a => a.name), frontend: { origin: release.origin, product: ownerApp.product } } } }), ...(secondAccount && { selfService: true }), agents }));
+      ...(frontendDist && { hosts: { [new URL(dashboard).host]: { demo: 'showcase', agents: agents.map(a => a.name), frontendDist, hostedAreas } } }),
+      ...(release && { hosts: { [new URL(dashboard).host]: { demo: ownerApp.product, agents: agents.filter(a => a.area === ownerApp.product).map(a => a.name), frontend: { origin: release.origin, product: ownerApp.product } } } }), ...((secondAccount || selfService) && { selfService: true }), agents }));
     await start('gateway', gatewayDir, 'src/gateway/server.ts', { PORT: String(gatewayPort), AGENT_GRANT_TOKEN: '',
       DASHBOARD_FILE: join(gatewayDir, 'dashboard.json') }, 'on port');
   } catch (error) { await dispose(); throw error; }

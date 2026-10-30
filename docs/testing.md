@@ -227,15 +227,24 @@ outside the application, not test-control HTTP routes. Close the agent-browser s
 `--payee <account>`, `--frontend <dir>` to serve a prototype build on the `showcase` host, `--payables-release <dir>` to serve a
 Payables build at `/a/payout/`, `--builder <account>` for an account on chain that is not yet an agreed payee (the
 owner adds it with a signed `policy_update`, which the simulator applies and versions), `--payout-funding <raw USDC>`
-for the payout agent's starting balance, `--treasury` to add the Treasury agent `portfolio` (owned by the payee
-account, 100 simulated USDC; its owner issues machine credentials at `/a/portfolio/access`), `--headed` or `--no-browser`) builds the same isolated stack for app-owned workflow
+for the payout agent's starting balance, `--treasury` to add the Treasury agent `portfolio` (owned by the owner,
+100 simulated USDC; the owner issues machine credentials at `/a/portfolio/access` or with the `machineCredential` control),
+`--app <deployment>` for an app deployment's server on `/apps/v1` (a service credential issued at startup into
+`stack/app-credential`, mode 0600, never into `state.json`; self-service setup of the deployment's own Payables agents),
+`--headed` or `--no-browser`) builds the same isolated stack for app-owned workflow
 recipes and filming, and keeps it running. `stack/state.json` lists the application URLs, CDP endpoint,
 owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`), with `--treasury` the portfolio's access page and
-machine base, the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
-refreshed every 250 ms. Write `stack/controls/<name>.json` with a `command` of `fund`, `fundPayout`, `settle`,
-`dropTransferResponse`, `dropSignatureResponse`, `revealOwnerOutcome` or `setUnavailable`; its result
-appears as `<name>.result.json`. Create `stack/stop` to stop. An attached client signs in from the stack's own wallet
+machine base, with `--app` the deployment, base and credential file, the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
+refreshed every 250 ms. Write `stack/controls/<name>.json` whole (write another name, then rename) with a `command` of `fund`, `fundPayout`, `settle`,
+`dropTransferResponse`, `dropSignatureResponse`, `revealOwnerOutcome`, `setUnavailable`, `signOwner`
+(`message`, `recipient`, `nonce`: the owner's NEP-413 signature from the fixture key, standing in for the wallet an app
+asks; never the platform sign-in text) or `machineCredential` (`scopes`, optional `label` and `ttlSeconds`: the owner
+signs in with the fixture key and issues a `portfolio` credential); its result appears as `<name>.result.json`,
+`{ ok, value }` or `{ ok: false, error }`. Create `stack/stop` to stop. An attached client signs in from the stack's own wallet
 pages: a page it opens itself has no local test wallet, and its own CDP connection must accept the local certificate. Signatures, deposits and settlement are simulated.
+`stack-app.spec.mjs` runs this entry point as a builder would (`--no-browser --treasury --app`): a separate server's
+setup, consent, payout request held and released by the owner's vote, and a read-only machine credential, through the
+control files and `state.json`. The routes' own behaviour is asserted in `app-access.spec.mjs` and `agent-access.spec.mjs`.
 Page dialogs (such as the payee's filing `confirm()`) are logged in `state.json` `dialogs` and left open
 for the attached client or person to answer; an attached Playwright client must register its own dialog
 handler, or it dismisses the dialog itself. `--accept-dialog '<exact message>'` (repeatable) instead accepts

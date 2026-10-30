@@ -13,7 +13,7 @@ test("gateway approve-only survives an instance file requesting execution", () =
     writeFileSync(envFile, "EXECUTOR=on\n");
     const env = childEnv({ name: "fixture", owner: "owner.near", port: 4001, executor: false, envFile });
     const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e",
-      `const {executes,saveEnv}=await import('./src/env.ts'); console.log(executes()); saveEnv({EXECUTOR:'on'}); console.log(executes());`], { env, encoding: "utf8", timeout: 15_000 });
+      `const {executes,saveEnv}=await import('./src/env.ts'); console.log(String(executes())); saveEnv({EXECUTOR:'on'}); console.log(String(executes()));`], { env, encoding: "utf8", timeout: 15_000 });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), "false\nfalse");
   } finally { rmSync(dir, {recursive:true,force:true}); }

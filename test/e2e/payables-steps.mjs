@@ -2,6 +2,7 @@ import { expect } from '@playwright/test';
 import { request as httpsRequest } from 'node:https';
 import { request as httpRequest } from 'node:http';
 import { OWNER, sign } from './provider.mjs';
+import { connectWallet } from './wallet.mjs';
 
 // Shared Payables workflow steps on the real stack: the owner's RPC through the gateway session, the payee API
 // through the payee's own session, and one owner-signed action. Used by every spec that runs this workflow.
@@ -9,9 +10,8 @@ import { OWNER, sign } from './provider.mjs';
 /** The owner's signed-in RPC on the payout agent. */
 export async function ownerRpc(page, stack) {
   await page.goto(`${stack.dashboard}/a/payout/`);
-  await page.getByRole('button', { name: 'Connect wallet', exact: true }).first().click();
   // Signed in on whichever frontend serves the owner's pages: the gateway session names the owner.
-  await expect.poll(async () => page.evaluate(async () => (await (await fetch('/gw/me')).json()).viewer?.account)).toBe(OWNER);
+  await connectWallet(page, OWNER);
   return (method, input) => page.evaluate(async ({ method, input }) => {
     const response = await fetch(`/a/payout/rpc/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ json: input }) });
     const value = await response.json(); if (!response.ok) throw new Error(JSON.stringify(value)); return value.json;

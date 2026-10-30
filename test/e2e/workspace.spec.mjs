@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
 import { environment } from './environment.mjs';
-import { browserContext } from './wallet.mjs';
+import { browserContext, connectWallet } from './wallet.mjs';
 import { OWNER, PAYEE } from './provider.mjs';
 
 async function rpc(page, agent, method, input) {
@@ -15,8 +15,7 @@ async function signedPage(browser, stack, account, path) {
   await wallet.context.tracing.start({ screenshots: true, snapshots: true });
   const page = await wallet.context.newPage();
   await page.goto(`${stack.dashboard}${path}`);
-  await page.getByRole('button', { name: 'Connect wallet', exact: true }).first().click();
-  await expect.poll(async () => page.evaluate(async () => (await (await fetch('/gw/me')).json()).viewer?.account)).toBe(account);
+  await connectWallet(page, account);
   return { ...wallet, page };
 }
 async function scenario(browser, info, run, options = {}) {
