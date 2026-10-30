@@ -67,8 +67,8 @@ it may retry.
   consent and setup texts (`consentMessage`, `setupMessage`), `ownerOutputs` and `OwnerInputs`/`OwnerOutput`
   per procedure, `ownerCapabilities` and `mayCall` (display only), gateway discovery (`gatewayDiscovery`,
   `gatewayDenialScope`), schemas for runs (`RecordingSchema`) and proposals, `ASSETS` and account helpers. It also
-  re-exports the payee entry. Peer: zod ^4.6.7. Its own dependencies: `@orpc/client` and `@orpc/contract` 2.0.0-beta.46,
-  `@ag-ui/core` 1.0.3.
+  re-exports the payee entry. Peer: zod ^4.6.7. It bundles `@orpc/client` 2.0.0-beta.47 and depends on
+  `@orpc/contract` 2.0.0-beta.47 and `@ag-ui/core` 1.0.3.
 - `@multiagency/sdk/payee`: `payeeClient` with `Result`/`Failure`, payee and compensation schemas, agent-connection
   schemas, `payeeContract` and `compatiblePayeeFrontend`. Peer: zod only.
 - `@multiagency/sdk/release-server`: `stage`, `activate`, `readRelease`, `digest` and `releaseServer` for app

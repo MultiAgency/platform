@@ -218,8 +218,10 @@ We retain the existing provider controls and local checks; this review introduce
 
 ## Recovery limitation
 
-**Provider SDK 0.7.2 (locked in `pnpm-lock.yaml` 2026-10-28; 0.7.1 from 2026-10-26): documented refusals not adopted.**
-Neither upgrade changes a classification rule. 0.7.2 adds `retryAfterSeconds` to `AgentApiError` (not read here) and
+**Provider SDK 0.7.3 (locked in `pnpm-lock.yaml` 2026-10-30; 0.7.2 from 2026-10-28, 0.7.1 from 2026-10-26): documented
+refusals not adopted.** No upgrade changes a classification rule. 0.7.3's JavaScript is identical to 0.7.2's (compared 2026-10-30); its types add the dry-run
+warning code `policy_transaction_limit_exceeded` and an execution's `deposit_seen_at`, and drop `native_balance` from a
+deletion preview; none of them is read here. 0.7.2 adds `retryAfterSeconds` to `AgentApiError` (not read here) and
 types a budget window's `spent_usd` as nullable: every field is `null` for an uncapped window (provider API #51, its
 skills and OpenAPI on 2026-10-28); before, it reported `"0.000000"` there (the provider's own demo stub and tests, changed
 2026-10-27). The overview schema required a string, so the agent refused its own overview of a policy with an uncapped

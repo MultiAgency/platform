@@ -14,7 +14,7 @@ pnpm add @multiagency/sdk zod@4.6.7
 
 Each package carries `provenance.json`: the source commit it was packed from, any uncommitted paths in that tree, and a digest for every file it was built from. One version number identifies one package: npm does not let a published version be republished with different contents (per npm's documented policy). The package's own README, skills and `CHANGES.md` describe that exact version.
 
-Zod is the one peer: a product's schemas and the SDK's share one Zod. The owner entry (`@multiagency/sdk`) brings its own `@orpc/client` and `@orpc/contract` 2.0.0-beta.46 and `@ag-ui/core` 1.0.3 as dependencies, so a product on another oRPC version keeps it; its bundle then carries both oRPC clients. The contributor entry never loads them. The installed package's dependencies and peerDependencies are authoritative for that package. The supported Node target is Node 24. TypeScript consumers use ESM with NodeNext resolution and the ES2023 and DOM libraries for the clients' web request types. The Node-only release-server entry also needs Node typings.
+Zod is the one peer: a product's schemas and the SDK's share one Zod. The owner entry (`@multiagency/sdk`) bundles its own `@orpc/client` 2.0.0-beta.47 (licenses in `THIRD-PARTY-NOTICES`) and depends on `@orpc/contract` 2.0.0-beta.47 and `@ag-ui/core` 1.0.3, so a product on another oRPC version keeps it; its bundle then carries both oRPC clients. The contributor entry never loads them. The installed package's dependencies and peerDependencies are authoritative for that package. The supported Node target is Node 24. TypeScript consumers use ESM with NodeNext resolution and the ES2023 and DOM libraries for the clients' web request types. The Node-only release-server entry also needs Node typings.
 
 For development against unreleased SDK source, install an SDK repository checkout's dependencies and run `pnpm sdk:dev --once` there, then link your product to its generated `packages/sdk` directory. Use `pnpm sdk:dev` to watch changes. The generated directory is not source and is intentionally absent from Git. A linked checkout can differ from the published package of the same version, so record which one a release was built with, and keep local paths out of portable release inputs.
 
@@ -35,8 +35,9 @@ owner signs `consentMessage(...)` (or `setupMessage(...)` for a hosted agent) wi
 it. A consent reaches the listed reads (`APP_READS`) and owner actions (`APP_OWNER`) and, for `owner/prepare`, only
 actions the owner can read when signing or that platform code builds entirely (`AppOwnerAction`); everything else is
 refused. The app never asks an owner to sign the platform's sign-in text. See the platform's `docs/agent-access.md`,
-"App access". The `/apps/v1` routes are not yet deployed on any hosted MultiAgency host; they run on the SDK repository's
-local stack (`pnpm test:e2e:stack --app <deployment>`), with a simulated provider, chain and wallet.
+"App access". No production MultiAgency host serves the `/apps/v1` routes yet; the operator runs them on a staging host
+for its own tests. Build against the SDK repository's local stack (`pnpm test:e2e:stack --app <deployment>`), with a
+simulated provider, chain and wallet.
 
 An agent connection permits its contributor's reports and compensation reads only. It cannot file invoices, approve payments, sign owner actions or manage connections. Treasury machine access is a separate existing route and credential; Payables owner delegation and DAO machine delegation are unavailable.
 
@@ -111,7 +112,7 @@ The SDK never automatically resubmits an action. Some owner procedures have no c
 
 ## Continue with the bundled guidance
 
-The package contains `skills/getting-started/SKILL.md`, `skills/payee-workflows/SKILL.md` and `skills/owner-workflows/SKILL.md`. These files describe the clients in the installed package and can be read directly or through TanStack Intent. `CHANGES.md` records consumer-impacting changes.
+The package contains `skills/getting-started/SKILL.md`, `skills/payee-workflows/SKILL.md`, `skills/owner-workflows/SKILL.md` and `skills/app-server/SKILL.md`. These files describe the clients in the installed package and can be read directly or through TanStack Intent. `CHANGES.md` records consumer-impacting changes.
 
 Use `@multiagency/sdk/schemas/*` for the published JSON schemas. The Node-only `@multiagency/sdk/release-server` serves immutable frontend artifacts; it does not authenticate callers or run a financial executor.
 

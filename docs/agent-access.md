@@ -50,7 +50,7 @@ the one-time field available for manual copy. Hiding or reloading cannot retriev
 
 Use `POST https://<issued-host>/machine/v1/a/<name>/rpc/<procedure>` with
 `Authorization: Bearer <token>`, no cookies or Origin. The body and streamed responses use Proto's
-pinned oRPC serialization (`@orpc/client` 2.0.0-beta.46, an SDK dependency; beta.44 clients are tested offline only, see
+pinned oRPC serialization (`@orpc/client` 2.0.0-beta.47, bundled in the SDK; beta.44 clients are tested offline only, see
 [SDK changes](sdk-changes.md)). Unknown procedures refuse
 access. Machine credentials are not browser sessions and cannot authenticate dashboard RPC or
 credential-management requests. `ownerClient` from `@multiagency/sdk` reaches this route with an

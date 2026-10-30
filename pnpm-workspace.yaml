@@ -1,4 +1,8 @@
 allowBuilds:
   esbuild: false
 # Verification shares installed dependencies read-only; install explicitly before source capture.
+# Reviewed before its release age (2026-10-30): published by the provider's CI with SLSA provenance, its JavaScript
+# identical to 0.7.2's (types and README only). Remove once 0.7.3 is past the release age.
+minimumReleaseAgeExclude:
+  - '@near-intents-agent-api/sdk@0.7.3'
 verifyDepsBeforeRun: false

@@ -10,7 +10,8 @@ candidate dates the heading. Under 0.x, any public-interface change bumps at lea
 All additive. Nothing on the existing wire changes.
 
 - **App access for an app's server** (the MultiAgency dashboard is the first app): `appClient({ base, credential })`
-  for the platform's new `/apps/v1` routes, which aren't deployed yet. `identity(agent)`, `setup(...)`, and
+  for the platform's new `/apps/v1` routes, which no production host serves yet (the operator runs them on a staging
+  host for its own tests). `identity(agent)`, `setup(...)`, and
   `consents.list/submit/revoke` answer with `AppRouteResult` kinds (`session`, `forbidden`, `refused`, `unavailable`;
   resending the same signed body is safe). `agent(organization, agent).call(...)` uses `ownerClient` and its result
   kinds, typed to `AppProcedure` (`APP_READS`, `APP_OWNER`). `owner/prepare` takes only `AppOwnerAction`: agent
@@ -37,6 +38,9 @@ All additive. Nothing on the existing wire changes.
   `@orpc/client` (Module Federation shares bare names only) no longer mixes its copy with the SDK's link. `@orpc/contract`
   still imports its own `@orpc/client` (installed with it); the SDK's calls don't go through that copy. `@orpc/contract` stays a dependency (apps implement
   servers from the contract objects); `zod` stays the one peer.
+- **oRPC 2.0.0-beta.47** (from beta.46), for the bundled client and `@orpc/contract`: its transport moves to
+  standard-server 0.13. Its breaking changes are in `@orpc/openapi` and the Effect integration, which the SDK doesn't use
+  (oRPC's release notes, 2026-10-27). Offline-tested.
 - **No change for uncapped budget windows:** since the provider's API #51 (SDK 0.7.2) it reports an uncapped window's
   spend as `null`; the platform's `overview` keeps reporting `"0.000000"` there, as the provider did before, so apps on
   any SDK version read it unchanged.
