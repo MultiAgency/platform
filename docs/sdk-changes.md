@@ -7,7 +7,9 @@ candidate dates the heading. Under 0.x, any public-interface change bumps at lea
 
 ## 0.3.0 (2026-10-30)
 
-All additive. Nothing on the existing wire changes.
+Additive except two moves: `ownerContract`, `ownerErrors` and `OwnerContract` are imported from
+`@multiagency/sdk/contract`, and the release server's command is `multiagency-release-server`. Nothing on the existing
+wire changes.
 
 - **App access for an app's server** (the MultiAgency dashboard is the first app): `appClient({ base, credential })`
   for the platform's new `/apps/v1` routes, which no production host serves yet (the operator runs them on a staging
