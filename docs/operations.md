@@ -288,7 +288,7 @@ settings file before starting it there.
 To stop an agent's sends, freeze its policy by owner vote: the provider refuses every send while the
 executor keeps reconciling. To stop one host from sending, set `EXECUTOR=off` there.
 
-## Platform staging (deployed 2026-10-28)
+## Platform staging
 
 A `staging` environment in the platform's Railway project serves app access for the dashboard's staging
 (`dev.multiagency.ai`) at `api.dev.multiagency.ai`; production would be `api.multiagency.ai`. Consents and setups name
@@ -299,9 +299,12 @@ Staging is meant to run the `platform` package (`scripts/package-platform.mjs`, 
 `dao`): the gateway as a headless host (`headless` in its config), which serves `/health`, app access (`/apps/v1`) and
 the confirm page with its own assets, and answers 404 to everything else, before reading any session: no sign-in,
 owner app, owner RPC, machine credentials or demo hosts. App setup is limited to the areas `appSetup` lists (Payables
-only). As of 2026-10-30 it still runs the `dao` package (candidate `d1d37e12`), which also serves the prototype's owner
-app and sign-in there. Switching needs no migration: the state directory, hosted agents and consents are kept, and the
-host is unchanged, so signed consents and setups stay valid.
+only). It has run it since 2026-10-31T01:03Z (release candidate `b9221b45`, commit `01add07`, Railway deployment
+`4900d1c4`, image `1b74b1fa`); before, it ran the `dao` package, which also served the prototype's owner app and
+sign-in there. Read-only checks on 2026-10-31T01:06Z: `/health` 200; `/apps/v1/agents/x` 401 without a credential and
+403 with a browser `Origin`; `/`, `/gw/challenge`, `/gw/me`, `/a/x/access`, `/machine/v1/…`, an unmatched `/confirm/…`,
+owner-app assets and `/build-manifest.json` 404; `POST /gw/session` 404. Switching needed no migration: the state
+directory, hosted agents and consents are kept, and the host is unchanged, so signed consents and setups stay valid.
 
 1. In the platform's Railway project, create `staging` as an empty environment (a duplicate copies production's
    services and variables) and add one empty service, `gateway`, with its own volume at `/data`, one replica,
@@ -332,9 +335,16 @@ secret, and the production app credentials issued on it. Production's `dao` serv
 
 User-run, on mainnet, with a small amount of the user's own USDC; never scheduled. It shows the app path end to end:
 setup, creation on the confirm page, consent, a payout request held for the owner, and the owner's vote relayed by an
-app. Until the dashboard's own screens exist, the app is a local stand-in, `scripts/staging-app.ts`: it holds the
-staging credential in one local process and has the owner's wallet sign app texts in a localhost page. Test tooling
-only; never deployed.
+app. Until an app's own screens exist, the app is the local testing UI, `scripts/staging-app.ts`: it holds the
+staging credential in one local process and has the owner's wallet sign app texts in a localhost page. It switches
+between Organizations and agents, shows the agent's policy, balances, held payouts and recent owner actions ("Refresh
+view"), and keeps every call and answer in a history that can be copied out for this log. Test tooling only; never
+deployed. The runs below used its earlier, single-Organization form, whose buttons were named differently: "Sign setup
+text and submit" (now "Sign setup text"), "Sign consent (owner, payout, read)" (now "Sign consent", scopes chosen
+beside it), "Add payee" and "Agree payee for withdrawal" (now "Add transfer payee" and "Add withdrawal payee", which add
+to the payees in force instead of replacing them), "Vote approve on the held payout" (now "Vote approve") and "Held"
+(now part of "Refresh view"). Edits it builds from the policy name the revision and digest they were read under, so the
+platform refuses them if the policy changed in between.
 
 Before starting: staging deployed from a candidate that includes app votes and the confirm page; a staging credential
 issued (step 5); an owner wallet whose key is a full-access key of the owner account (check with `view_access_key`) and
@@ -376,7 +386,7 @@ with any remaining funds under the signed policy; the consent ends when it expir
 Record each step's outcome in `docs/mainnet-log.md` with the date (UTC) and the deployment id; op ids, transaction
 hashes, amounts and payees go only in the private release record.
 
-### Staging withdrawals on the same test agent (prepared, not run)
+### Staging withdrawals on the same test agent (run 2026-10-30: [mainnet log](mainnet-log.md#payout-withdrawals-on-platform-staging-2026-10-30-utc))
 
 User-run, on mainnet, with small amounts of the user's own wNEAR and USDC; never scheduled. It shows what is offline-
 and stack-tested only: a withdrawal to a NEAR account arriving (wNEAR as native NEAR, USDC as USDC), the fee 1Click
@@ -389,9 +399,8 @@ staging run in progress.
 
 1. Start the stand-in as above and enter the agent's name. Each policy edit below opens the confirm page: check the
    fields it shows before and after, then sign twice. Read the owner status until `SUCCESS`.
-2. Agree the payee for withdrawal ("Agree payee for withdrawal"). Expect `actions` to gain `withdraw` and `destinations`
-   a `withdraw` entry on chain `near` with no memo. The edit names the whole withdrawal list: agreeing another account
-   this way replaces the first.
+2. Agree the payee for withdrawal ("Add withdrawal payee"). Expect `actions` to gain `withdraw` and `destinations`
+   a `withdraw` entry on chain `near` with no memo.
 3. Allow wNEAR with a small cap ("Allow wNEAR", in yoctoNEAR). Expect `assets` to gain `nep141:wrap.near` and `limits` a
    wNEAR cap per payout, day and month, every other cap unchanged.
 4. Turn owner approval off. Every payout within the policy is then paid without a vote, transfers included, until

@@ -147,9 +147,9 @@ recorded payment, revocation; mutation challenge `agent-route-unrestricted`). No
 
 The platform's own host (`api.dev.multiagency.ai` for staging; `api.multiagency.ai` later) runs the `platform` package
 headless: only `/health`, these routes and the confirm page with its own assets, and app setup for Payables agents only
-(`deploy/platform*.json`; offline-tested in `test/platform-host.test.ts`, E2E on a headless stack). Not deployed yet:
-on 2026-10-30 staging still runs the `dao` package, which also serves the prototype's owner app and sign-in there. The
-prototype's hosts (the `dao` package) serve these routes beside their owner app.
+(`deploy/platform*.json`; offline-tested in `test/platform-host.test.ts`, E2E on a headless stack). Staging has run it
+since 2026-10-31 (read-only checks in [operations](operations.md#platform-staging)); no production
+host yet. The prototype's hosts (the `dao` package) serve these routes beside their owner app.
 
 An app deployment (for example the MultiAgency dashboard's `staging`) reaches agents under `/apps/v1` with its service
 credential (`Authorization: Bearer
