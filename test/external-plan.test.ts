@@ -94,3 +94,13 @@ test("changed balances and expired valuations refuse external preparation", asyn
   await assert.rejects(prepareExternalPlan({ swaps }), /fresh price/);
   assert.deepEqual(readOps(), []);
 });
+
+test("an external plan with a leg the provider warns about is refused before it is saved", async () => {
+  provider();
+  api.swap = async (_id, input) => {
+    const output = BigInt(input.amount) * 500000000000000000n;
+    return { quote: { amount_out: output.toString(), min_amount_out: (output * 998n / 1000n).toString() }, warnings: [{ code: "policy_asset_denied", detail: "d" }] } as never;
+  };
+  await assert.rejects(prepareExternalPlan({ swaps }), /provider's dry run warned \(policy_asset_denied\)/);
+  assert.deepEqual(readOps(), []);
+});

@@ -241,9 +241,15 @@ observed provider behaviour and a separate rule decision. `policy_denied` was ma
 those codes leaves the operation unresolved. `quote_unavailable`, which the changelog removes, stays in
 `PROVEN_5XX` because the deployed provider version isn't established. Since provider API #51/#54 (skills repo,
 2026-10-27), a dry swap quote is no longer refused by the account's rules: it answers 200 with `warnings` carrying the
-code the live swap would get. `quoteLeg` (`src/treasury.ts`) doesn't read `warnings`, so a leg the policy will refuse
-can now be planned and is refused only when sent, under a code that leaves the operation unresolved and blocks sends
-until reconciled. Not yet observed here; reading the warnings is a money-path change awaiting a decision. The pre-send balance check (`src/agent.ts`) still
+code the live swap would get. `quoteLeg` (`src/treasury.ts`) returns those codes, and a leg with any code not on the
+engine's allow-list (empty today, user decision 2026-10-30) is left out of a strategy rebalance, refuses an external
+plan before it is saved, isn't proposed by the steward, and rejects a saved plan at its pre-send re-quote before
+anything is claimed; an autopilot tick reports the codes and asks the owner once (offline-tested,
+`test/rebalance.test.ts`, `test/external-plan.test.ts`, `test/steward-tools.test.ts`, `test/autopilot.test.ts`; not yet
+observed on mainnet). A clean dry run doesn't guarantee the live answer. A plan's legs are all re-quoted against the
+state before its first leg, so a budget or limit that only a later leg crosses once earlier legs have spent
+(`spend_budget_exceeded`, `policy_limit_exceeded`) isn't warned; that leg, or any swap the provider refuses after the
+re-quote under a code not listed above, still leaves the operation unresolved. The pre-send balance check (`src/agent.ts`) still
 reads the confidential balance rather than 0.7's `available` figure (balance minus queued or timelocked work), so it can
 pass a send the provider then refuses with `insufficient_balance`. The ledger's `details.amount_out` is documented as
 present only on `SUCCESS` (or a partial `REFUNDED`), so pending swap rows show none. The unresolved treasury

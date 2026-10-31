@@ -25,7 +25,22 @@ export type Leg = { from: Holding; to: Holding; usd: number; amount: bigint };
  * A dry quote: `costBps` is what the swap is expected to lose to fees and price impact; `worstCostBps`
  * what it loses if it returns only its guaranteed floor. The strategy's cost cap applies to the worst case.
  */
-type Quote = { amountOut: string; minAmountOut: string; costBps: number; worstCostBps: number };
+/** A leg's dry-run quote; `warnings` are the codes of the provider's warnings on it (their detail text is dropped). */
+type Quote = { amountOut: string; minAmountOut: string; costBps: number; worstCostBps: number; warnings: string[] };
+
+/**
+ * Provider warnings a leg may carry and still be planned and sent: none for now. Per the provider's docs a dry run warns
+ * with the live refusal codes (`policy_*`, `spend_*`, `insufficient_balance`): the live swap will be refused with that
+ * code, and several of those codes aren't proven refusals here (`ops.ts`), so sending one would leave the agent blocked on
+ * an unresolved operation. Those may never be allowed. Informational warnings (`high_fee`, `asset_delivered_as_is`) are
+ * refused too until there is evidence for allowing each (user's decision, 2026-10-30).
+ */
+const ALLOWED_WARNINGS = new Set<string>();
+/** The codes on a quote that keep its leg out of any plan and away from the send site. */
+export const blockingWarnings = (quote: Quote) => quote.warnings.filter((code) => !ALLOWED_WARNINGS.has(code));
+/** Why a leg with these codes isn't planned or sent: what the owner (or the app) reads. */
+export const warnedCodes = (codes: string[]) => [...new Set(codes)].sort().join(", ");
+export const warnedReason = (codes: string[]) => `the provider's dry run warned (${warnedCodes(codes)}), so the swap was not sent`;
 
 type RebalanceEvent =
   | { type: "plan"; total: number; book: Holding[]; legs: Leg[]; budget: string | null | undefined; strategy: Strategy }
@@ -68,21 +83,21 @@ export async function* rebalance(): AsyncGenerator<RebalanceEvent> {
   for (const [i, leg] of legs.entries()) {
     const quote = await quoteLeg(leg);
     quotes.push(quote);
-    yield { type: "quote", leg: i, ...quote, skipped: quote.worstCostBps > strategy.maxCostBps };
+    yield { type: "quote", leg: i, ...quote, skipped: quote.worstCostBps > strategy.maxCostBps || blockingWarnings(quote).length > 0 };
   }
   const { actions, steps } = planSteps(legs, quotes, strategy.maxCostBps);
   if (actions.length > 0) yield { type: "saved", plan: savePlan(snapshot, "rebalance", "Rebalance toward the target split", actions), steps };
 }
 
 /**
- * Each leg costing at most `maxCostBps` as a plan step, held to its quoted floor; `steps[i]` maps
- * leg i to its step.
+ * Each leg costing at most `maxCostBps`, and carrying no blocking provider warning, as a plan step, held to its quoted
+ * floor; `steps[i]` maps leg i to its step.
  */
 export function planSteps(legs: Leg[], quotes: Quote[], maxCostBps: number) {
   const actions: PlannedAction[] = [];
   const steps = legs.map((leg, i) => {
-    const { amountOut, minAmountOut, costBps, worstCostBps } = quotes[i]!;
-    if (worstCostBps > maxCostBps) return undefined;
+    const quote = quotes[i]!, { amountOut, minAmountOut, costBps, worstCostBps } = quote;
+    if (worstCostBps > maxCostBps || blockingWarnings(quote).length > 0) return undefined;
     actions.push({ type: "swap", from: leg.from.asset, to: leg.to.asset, amount: leg.amount.toString(), amountOut, minAmountOut, costBps });
     return actions.length - 1;
   });
@@ -99,11 +114,11 @@ const swapRequest = (leg: Leg) => ({
 
 /** A dry quote for one leg, with what it would lose to fees and price impact, expected and at worst. */
 export async function quoteLeg(leg: Leg): Promise<Quote> {
-  const { quote } = await agent().swap(agentId(), { ...swapRequest(leg), dry: true });
+  const { quote, warnings } = await agent().swap(agentId(), { ...swapRequest(leg), dry: true });
   const amountOut = typeof quote.amount_out === "string" ? quote.amount_out : undefined;
   const minAmountOut = typeof quote.min_amount_out === "string" ? quote.min_amount_out : undefined;
   if (!amountOut || !minAmountOut) throw new Error("quote has no amount_out/min_amount_out");
-  return quoteOf(leg, amountOut, minAmountOut);
+  return quoteOf(leg, amountOut, minAmountOut, (warnings ?? []).map((warning) => warning.code));
 }
 
 /**
@@ -111,9 +126,9 @@ export async function quoteLeg(leg: Leg): Promise<Quote> {
  * rounds up, since `authorize` compares it unrounded against the whole-bps cap: a leg over the cap by
  * a fraction of a bps is left out of the plan, not refused after the plan is claimed.
  */
-export function quoteOf(leg: Leg, amountOut: string, minAmountOut: string): Quote {
+export function quoteOf(leg: Leg, amountOut: string, minAmountOut: string, warnings: string[] = []): Quote {
   const cost = (raw: string) => costBps(leg.usd, usdValue(raw, leg.to.decimals, leg.to.price));
-  return { amountOut, minAmountOut, costBps: Math.round(cost(amountOut)), worstCostBps: Math.ceil(cost(minAmountOut)) };
+  return { amountOut, minAmountOut, costBps: Math.round(cost(amountOut)), worstCostBps: Math.ceil(cost(minAmountOut)), warnings };
 }
 
 /**

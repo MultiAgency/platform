@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ASSETS, mayBuy } from "../policy.js";
 import { loadStrategy } from "../strategy.js";
 import { strategyDigest } from "../strategy-digest.js";
-import { quoteLeg, type Leg } from "../treasury.js";
+import { blockingWarnings, quoteLeg, warnedReason, type Leg } from "../treasury.js";
 import { usdValue } from "../value.js";
 import { checkPlan, feasibility } from "./checks.js";
 import type { Plan, PlannedAction } from "./model.js";
@@ -32,6 +32,8 @@ export async function prepareExternalPlan(input: unknown): Promise<Plan> {
     if (!Number.isFinite(usd) || usd <= 0) throw new Error("Swap has no finite positive valuation");
     const leg: Leg = { from, to, amount, usd };
     const quote = await quoteLeg(leg);
+    const warned = blockingWarnings(quote);
+    if (warned.length) throw new Error(`Not planned: ${warnedReason(warned)}`);
     if (!Amount.safeParse(quote.amountOut).success || !Amount.safeParse(quote.minAmountOut).success || BigInt(quote.minAmountOut) > BigInt(quote.amountOut))
       throw new Error("Quote has invalid output amounts");
     const floor = swap.minAmountOut && BigInt(swap.minAmountOut) > BigInt(quote.minAmountOut) ? swap.minAmountOut : quote.minAmountOut;

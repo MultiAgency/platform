@@ -13,7 +13,7 @@ import { type Plan, type PlannedAction, savePlan, snapshot } from "./plans.js";
 import { loadStrategy } from "./strategy.js";
 import type { Strategy } from "./strategy-digest.js";
 import { usdValue } from "./value.js";
-import { type Leg, quoteLeg, targets } from "./treasury.js";
+import { blockingWarnings, type Leg, quoteLeg, targets, warnedReason } from "./treasury.js";
 
 /**
  * An LLM as the treasury's decision-maker, running on NEAR AI Cloud inside a TEE. Requests and
@@ -74,7 +74,7 @@ const tool = <S extends z.ZodType>(name: string, description: string, input: S, 
 });
 
 /** Tools never move money: `swap` and `shield_public` add exact actions to the plan the owner reviews. */
-function tools(plan: PlannedAction[], strategy: Strategy): Tool[] {
+export function stewardTools(plan: PlannedAction[], strategy: Strategy): Tool[] {
   const { maxCostBps } = strategy;
   return [
     tool(
@@ -110,7 +110,8 @@ function tools(plan: PlannedAction[], strategy: Strategy): Tool[] {
         const quoted = await quoteSwap(input);
         if (typeof quoted === "string") return quoted;
         const { leg, quote } = quoted;
-        return `${format(leg.amount, leg.from)} (~$${leg.usd.toFixed(2)}) → ${format(quote.amountOut, leg.to)}, floor ${format(quote.minAmountOut, leg.to)}, cost ${quote.costBps} bps, at worst ${quote.worstCostBps} bps`;
+        const warned = blockingWarnings(quote);
+        return `${format(leg.amount, leg.from)} (~$${leg.usd.toFixed(2)}) → ${format(quote.amountOut, leg.to)}, floor ${format(quote.minAmountOut, leg.to)}, cost ${quote.costBps} bps, at worst ${quote.worstCostBps} bps${warned.length ? `; would not be proposed: ${warnedReason(warned)}` : ""}`;
       },
     ),
     tool(
@@ -123,7 +124,10 @@ function tools(plan: PlannedAction[], strategy: Strategy): Tool[] {
         const { leg, quote } = quoted;
         if (quote.worstCostBps > maxCostBps)
           return `NOT PROPOSED: at its floor it costs ${quote.worstCostBps} bps, above ${maxCostBps} bps`;
-        plan.push({ type: "swap", from: leg.from.asset, to: leg.to.asset, amount: leg.amount.toString(), ...quote });
+        const warned = blockingWarnings(quote);
+        if (warned.length) return `NOT PROPOSED: ${warnedReason(warned)}`;
+        const { amountOut, minAmountOut, costBps } = quote;
+        plan.push({ type: "swap", from: leg.from.asset, to: leg.to.asset, amount: leg.amount.toString(), amountOut, minAmountOut, costBps });
         return `PROPOSED as step ${plan.length}: swap ${format(leg.amount, leg.from)} → ${format(quote.amountOut, leg.to)}, floor ${format(quote.minAmountOut, leg.to)}, ${quote.costBps} bps`;
       },
     ),
@@ -227,7 +231,7 @@ export async function* steward({
   const transcript: StewardEvent[] = [];
   const log = <E extends StewardEvent>(event: E) => (transcript.push(event), event);
   const proposed: PlannedAction[] = [];
-  const toolset = tools(proposed, strategy);
+  const toolset = stewardTools(proposed, strategy);
   const byName = new Map(toolset.map((t) => [t.spec.function.name, t]));
   const messages: ChatCompletionMessageParam[] = [
     { role: "system", content: system(strategy) },

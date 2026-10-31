@@ -11,7 +11,7 @@ const MAX_COST_BPS = DEFAULT_STRATEGY.maxCostBps;
 const holding = (asset: string) => ({ asset }) as Holding;
 const leg = (from: string, to: string, amount: bigint): Leg => ({ from: holding(from), to: holding(to), usd: 3, amount });
 /** A quote expected to cost `costBps`, and `worstCostBps` if it only returns its guaranteed floor. */
-const quote = (costBps: number, worstCostBps = costBps) => ({ amountOut: "561", minAmountOut: "555", costBps, worstCostBps });
+const quote = (costBps: number, worstCostBps = costBps, warnings: string[] = []) => ({ amountOut: "561", minAmountOut: "555", costBps, worstCostBps, warnings });
 
 test("each leg worth its cost becomes a swap held to its quoted floor", () => {
   const { actions, steps } = planSteps([leg("usdc", "wnear", 3_000_000n)], [quote(44)], MAX_COST_BPS);
@@ -65,4 +65,11 @@ test("the owner's strategy decides the legs: its targets, and the smallest leg w
   ]);
   // The same drift, but each leg is now under the owner's minimum: left alone.
   assert.deepEqual(planLegs(book, { ...stable, minLegUsd: 5 }).legs, []);
+});
+
+test("a leg the provider warns about is left out of the plan, however cheap", () => {
+  const { actions, steps } = planSteps([leg("usdc", "wnear", 3_000_000n), leg("usdc", "eth", 1_000_000n)],
+    [quote(10, 10, ["high_fee"]), quote(10)], MAX_COST_BPS);
+  assert.deepEqual(steps, [undefined, 0], "an informational warning is refused too, until allowed on evidence");
+  assert.equal(actions.length, 1);
 });

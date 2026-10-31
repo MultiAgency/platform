@@ -391,3 +391,65 @@ test("accepted submission progress does not resolve a lost status read or permit
   await tick("schedule");
   assert.equal(sends.length, 1, "observational progress must never authorize a replay");
 });
+
+/** The provider's dry run for every swap: the live swap would be refused with `code` (provider docs: dry runs warn with the live codes). */
+const warnedQuotes = (code: string) => mock.method(api, "forGrant", () => ({
+  swap: async (_id: string, request: { dry?: boolean; amount: string }) => {
+    assert.equal(request.dry, true, "a warned leg must never send");
+    return { quote: { amount_out: request.amount, min_amount_out: request.amount }, warnings: [{ code, detail: "detail-not-for-the-owner" }] };
+  },
+}));
+
+test("a leg the provider warns about is never planned or sent: the tick names the codes and asks the owner once", async () => {
+  limit(100);
+  warnedQuotes("policy_limit_exceeded");
+  const report = await tick("schedule");
+  assert.deepEqual(sends, []);
+  assert.match(report, /provider's dry run warned \(policy_limit_exceeded\)/);
+  assert.doesNotMatch(report, /detail-not-for-the-owner/);
+  const asks = () => open().filter(e => /policy_limit_exceeded/.test(e.text));
+  assert.equal(asks().length, 1);
+  await tick("schedule");
+  assert.equal(asks().length, 1, "the same warnings ask the owner once, not every tick");
+  dismiss(asks()[0]!.id);
+  await tick("schedule");
+  assert.equal(asks().length, 0, "a dismissed ask isn't posted again for the same warnings");
+  assert.deepEqual(readOps(), [], "nothing is recorded as sent");
+});
+
+test("a saved plan whose fresh quote now warns is rejected before it is claimed, and runs once the warning clears", async () => {
+  const { rebalance } = await import("../src/treasury.js");
+  const { executePlan } = await import("../src/plans.js");
+  let planId: string | undefined;
+  for await (const event of rebalance()) if (event.type === "saved") planId = event.plan.id;
+  assert.ok(planId, "a clean quote saves the plan");
+  const restore = warnedQuotes("spend_budget_exceeded");
+  const rejected: string[] = [];
+  for await (const event of executePlan(planId!)) if (event.type === "rejected") rejected.push(...event.problems);
+  assert.match(rejected.join(" "), /provider's dry run warned \(spend_budget_exceeded\)/);
+  assert.deepEqual(sends, []);
+  assert.deepEqual(readOps(), []);
+  restore.mock.restore();
+  const statuses: string[] = [];
+  for await (const event of executePlan(planId!)) if (event.type === "action") statuses.push(event.status);
+  assert.ok(statuses.length > 0 && statuses.every(s => s === "SUCCESS"), "the plan was not claimed by the rejected run");
+});
+
+test("a warned leg drops out like a costly one: the rest of the rebalance still executes", async () => {
+  limit(100);
+  mock.method(api, "forGrant", () => ({
+    swap: async (_id: string, request: { dry?: boolean; origin_asset: string; destination_asset: string; amount: string }) => {
+      if (request.dry) return { quote: { amount_out: request.amount, min_amount_out: request.amount },
+        warnings: request.destination_asset === ASSETS.ETH ? [{ code: "policy_asset_denied", detail: "d" }] : [] };
+      assert.notEqual(request.destination_asset, ASSETS.ETH, "the warned leg must never send");
+      sends.push(`swap ${request.origin_asset} → ${request.destination_asset}`);
+      book[request.origin_asset]!.confidential -= BigInt(request.amount);
+      book[request.destination_asset]!.confidential += BigInt(request.amount);
+      return { correlation_id: `op_${sends.length}` };
+    },
+  }));
+  const report = await tick("schedule");
+  assert.deepEqual(sends, [`swap ${ASSETS.USDC} → ${ASSETS.wNEAR}`]);
+  assert.match(report, /swaps left out: .*policy_asset_denied/);
+  assert.match(report, /step 1: SUCCESS/);
+});

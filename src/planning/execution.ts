@@ -2,7 +2,7 @@ import { dispatch, LocalRefusal, type Sending } from "../agent.js";
 import type { Holding } from "../holdings.js";
 import { acquireMoneyLock } from "../lock.js";
 import { usdValue } from "../value.js";
-import { executeLeg, quoteLeg } from "../treasury.js";
+import { blockingWarnings, executeLeg, quoteLeg, warnedReason } from "../treasury.js";
 import type { PlannedAction } from "./model.js";
 import { loadPlan, claimPlan } from "./store.js";
 import { observe } from "./observation.js";
@@ -40,9 +40,11 @@ export async function* executePlan(id: string, now = () => new Date(), { autopil
     const { snapshot: live, book, assets } = await observe();
     const invalid = feasibility(plan.actions, live.balances);
     if (invalid.length) { yield { type: "rejected", problems: invalid }; return; }
-    const quotes: string[] = [];
+    // Fresh quotes, under the lock: a leg the provider now warns about is rejected before the plan is claimed.
+    const quotes: string[] = [], warned: string[] = [];
     for (const action of plan.actions)
-      if (action.type === "swap") quotes.push((await quoteLeg(legFor(book, action))).amountOut);
+      if (action.type === "swap") { const quote = await quoteLeg(legFor(book, action)); quotes.push(quote.amountOut); warned.push(...blockingWarnings(quote)); }
+    if (warned.length) { yield { type: "rejected", problems: [warnedReason(warned)] }; return; }
     const problems = checkPlan(plan, { ...live, now: now(), quotes, assets });
     if (problems.length > 0) {
       yield { type: "rejected", problems };

@@ -12,7 +12,7 @@ import { context, newTickId, observe, recordEnd, recordStart, type TickEnd, type
 import { ageMinutes, recover } from "./recover.js";
 import { loadStrategy, saveStrategy } from "./strategy.js";
 import { grantApproves, type Strategy, strategyDigest, strategyLabelSuffix } from "./strategy-digest.js";
-import { rebalance, sweep } from "./treasury.js";
+import { blockingWarnings, rebalance, sweep, warnedCodes, warnedReason } from "./treasury.js";
 
 /**
  * The agent working on its own: each tick sweeps public balances into the confidential one, then
@@ -159,8 +159,10 @@ async function run(found: Found, progress: (event: ProgressEvent) => void): Prom
       let planId: string | undefined;
       let plannedStrategy: string | undefined;
       let legs: { usd: number }[] = [];
+      const warned: string[] = [];
       for await (const event of rebalance()) {
         if (event.type === "plan") legs = event.legs;
+        if (event.type === "quote") warned.push(...blockingWarnings(event));
         if (event.type === "saved") {
           planId = event.plan.id;
           plannedStrategy = event.plan.strategyDigest;
@@ -172,7 +174,15 @@ async function run(found: Found, progress: (event: ProgressEvent) => void): Prom
       }
       progress({ type: "STEP_FINISHED", stepName: "planning" });
       if (strategyChanged() || (plannedStrategy !== undefined && plannedStrategy !== expectedStrategy)) return changed();
-      if (!planId) report.push(legs.length ? "rebalance skipped: all proposed swaps exceed the cost limit" : "no rebalance legs meet the minimum size");
+      if (warned.length) {
+        // The same warnings ask the owner once, not every tick and not again once dismissed: rule warnings don't clear
+        // until the policy or strategy changes, and each tick's report still names them.
+        const ask = `The provider's dry run warned about rebalance swaps (${warnedCodes(warned)}), so they were not sent. Change the policy or the strategy, or wait if the warning clears.`;
+        if (!readInbox().some((e) => e.text === ask)) post("action", ask);
+        if (planId) report.push(`swaps left out: ${warnedReason(warned)}`);
+      }
+      if (!planId) report.push(!legs.length ? "no rebalance legs meet the minimum size"
+        : warned.length ? `rebalance skipped: ${warnedReason(warned)}` : "rebalance skipped: all proposed swaps exceed the cost limit");
       else if (usd > maxUsd) {
         post("action", `A rebalance of $${usd.toFixed(2)} is above the $${maxUsd.toFixed(2)} auto-execute limit. Preview and execute it from Automations.`);
         report.push(`rebalance of $${usd.toFixed(2)} left for the owner`);
