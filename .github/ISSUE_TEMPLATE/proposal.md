@@ -1,6 +1,6 @@
 ---
 name: Proposal
-about: A change that needs agreement first (see CONTRIBUTING.md), or something an app needs from the SDK
+about: A change that needs agreement first, or something the SDK is missing
 labels: enhancement
 ---
 
