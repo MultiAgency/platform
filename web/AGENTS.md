@@ -41,7 +41,7 @@ Root `AGENTS.md` governs money-path changes and live-system actions.
 
 - Organize each view around one decision, its relevant context, and the resulting outcome.
   Put the review context before the action in the mobile document order.
-- Public pages explain workflows and requirement stages without simulated execution or approval.
+- Public pages explain each workflow and its status without simulated execution or approval.
   Preserve legacy example links as static area overviews and keep the public import boundary
   free of private reads and evidence.
 - Use a visible single-selection ToggleGroup for short option sets, and NativeSelect

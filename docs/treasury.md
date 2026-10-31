@@ -29,7 +29,6 @@ for the same requirements with their evidence. Roadmap briefs remain below for p
 not displayed in the app. Both presentations use the [canonical inventory](../evidence/inventory.ts).
 The tables below are generated; edit the inventory and run `pnpm evidence:write`.
 `pnpm test` rejects drift.
-These layout changes are prepared locally; see DEMO.md for the last verified deployment.
 
 <!-- BEGIN GENERATED: requirements -->
 <!-- Generated from evidence/inventory.ts. Run pnpm evidence:write; do not edit here. -->
@@ -103,7 +102,7 @@ These are catalog targets, not established guarantees. Evidence stages describe 
 ## Run-log adapter and export (offline-tested)
 
 `src/agui.ts` projects a tick and its agent-scoped journal history into a private recording, validated
-against the pinned `@ag-ui/core` 1.0.2 event schemas. New exports use envelope version 3 and declare
+against the pinned `@ag-ui/core` 1.0.3 event schemas. New exports use envelope version 3 and declare
 AG-UI protocol 1.0 separately from the SDK version. Versions 1/2 remain readable as legacy archives;
 they are not retroactively certified as conforming event sequences.
 It imports evidence types only and makes no provider calls, writes, or money decisions.
@@ -136,8 +135,8 @@ this change. The Treasury app continues using its existing timeline reads for cu
 optional **Inspect recording** view steps through historical observations with a selector and
 Previous/Next controls, without timed playback or a live stream. It shows missing timing and source
 gaps, and keeps later journal observations separate from the run's original outcome. It cannot
-replay or authorize an operation. The Treasury app's `test/recording-view.test.ts` checks version, identity, size and
-completion semantics, and its `test/browser/run-history.cjs` checks synthetic recording behavior once,
+replay or authorize an operation. The earlier Treasury prototype's `test/recording-view.test.ts` checks version,
+identity, size and completion semantics, and its `test/browser/run-history.cjs` checks synthetic recording behavior once,
 including identity refusal and separate later settlement, and resizes the loaded inspector to
 320px, 390px and 1280px. All requests are intercepted.
 These are offline checks, not verification of a deployed inspector or a real recording.
@@ -190,7 +189,7 @@ endpoint cannot combine settings changes and enablement. Approve-only
 instances cannot configure strategies; Payables has no Treasury setup and retains stop for an
 existing schedule. No state format migration is required.
 
-`test/strategy-controls.test.ts` covers server refusal/failure paths, and the Treasury app's `test/browser/strategy.cjs`
+`test/strategy-controls.test.ts` covers server refusal/failure paths, and the earlier Treasury prototype's `test/browser/strategy.cjs`
 covers synthetic wallet/DAO workflows. This is offline-tested behavior, not deployed or mainnet-observed.
 Dispatch still authorizes every operation; the settings lock is not distributed fencing and does not
 coordinate manual file edits or make provider observations atomic with subsequent sends.

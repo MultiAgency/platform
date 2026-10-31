@@ -34,7 +34,6 @@ for the same requirements with their evidence. Roadmap briefs remain below for p
 not displayed in the app. Both presentations use the [canonical inventory](../evidence/inventory.ts).
 The tables below are generated; edit the inventory and run `pnpm evidence:write`.
 `pnpm test` rejects drift.
-These layout changes are prepared locally; see DEMO.md for the last verified deployment.
 
 <!-- BEGIN GENERATED: requirements -->
 <!-- Generated from evidence/inventory.ts. Run pnpm evidence:write; do not edit here. -->

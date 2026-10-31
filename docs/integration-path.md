@@ -30,7 +30,7 @@ the platform only. Which existing workflows already reuse each piece is in [the 
 3. **Use `@multiagency/sdk`** for every route it covers, rather than the RPC wire format. Start with the package
    README (`src/contract/README.md`, shipped as the package's `README.md`): how to install it, which client fits which
    caller and access, and first reads. Its bundled skills (`getting-started`, `owner-workflows`, `payee-workflows`)
-   carry complete, verified examples. Install it from npm (`pnpm add @multiagency/sdk zod@4.6.7`; the owner entry brings
+   carry complete, verified examples. Install it from npm (`pnpm add @multiagency/sdk zod@^4.6.5`; the owner entry brings
    its own oRPC and AG-UI), or link an SDK
    repository checkout for development against unreleased source (`pnpm sdk:dev --once` in the SDK repository, then
    `"@multiagency/sdk": "link:../sdk/packages/sdk"`). A linked checkout can differ from the published package of the
@@ -53,7 +53,7 @@ the platform only. Which existing workflows already reuse each piece is in [the 
    records. An owner app can be served by the shared release server (`frontend` host config): the gateway
    checks each release's `contract.json` capabilities, refuses an incompatible release (503, records
    unchanged) and binds the served page to the checked release. A legacy host still serves a directory
-   (`frontendDist`). Offline E2E only (`owner-release`, `treasury-release`, `treasury-migration` specs); not deployed.
+   (`frontendDist`). Offline E2E only (`owner-release`, `treasury-migration` specs); not deployed.
 7. **Test on the stack.** From Proto, build the example (`pnpm example:build`), then
    `pnpm test:e2e:stack --frontend examples/minimal-prototype/dist` (or your own build's absolute path) starts the real
    gateway, agent servers and simulated provider, with owner and payee wallet contexts. See [testing.md](testing.md).
@@ -80,5 +80,5 @@ the simulator, not an observed provider.
 - Host `demo` and agent `area` are fixed enums; a new prototype reuses an existing value or needs a Proto config change.
 - Owner procedures outside the Treasury/Payables set (for example `ownerIdentity`, `demoGuide/compose`) have no packaged contract.
 - Independent owner-app releases are proven on the local stack only; no deployed host uses the `frontend` release origin yet.
-- No app-callback channel exists. Any server-side need is reviewed first (P1 item 3).
+- No app-callback channel exists. Any server-side need is reviewed first.
 - The example is offline-tested only; it has not been deployed or observed on mainnet.

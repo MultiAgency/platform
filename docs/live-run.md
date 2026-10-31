@@ -8,7 +8,7 @@ by their recorded swap or shield and links directly
 to the operation in Activity. It flags incomplete evidence beside the updates. Historical runs
 retain on-request inspection and download; **Refresh outcomes** also reads their latest snapshot.
 
-For ten minutes after a run starts, the executor's private `autopilot.log` endpoint is checked every
+For ten minutes after a run starts, the executor's private `autopilot/log` procedure is checked every
 three seconds until an end is recorded, then every fifteen seconds. Background tabs do not poll.
 Pause/resume controls are secondary under **Run details**; they pause only these
 supplementary reads, never the executor. The existing timeline continues its own evidence refresh.

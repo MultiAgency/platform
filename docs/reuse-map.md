@@ -33,6 +33,6 @@ or hosted acceptance. Receipts and E2E artifacts are git-ignored local files, re
 
 ## What no workflow reuses yet
 
-- The contract package (`src/contract/`) is vendored by the apps (Payables, Treasury and Invoices pin released tarballs), but the workflow receipts above predate that adoption.
-- Owner-app capability refusal and independent Treasury and Payables releases are shown only by Proto's offline E2E (`owner-release`, `treasury-release`, `treasury-migration` specs), not by a deployed host.
+- The contract package (`src/contract/`) is used by the apps (Treasury installs it from npm; Payables and Invoices link a local checkout), but the workflow receipts above predate that adoption.
+- Owner-app capability refusal and independent Treasury and Payables releases are shown only by Proto's offline E2E (`owner-release`, `treasury-migration` specs), not by a deployed host.
 - No workflow uses an app-callback channel; none exists.

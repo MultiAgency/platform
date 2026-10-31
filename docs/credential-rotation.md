@@ -62,6 +62,6 @@ merely because their frontend domains now route through dao.
    An old image may be restored only with updated credentials and current compatible state. Do not
    restore exposed secrets, replay signatures or infer settlement from a successful restart.
 
-Follow the local use-railway, near-agent-api and signed-in-browser-checks skills. No values or private
+Follow the near-agent-api skill (`.agents/skills/near-agent-api`). No values or private
 evidence belong in tracked documentation. Rotation is an outstanding production gate, not completed
 by the infrastructure code fixes.

@@ -40,9 +40,9 @@ else `recipient_not_registered`, since such a delivery fails per the NEAR Intent
 
 ## Shared core
 
-`src/router.ts` composes `rpc/owner.ts`, `rpc/payables.ts`, `rpc/treasury.ts` and
-`rpc/observations.ts`. Shared transport error handling lives in `rpc/base.ts`; shared input schemas
-live in `rpc/inputs.ts`. This extraction retains procedure paths, gateway access classifications and
+`src/router.ts` composes the procedure modules in `rpc/`: owner, payables, treasury, observations, compensation,
+work orders and the demo guide. Shared transport error handling lives in `rpc/base.ts`; shared input schemas
+live in `contract/inputs.ts`. This extraction retains procedure paths, gateway access classifications and
 existing domain calls. Submission remains centralized in dispatch.
 
 | Concern | Files |
@@ -67,7 +67,7 @@ existing domain calls. Submission remains centralized in dispatch.
 |---|---|
 | Planning | `treasury.ts` (rebalance legs, quotes, sweep), `planning/` (plan model, checks, storage, observations and execution; `plans.ts` retains compatibility exports), `strategy.ts`, `strategy-digest.ts` |
 | Running alone | `autopilot.ts` (the scheduled tick: sweep, then rebalance within its limit) |
-| Experimental | `llm.ts` (the steward, reached only at `/steward`) |
+| Experimental | `llm.ts` (the steward, reached through the `steward` procedure; its page is in the Treasury app) |
 
 ## Around them
 
@@ -77,9 +77,9 @@ existing domain calls. Submission remains centralized in dispatch.
   App access (`app-access.ts`, `app-routes.ts`) serves `/apps/v1` to app servers; `app-confirm.ts` holds the NEP-366
   owner actions apps prepare and serves the confirm page's two calls.
 - **Web** (`web/src/`): one app for both areas, plus the standalone confirm page (`confirm.tsx`, its own build entry). `format.ts` `kindOf` uses the configured area, with a policy-based fallback for legacy instances; `beats.ts` holds each area's briefs, requirements and stages; `showcase.tsx` shows
-  them. `timeline-payment.tsx` and `timeline-run.tsx` follow one held payment or the latest autopilot
-  run step by step, each step read from its own record; they show data only on the instance that holds
-  those records (approvals filed there, evidence its executor wrote).
+  them. `timeline-payment.tsx` follows one held payment step by step, each step read from its own record; it shows data
+  only on the instance that holds those records (approvals filed there). The autopilot run view is no longer here: its
+  route (`/follow/run`) redirects to the agent's app.
 - **Packages**: every release candidate builds two from the same tested snapshot. `dao`
   (`scripts/package-shared-frontends.mjs`) is the prototype's full deployment: gateway, owner app, demo hosts and the
   bundled Treasury and Payables frontends. `platform` (`scripts/package-platform.mjs`) is the engine for apps: the
@@ -403,7 +403,7 @@ and [shared-demos-rollout.md](shared-demos-rollout.md).
 
 ### Gateway lifecycle ownership
 
-Proto uses pinned Effect 4.0.5 internally for child supervision. A gateway scope owns scoped
+Proto uses pinned Effect 4.1.0 internally for child supervision. A gateway scope owns scoped
 child lifetimes and restart sleeps; scope closure cancels restarts and runs bounded child cleanup
 in parallel. The public start/stop facade, HTTP/oRPC contracts and independently built consumer
 frontends retain their interfaces. Signaling failures or forced termination are unclean shutdowns.
