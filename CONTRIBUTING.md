@@ -44,7 +44,8 @@ chromium`). Never run `pnpm test:live`, and never use real keys or a `.env`.
 
 ## Security and license
 
-Report vulnerabilities privately to contact@multiagency.ai, not in an issue.
+Report vulnerabilities privately to contact@multiagency.ai, not in an issue. Everyone here follows the
+[code of conduct](CODE_OF_CONDUCT.md).
 
 This repository, including the SDK, is under the MIT License (`LICENSE`). By submitting a contribution, you agree to
 license it under the same terms.
