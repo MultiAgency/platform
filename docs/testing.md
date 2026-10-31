@@ -228,7 +228,8 @@ outside the application, not test-control HTTP routes. Close the agent-browser s
 Payables build at `/a/payout/`, `--builder <account>` for an account on chain that is not yet an agreed payee (the
 owner adds it with a signed `policy_update`, which the simulator applies and versions), `--payout-funding <raw USDC>`
 for the payout agent's starting balance, `--treasury` to add the Treasury agent `portfolio` (owned by the owner,
-100 simulated USDC; the owner issues machine credentials at `/a/portfolio/access` or with the `machineCredential` control),
+100 simulated USDC, its own simulated provider, quoting a swap between any two listed tokens from the `/v1/tokens` prices;
+the owner issues machine credentials at `/a/portfolio/access` or with the `machineCredential` control),
 `--app <deployment>` for an app deployment's server on `/apps/v1` (a service credential issued at startup into
 `stack/app-credential`, mode 0600, never into `state.json`; self-service setup of the deployment's own Payables agents),
 `--headed` or `--no-browser`) builds the same isolated stack for app-owned workflow
@@ -237,7 +238,11 @@ owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`: t
 "Connect wallet" and, if near-connect asks which wallet to use, picks the local test wallet), with `--treasury` the portfolio's access page and
 machine base, with `--app` the deployment, base and credential file, the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
 refreshed every 250 ms. Write `stack/controls/<name>.json` whole (write another name, then rename) with a `command` of `fund`, `fundPayout`, `settle`,
-`dropTransferResponse`, `dropSignatureResponse`, `revealOwnerOutcome`, `setUnavailable`, `signOwner`
+`dropTransferResponse`, `dropSignatureResponse`, `revealOwnerOutcome`, `setUnavailable` (`value`; optional `agent`:
+`payout`, the default, or `portfolio`), `dropSwapResponse` (`portfolio` applies its next swap, or the `after`-th, and
+loses the reply: an `unknown` outcome), `fundPublic` (`asset`, raw `amount`: funds on `portfolio`'s public balance, which
+a sweep shields), `setTargets` (`targetBps` and any other strategy fields: the owner signs in with the fixture key and
+saves `portfolio`'s strategy through `strategy/save`, which turns autopilot off; answers the strategy and its digest), `signOwner`
 (`message`, `recipient`, `nonce`: the owner's NEP-413 signature from the fixture key, standing in for the wallet an app
 asks; never the platform sign-in text) or `machineCredential` (`scopes`, optional `label` and `ttlSeconds`: the owner
 signs in with the fixture key and issues a `portfolio` credential); its result appears as `<name>.result.json`,
@@ -245,7 +250,9 @@ signs in with the fixture key and issues a `portfolio` credential); its result a
 pages: a page it opens itself has no local test wallet, and its own CDP connection must accept the local certificate. Signatures, deposits and settlement are simulated.
 `stack-app.spec.mjs` runs this entry point as a builder would (`--no-browser --treasury --app`): a separate server's
 setup, consent, payout request held and released by the owner's vote, and a read-only machine credential, through the
-control files and `state.json`; a second case serves an app's own build (`--frontend`) whose near-connect asks which wallet
+control files and `state.json`; a Treasury case (`--no-browser --treasury`) saves targets, sweeps a public balance,
+executes a rebalance into wNEAR and ETH, and sees a `portfolio`-only outage and a lost swap reply (`unknown`, then
+`unresolved`); a second case serves an app's own build (`--frontend`) whose near-connect asks which wallet
 to use, and the stack still starts signed in. The routes' own behaviour is asserted in `app-access.spec.mjs` and `agent-access.spec.mjs`.
 Page dialogs (such as the payee's filing `confirm()`) are logged in `state.json` `dialogs` and left open
 for the attached client or person to answer; an attached Playwright client must register its own dialog

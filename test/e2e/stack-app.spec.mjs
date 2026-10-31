@@ -17,6 +17,27 @@ import { OWNER, PAYEE, PUBLIC_KEY, USDC } from './provider.mjs';
 const later = days => new Date(Date.now() + days * 86_400_000).toISOString();
 const value = result => { if (!result.ok) throw new Error(JSON.stringify(result)); return result.value; };
 
+/** A `fetch` that trusts only the running stack's own certificate. Answers are buffered whole, streams included. */
+const stackFetch = directory => {
+  const ca = readFileSync(join(directory, 'environment', 'localhost.crt'));
+  return (url, options = {}) => new Promise((resolve, reject) => {
+    const req = httpsRequest(url, { method: options.method ?? 'GET', headers: Object.fromEntries(new Headers(options.headers)), ca }, res => {
+      const chunks = []; res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers: res.headers })));
+    }); req.on('error', reject); req.end(options.body);
+  });
+};
+/** One control file, written whole, and its answer. */
+const controlFiles = directory => {
+  let sequence = 0;
+  return async (command, input = {}) => {
+    const path = join(directory, 'controls', `c${++sequence}.json`), answer = path.replace(/\.json$/, '.result.json');
+    writeFileSync(`${path}.tmp`, JSON.stringify({ command, ...input })); renameSync(`${path}.tmp`, path);
+    await expect.poll(() => existsSync(answer), { timeout: 30_000 }).toBe(true);
+    return JSON.parse(readFileSync(answer, 'utf8'));
+  };
+};
+
 /** Runs `stack.mjs` with `args` until `use` returns, then stops it through its stop file and expects a clean exit. */
 async function withStack(info, args, use) {
   const artifacts = info.outputPath('stack-run'), directory = join(artifacts, 'stack');
@@ -48,21 +69,7 @@ test('a separate app server runs a held payout and a Treasury machine read on th
     expect(credential).toMatch(/^tap_/);
     expect(readFileSync(join(directory, 'state.json'), 'utf8'), 'the token stays out of state.json').not.toContain(credential);
 
-    const ca = readFileSync(join(directory, 'environment', 'localhost.crt'));
-    const fetch = (url, options = {}) => new Promise((resolve, reject) => {
-      const req = httpsRequest(url, { method: options.method ?? 'GET', headers: Object.fromEntries(new Headers(options.headers)), ca }, res => {
-        const chunks = []; res.on('data', chunk => chunks.push(chunk));
-        res.on('end', () => resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers: res.headers })));
-      }); req.on('error', reject); req.end(options.body);
-    });
-    let sequence = 0;
-    /** One control file, written whole, and its answer. */
-    const control = async (command, input = {}) => {
-      const path = join(directory, 'controls', `c${++sequence}.json`), answer = path.replace(/\.json$/, '.result.json');
-      writeFileSync(`${path}.tmp`, JSON.stringify({ command, ...input })); renameSync(`${path}.tmp`, path);
-      await expect.poll(() => existsSync(answer), { timeout: 15_000 }).toBe(true);
-      return JSON.parse(readFileSync(answer, 'utf8'));
-    };
+    const fetch = stackFetch(directory), control = controlFiles(directory);
     const signed = async payload => {
       const answer = await control('signOwner', payload);
       if (!answer.ok) throw new Error(answer.error);
@@ -117,6 +124,63 @@ test('a separate app server runs a held payout and a Treasury machine read on th
       headers: { ...Object.fromEntries(new Headers(init?.headers)), authorization: `Bearer ${issued.value.token}` } }) });
     expect(value(await machine.call('overview'))).toMatchObject({ agentId: treasury.agentId, area: 'treasury' });
     expect(await machine.call('held'), 'outside the read scope').toMatchObject({ ok: false, kind: 'forbidden' });
+  });
+});
+
+// The Treasury agent's own controls, as the treasury app drives them: targets saved through the owner's strategy/save,
+// a public balance to sweep, swaps between every listed pair, an outage and a lost swap reply on `portfolio` only.
+test('the stack controls the Treasury agent: targets, a public balance, every pair, an outage and a lost swap reply', async ({}, info) => {
+  test.setTimeout(240_000);
+  await withStack(info, ['--no-browser', '--treasury'], async (directory, state) => {
+    const { treasury } = state(), fetch = stackFetch(directory), control = controlFiles(directory);
+    const [WNEAR, ETH] = ['nep141:wrap.near', 'nep141:eth.omft.near'];
+    const targetBps = { [USDC]: 5000, [WNEAR]: 2000, [ETH]: 3000 };
+    const saved = await control('setTargets', { targetBps });
+    expect(saved, 'saved through strategy/save').toMatchObject({ ok: true, value: { strategy: { targetBps }, digest: expect.stringMatching(/^sha256:/) } });
+    expect(await control('setTargets', {}), 'targets are required').toMatchObject({ ok: false });
+
+    const issued = value(await control('machineCredential', { label: 'treasury app', scopes: ['read', 'prepare', 'execute-plan', 'sweep'], ttlSeconds: 600 }));
+    const machine = ownerClient({ base: treasury.machineBase, fetch: (input, init) => fetch(input, { ...init,
+      headers: { ...Object.fromEntries(new Headers(init?.headers)), authorization: `Bearer ${issued.token}` } }) });
+    const run = async (path, input) => {
+      const events = [], stream = machine.stream(path, input);
+      for (let next = await stream.next(); ; next = await stream.next()) { if (next.done) return { events, failure: next.value }; events.push(next.value); }
+    };
+    expect(value(await machine.call('strategy/get')).digest, 'the agent runs the saved strategy').toBe(saved.value.digest);
+
+    // A public balance: the sweep plans it, shields it once, and nothing is left exposed.
+    expect(await control('fundPublic', { asset: 'nep141:not-listed', amount: '1' })).toMatchObject({ ok: false });
+    expect(await control('fundPublic', { asset: WNEAR, amount: '5000000000000000000000000' })).toEqual({ ok: true });
+    const exposed = await run('sweep', { execute: false });
+    expect(exposed.events[0].exposed.map(h => [h.asset, h.public])).toEqual([[WNEAR, 5000000000000000000000000n]]);
+    const swept = await run('sweep', { execute: true });
+    expect(swept.failure).toBeUndefined();
+    expect(swept.events.filter(e => e.type === 'shield')).toEqual([expect.objectContaining({ asset: WNEAR, status: 'SUCCESS' })]);
+    expect((await run('sweep', { execute: false })).events[0].exposed, 'nothing left public').toEqual([]);
+
+    // A rebalance toward the saved targets swaps USDC into both wNEAR and ETH, each quoted from the listed prices.
+    const planned = await run('rebalance');
+    const plan = planned.events.find(e => e.type === 'saved')?.plan;
+    expect(plan?.actions.map(a => a.to).sort()).toEqual([ETH, WNEAR].sort());
+    const executed = await run('executePlan', { planId: plan.id });
+    expect(executed.failure).toBeUndefined();
+    expect(executed.events.map(e => [e.action.to, e.status]).sort()).toEqual([[ETH, 'SUCCESS'], [WNEAR, 'SUCCESS']].sort());
+    expect(value(await machine.call('externalPlan', { swaps: [{ from: ETH, to: WNEAR, amount: '1000000000000000' }] })).actions[0],
+      'any listed pair is quoted').toMatchObject({ from: ETH, to: WNEAR, amountOut: '1000000000000000000000000' });
+
+    // An outage on portfolio's provider only.
+    expect(await control('setUnavailable', { agent: 'nobody', value: true })).toMatchObject({ ok: false });
+    expect(await control('setUnavailable', { agent: 'portfolio', value: true })).toEqual({ ok: true });
+    expect(await machine.call('overview'), 'the outage reaches portfolio').toMatchObject({ ok: false });
+    expect(await control('setUnavailable', { agent: 'portfolio', value: false })).toEqual({ ok: true });
+    expect(await machine.call('overview')).toMatchObject({ ok: true });
+
+    // A lost swap reply: the swap was applied but its answer never came, so the outcome is unknown and blocks the next send.
+    const lost = value(await machine.call('externalPlan', { swaps: [{ from: USDC, to: WNEAR, amount: '1000000' }] }));
+    expect(await control('dropSwapResponse', { after: 1 })).toEqual({ ok: true });
+    expect((await run('executePlan', { planId: lost.id })).failure).toMatchObject({ ok: false, kind: 'unknown' });
+    const next = value(await machine.call('externalPlan', { swaps: [{ from: USDC, to: WNEAR, amount: '1000000' }] }));
+    expect((await run('executePlan', { planId: next.id })).failure).toMatchObject({ ok: false, kind: 'unresolved' });
   });
 });
 

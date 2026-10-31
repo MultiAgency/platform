@@ -5,6 +5,9 @@ and payee intake for MultiAgency prototypes. Regular NEAR wallet owners and auth
 DAO members can reserve their own Treasury or Payables setup; owner policy and grant signatures
 remain separate. The public showcase reads no private records.
 
+This repository is meant to be the one owner of the gateway, executor and money path, with apps building on it only
+through `@multiagency/sdk`. Not yet: the Treasury and Payables repositories still carry their own copies (see Not done yet).
+
 The [shared frontend integration](docs/shared-frontend-integration.md) keeps Proto as the static
 three-idea showcase and serves independently built Treasury and Payables frontends. Invoices is
 Payables' payee-facing entry. The 2026-10-16 UTC [release record](docs/proto-release-execution.md)
@@ -228,6 +231,9 @@ of maintaining separate requirement statuses.
 
 ## Not done yet
 
+- `MultiAgency/treasury` and `MultiAgency/payables` still carry their own copies of the gateway and money path,
+  including `test/send-path.test.ts`. A fix made here doesn't reach them. The treasury app (MultiAgency/agentic-treasury) is to replace Treasury on the SDK;
+  Payables has not moved onto it.
 - A new prototype must reuse a fixed host `demo` value and agent area. Owner-app `contract.json` is checked at
   runtime only on hosts served through the shared release server (offline E2E; not deployed). See the
   [integration path](docs/integration-path.md#gaps).

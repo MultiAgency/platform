@@ -35,7 +35,7 @@ export function copyGuidance(staging: string) {
   cpSync(join(root, "src/contract/skills"), join(staging, "skills"), { recursive: true });
   cpSync(join(root, "docs/sdk-changes.md"), join(staging, "CHANGES.md"));
   cpSync(join(root, "src/contract/README.md"), join(staging, "README.md"));
-  for (const file of ["LICENSE", "NOTICE"]) cpSync(join(root, "src/contract", file), join(staging, file));
+  cpSync(join(root, "LICENSE"), join(staging, "LICENSE"));
 }
 
 /**
@@ -78,7 +78,7 @@ export function stage(staging: string, tsconfig: string) {
   sources.push("src/contract/release-server.mjs", "src/contract/release-server.d.mts");
   // TanStack Intent skills: the agent guidance for this exact version. Their maintenance artifacts stay unpublished.
   copyGuidance(staging);
-  sources.push("docs/sdk-changes.md", "src/contract/README.md", "src/contract/LICENSE", "src/contract/NOTICE");
+  sources.push("docs/sdk-changes.md", "src/contract/README.md", "LICENSE");
   sources.push(...readdirSync(join(root, "src/contract/skills"), { recursive: true, encoding: "utf8" }).filter(f => f.endsWith("/SKILL.md")).map(f => join("src/contract/skills", f)).sort());
   // JSON Schema for non-JavaScript consumers; refinements are enforced only by the zod schemas.
   mkdirSync(join(staging, "schemas"));
@@ -91,7 +91,7 @@ export function stage(staging: string, tsconfig: string) {
   for (const [key, schema] of Object.entries(schemas)) writeFileSync(join(staging, "schemas", `${key}.json`), JSON.stringify(z.toJSONSchema(schema, { unrepresentable: "any" }), null, 2) + "\n");
 
   const dependencies = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).dependencies as Record<string, string>;
-  writeFileSync(join(staging, "package.json"), JSON.stringify({ name, version, type: "module", license: "Apache-2.0",
+  writeFileSync(join(staging, "package.json"), JSON.stringify({ name, version, type: "module", license: "MIT",
     description: "MultiAgency SDK: payee, compensation and owner-app schemas, typed payee and owner clients, and the shared release asset server.",
     keywords: ["tanstack-intent"], repository: { type: "git", url: "git+https://github.com/MultiAgency/platform.git" }, publishConfig: { access: "public" },
     // The bin path has no leading "./": npm 11 publish drops such a bin as invalid (pnpm pack keeps it).
@@ -101,7 +101,7 @@ export function stage(staging: string, tsconfig: string) {
       // the main entry runs beside a host that shares its own @orpc/contract (a Module Federation singleton).
       "./contract": { types: "./dist/contract/owner-contract.d.ts", default: "./dist/contract/owner-contract.js" },
       "./schemas/*": "./schemas/*", "./release-server": { types: "./bin/release-server.d.mts", default: "./bin/release-server.mjs" } }, bin: releaseServerBins,
-    files: ["dist", "bin", "schemas", "skills", "!skills/_artifacts", "CHANGES.md", "README.md", "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES", "provenance.json"],
+    files: ["dist", "bin", "schemas", "skills", "!skills/_artifacts", "CHANGES.md", "README.md", "LICENSE", "THIRD-PARTY-NOTICES", "provenance.json"],
     // The oRPC client is bundled (`bundleOrpcClient`); the contract objects and AG-UI are dependencies. zod is the one
     // peer: the app's schemas and the SDK's must be one instance.
     dependencies: { "@orpc/contract": dependencies["@orpc/contract"], "@ag-ui/core": dependencies["@ag-ui/core"] },

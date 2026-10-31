@@ -20,7 +20,7 @@ test("an edited copy fails the check", () => {
 });
 
 test("sanitizing keeps identities and outcomes and drops local paths and the stack", () => {
-  const raw = { scenario: "/Users/someone/agencies/payables/workflows/scenarios/sponsorship.json", stack: { dashboard: "https://127.0.0.1:1" },
+  const raw = { scenario: "/Users/example/scenarios/sponsorship.json", stack: { dashboard: "https://127.0.0.1:1" },
     inputs: { payee: "payee.near", amountUsdc: "20" }, steps: [{ step: "Paid", status: "SUCCESS", invoiceId: "e215" }], proto: { path: "/private/tmp/x/snapshot", snapshot: { runDigest: "9d13" } } };
   assert.deepEqual(sanitize(raw), { scenario: "<local>/sponsorship.json", inputs: { payee: "payee.near", amountUsdc: "20" },
     steps: [{ step: "Paid", status: "SUCCESS", invoiceId: "e215" }], proto: { path: "<local>/snapshot", snapshot: { runDigest: "9d13" } } });

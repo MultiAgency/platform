@@ -6,7 +6,7 @@ Start with one supported workflow. A product may provide its own screens, naviga
 
 ## Install the package
 
-The SDK is published on npm under the Apache-2.0 license:
+The SDK is MIT-licensed. Install it with:
 
 ```text
 pnpm add @multiagency/sdk zod@^4.6.5
@@ -40,6 +40,29 @@ for its own tests. Build against the SDK repository's local stack (`pnpm test:e2
 simulated provider, chain and wallet.
 
 An agent connection permits its contributor's reports and compensation reads only. It cannot file invoices, approve payments, sign owner actions or manage connections. Treasury machine access is a separate existing route and credential; Payables owner delegation and DAO machine delegation are unavailable.
+
+## What the platform does for your product
+
+The NEAR Intents Agent API provider holds the funds, enforces the policy the owner signed (payees, caps, budget, held approvals), prepares the owner actions a wallet or DAO signs, and executes money actions. The platform does the rest of what a product would otherwise build around the provider, and no client of this SDK receives a provider key or grant.
+
+What your product can rely on, and what it still does:
+
+- **Each money action is sent at most once.** One executor per agent sends every action from one place, after a write-ahead record, so a crash, restart or lost reply never sends it again, and an app's `requestId` is honored once. An outcome the platform can't prove stays unresolved and blocks new money actions on that agent. Your product never resends after `unknown`; it reads `activity` and `unresolved` (see Handle outcomes explicitly).
+- **What the provider can't check is refused before sending.** The provider enforces the signed policy; the platform also checks that the policy is still the one in force, the grant fits the action, a swap buys an asset the policy lists, a held payout isn't duplicated and a saved plan runs as it was quoted. A recipient that doesn't exist on NEAR is refused before anything is recorded. Your product branches on the refusal's `kind` and code, never its text.
+- **Owners approve what they read.** Owner actions are prepared on the platform and completed only by the owner's own signature or a DAO's vote. A vote on a held payout is checked against the provider's own record of that payout, so the approval releases exactly the terms shown. Your product shows what the owner is signing; it never signs for them.
+- **Callers are bound to their host, owner and agent.** Sessions are host-local; machine credentials and app consents name one host, agent and owner, expire, and can be revoked. Your product keeps credentials server-side and out of logs and URLs.
+
+What has run where, by the routes each client calls:
+
+| Client | Status |
+| --- | --- |
+| `ownerClient`, in the owner's session | Mainnet-observed on the hosted platform: reads, owner actions, held-payout votes, and plan execution through the Treasury autopilot |
+| `ownerClient` with a machine credential | Offline- and stack-tested; not observed on mainnet |
+| `appClient` | Mainnet-observed on platform staging (2026-10-28, 2026-10-30); not in production; wallet-owned agents only |
+| `payeeClient`, in the contributor's session | Mainnet-observed on the hosted invoice entry: invoices and agreement requests (2026-10-12, 2026-10-14) |
+| `payeeClient` with a report connection | Offline- and stack-tested; not deployed |
+
+Crash recovery and the refusals above are tested offline, not observed on mainnet. The platform's [mainnet log](https://github.com/MultiAgency/platform/blob/main/docs/mainnet-log.md) records what has run on mainnet, and [enforcement](https://github.com/MultiAgency/platform/blob/main/docs/enforcement.md) what the signed policy guarantees.
 
 ## First read from a browser product
 

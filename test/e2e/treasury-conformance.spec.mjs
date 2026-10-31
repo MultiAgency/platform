@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-import { mkdirSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import lockfile from 'proper-lockfile';
@@ -7,6 +6,7 @@ import { environment } from './environment.mjs';
 import { browserContext, connectWallet } from './wallet.mjs';
 import { PAYEE, OWNER, USDC, sign } from './provider.mjs';
 import { clientConformance } from './conformance.mjs';
+import { stackControls } from './stack-controls.mjs';
 
 // M4 runtime conformance for Treasury's listed procedures (see `clientConformance`). Error kinds are forced where
 // the procedure can return them.
@@ -25,9 +25,9 @@ test('Treasury: every listed procedure through ownerClient equals its raw answer
     await connectWallet(page, PAYEE);
     const { client, check, outage, accepted, report } = clientConformance(page, '/a/portfolio', LISTED);
 
-    // Strategy and a saved plan.
-    const strategy = join(stack.directory, 'portfolio/.strategy'); mkdirSync(strategy, { recursive: true });
-    writeFileSync(join(strategy, '.env.json'), JSON.stringify({ targetBps: { [USDC]: 7500, 'nep141:wrap.near': 2500, 'nep141:eth.omft.near': 0 }, minLegUsd: 2, maxCostBps: 250, autopilot: { everyMin: 60, maxUsd: 0 } }));
+    // The strategy, saved by the owner through strategy/save (the stack's setTargets control).
+    await stackControls(stack, { owner: PAYEE }).setTargets({ targetBps: { [USDC]: 7500, 'nep141:wrap.near': 2500, 'nep141:eth.omft.near': 0 },
+      minLegUsd: 2, maxCostBps: 250, autopilot: { everyMin: 60, maxUsd: 0 } });
 
     // Reads.
     for (const procedure of ['instance', 'setup', 'overview', 'policyHistory', 'activity', 'unresolved', 'held', 'inbox/list', 'autopilot/get', 'strategy/get', 'treasury/get', 'ledgerCsv', 'reconcileBooks', 'owner/pending', 'owner/actions'])

@@ -10,7 +10,7 @@ metadata:
   purpose: 'An app server''s access to agents: credential, consents, relayed owner actions, and payout requests by requestId with recovery by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.3.0'
+  library_version: '0.3.1'
 requires:
   - getting-started
   - owner-workflows
@@ -28,8 +28,8 @@ Read getting-started and owner-workflows first. `appClient` runs on your server 
 under a live owner consent for that Organization and agent, and only within the consent's scopes: `read`, `owner`, and
 `payout`. No production MultiAgency host serves the `/apps/v1` routes yet; the operator runs them on a staging host for
 its own tests. Until a production host does, build against the SDK repository's local stack
-(`pnpm test:e2e:stack --app <deployment>`). Use only `/apps/v1` and the confirm page on the platform's host: it is
-becoming headless (no sign-in or owner page, setup for Payables agents only), whatever else a host serves today.
+(`pnpm test:e2e:stack --app <deployment>`). Use only `/apps/v1` and the confirm page on the platform's host: it serves
+nothing else (no sign-in or owner page), and setup there is for Payables agents only.
 
 ## Setup
 
@@ -81,8 +81,7 @@ With `owner` scope an app may prepare `agent_create` without payees (naming the 
 `agent_freeze`, `agent_unfreeze`, `grant_issue`, `grant_revoke`, `policy_update`, and `approval_vote` on a held payout,
 through `app.agent(organization, agent).call(...)`. Everything else is refused before it reaches the agent. A vote the
 platform can't verify (an expired or changed approval, other terms, approving a held withdrawal) is refused before
-anything reaches the provider (`refused`, code `local_authorization_held`), at prepare or at submit; earlier platform
-builds answer `unknown` for it, which there also means nothing reached the provider.
+anything reaches the provider (`refused`, code `local_authorization_held`), at prepare or at submit.
 
 ```ts
 import { appClient, type AppOwnerAction } from "@multiagency/sdk";

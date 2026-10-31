@@ -5,10 +5,13 @@ import { ASSETS, treasuryPolicy } from "../src/policy.js";
 import { prepareExternalPlan } from "../src/planning/external.js";
 import { readOps } from "../src/ops.js";
 import { loadPlan } from "../src/plans.js";
+import { PublicError } from "../src/public-error.js";
 import { freshDirectory } from "./fixtures/harness.js";
 freshDirectory("external-plan", { per: "test" });
 
 const swaps = [{ from: ASSETS.USDC, to: ASSETS.wNEAR, amount: "1000000" }];
+/** A refusal the caller reads with its reason (`refused`), not an unproven outcome (`unknown`). */
+const refused = (reason: RegExp) => (error: unknown) => error instanceof PublicError && reason.test(error.message);
 function provider() {
   let quotes = 0;
   process.env.AGENT_GRANT_TOKEN = "ngt_offline_fixture";
@@ -41,13 +44,13 @@ test("external plans reject invalid actions, forbidden outputs, infeasible total
   for (const input of [{ swaps: [] }, { swaps: [{ ...swaps[0], amount: "-1" }] }, { swaps: [{ ...swaps[0], amount: "1.5" }] }, { swaps: [{ ...swaps[0], to: ASSETS.USDC }] }, { swaps, execute: true }, { swaps: [{ ...swaps[0], to: "https://arbitrary.test" }] }])
     await assert.rejects(prepareExternalPlan(input));
   api.getPolicy = async () => ({ revision: 1, policy: { ...treasuryPolicy, assets: [ASSETS.USDC] } }) as never;
-  await assert.rejects(prepareExternalPlan({ swaps }), /policy/);
+  await assert.rejects(prepareExternalPlan({ swaps }), refused(/policy/));
   provider();
   await assert.rejects(prepareExternalPlan({ swaps: [{ ...swaps[0], amount: "999999999999" }] }));
-  await assert.rejects(prepareExternalPlan({ swaps: [{ ...swaps[0], amount: "6000000" }, { ...swaps[0], amount: "6000000" }] }), /remaining balance/);
-  await assert.rejects(prepareExternalPlan({ swaps: [{ ...swaps[0], minAmountOut: "999999999999999999999999" }] }), /floor/);
+  await assert.rejects(prepareExternalPlan({ swaps: [{ ...swaps[0], amount: "6000000" }, { ...swaps[0], amount: "6000000" }] }), refused(/remaining balance/));
+  await assert.rejects(prepareExternalPlan({ swaps: [{ ...swaps[0], minAmountOut: "999999999999999999999999" }] }), refused(/floor/));
   api.swap = async () => ({ quote: { amount_out: "500000000000000000000000", min_amount_out: "1" } }) as never;
-  await assert.rejects(prepareExternalPlan({ swaps }), /cost/);
+  await assert.rejects(prepareExternalPlan({ swaps }), refused(/cost/));
   assert.deepEqual(readOps(), []);
 });
 
@@ -55,7 +58,7 @@ test("policy changes during external quoting refuse saving the plan", async () =
   provider();
   let reads = 0;
   api.getPolicy = async () => ({ revision: ++reads, policy: treasuryPolicy }) as never;
-  await assert.rejects(prepareExternalPlan({ swaps }), /policy changed/);
+  await assert.rejects(prepareExternalPlan({ swaps }), refused(/policy changed/));
   assert.deepEqual(readOps(), []);
 });
 
@@ -77,7 +80,8 @@ test("a later failed quote saves no partial plan; required plan storage failure 
   const { existsSync, writeFileSync } = await import("node:fs");
   const quote = api.swap; let calls = 0;
   api.swap = (async (...args: Parameters<typeof api.swap>) => { if (++calls === 2) throw new Error("quote unavailable"); return quote(...args); }) as typeof api.swap;
-  await assert.rejects(prepareExternalPlan({ swaps: [...swaps, ...swaps] }), /quote unavailable/);
+  // A provider failure is not a refusal: it keeps its own class.
+  await assert.rejects(prepareExternalPlan({ swaps: [...swaps, ...swaps] }), (error: unknown) => !(error instanceof PublicError) && /quote unavailable/.test((error as Error).message));
   assert.equal(existsSync(".plans"), false);
   provider(); writeFileSync(".plans", "blocked storage");
   await assert.rejects(prepareExternalPlan({ swaps }));
@@ -88,7 +92,7 @@ test("changed balances and expired valuations refuse external preparation", asyn
   provider(); let confidentialReads = 0;
   api.getBalances = async (_id, { source } = {}) => ({ balances: [{ asset_id: ASSETS.USDC,
     balance_raw: source === "public" ? "0" : ++confidentialReads === 1 ? "10000000" : "9000000" }] }) as never;
-  await assert.rejects(prepareExternalPlan({ swaps }), /balance/);
+  await assert.rejects(prepareExternalPlan({ swaps }), refused(/balance/));
   provider(); const tokens = api.getTokens;
   api.getTokens = async (...args) => (await tokens(...args)).map(token => ({ ...token, price_expires_at: new Date(0).toISOString() }));
   await assert.rejects(prepareExternalPlan({ swaps }), /fresh price/);
@@ -101,6 +105,6 @@ test("an external plan with a leg the provider warns about is refused before it 
     const output = BigInt(input.amount) * 500000000000000000n;
     return { quote: { amount_out: output.toString(), min_amount_out: (output * 998n / 1000n).toString() }, warnings: [{ code: "policy_asset_denied", detail: "d" }] } as never;
   };
-  await assert.rejects(prepareExternalPlan({ swaps }), /provider's dry run warned \(policy_asset_denied\)/);
+  await assert.rejects(prepareExternalPlan({ swaps }), refused(/provider's dry run warned \(policy_asset_denied\)/));
   assert.deepEqual(readOps(), []);
 });
