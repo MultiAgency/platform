@@ -319,11 +319,14 @@ directory, hosted agents and consents are kept, and the host is unchanged, so si
    `railway domain status` shows and remove `DASHBOARD_HOST`.
 4. Read-only checks: `/health` 200; `/apps/v1/agents/x` without a credential 401, with a browser `Origin` 403, on another
    host 421; `/`, `/gw/challenge` and `/a/x/access` 404 (offline-tested in `test/platform-host.test.ts`).
-5. On the staging service, the operator issues the dashboard staging's credential from the gateway's own state
-   directory (it writes `.app-access/` there, beside the gateway): `cd /data/state && /app/node_modules/.bin/tsx
-   /app/src/app-credential.ts issue staging api.dev.multiagency.ai 90 "dashboard staging"`. The token goes only into the
-   dashboard staging's server secrets (`PLATFORM_APP_CREDENTIAL`, with `PLATFORM_URL=https://api.dev.multiagency.ai` and
-   `PLATFORM_DEPLOYMENT=staging`).
+5. On the staging service, the operator issues the dashboard's credential from the gateway's own state directory (it
+   writes `.app-access/` there, beside the gateway): `cd /data/state && /app/node_modules/.bin/tsx
+   /app/src/app-credential.ts issue multiagency-dashboard api.dev.multiagency.ai 90 "MultiAgency dashboard"`. The token
+   goes only into the dashboard staging's server secrets (`PLATFORM_APP_CREDENTIAL`, with
+   `PLATFORM_URL=https://api.dev.multiagency.ai` and `PLATFORM_DEPLOYMENT=multiagency-dashboard`). Deployment names follow
+   `<publisher>-<app>` and are the same on every host: the host separates staging from production, and a credential is
+   bound to one host (user, 2026-10-31; provisional until the first real owner on production). `staging` is the
+   platform's own test deployment (the stand-in runs below); a credential under it acts on that deployment's consents.
 6. Rollback: redeploy the previous image; state stays on the staging volume. Nothing here touches proto.multiagency.ai
    or invoices.multiagency.ai.
 

@@ -22,7 +22,7 @@ extraction used the existing local dependencies without changing candidate bytes
 Treasury release `e2c237bf-7d8b-4c4e-9e5d-b43030e14117` passed both-host
 owner sign-in, existing-agent access and two retained private-record checks, with
 original state and executor assignment preserved. Evidence:
-[Treasury acceptance](https://github.com/MultiAgency/treasury/blob/cea2eab2b414ddd32f65857ac4683fe9823e215a/docs/treasury-release-acceptance.md).
+[Treasury acceptance](https://github.com/MultiAgency/treasury-prototype/blob/cea2eab2b414ddd32f65857ac4683fe9823e215a/docs/treasury-release-acceptance.md).
 
 Payables release `360625c3-2589-4d80-be89-f8ecad0186db` passed both-host
 sign-in and authenticated reload. Its execution receipt records zero registrations

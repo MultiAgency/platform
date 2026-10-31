@@ -6,7 +6,7 @@ DAO members can reserve their own Treasury or Payables setup; owner policy and g
 remain separate. The public showcase reads no private records.
 
 This repository is meant to be the one owner of the gateway, executor and money path, with apps building on it only
-through `@multiagency/sdk`. Not yet: the Treasury and Payables repositories still carry their own copies (see Not done yet).
+through `@multiagency/sdk`. Not yet: Payables still carries its own copy (see Not done yet).
 
 The [shared frontend integration](docs/shared-frontend-integration.md) keeps Proto as the static
 three-idea showcase and serves independently built Treasury and Payables frontends. Invoices is
@@ -231,9 +231,10 @@ of maintaining separate requirement statuses.
 
 ## Not done yet
 
-- `MultiAgency/treasury` and `MultiAgency/payables` still carry their own copies of the gateway and money path,
-  including `test/send-path.test.ts`. A fix made here doesn't reach them. The treasury app (MultiAgency/agentic-treasury) is to replace Treasury on the SDK;
-  Payables has not moved onto it.
+- `MultiAgency/payables` still carries its own copy of the gateway and money path, including
+  `test/send-path.test.ts`, so a fix made here doesn't reach it. Its frontend calls the platform through the SDK but
+  still imports modules from that copy, so the copy can't be retired yet. The Treasury app (`MultiAgency/treasury`) is
+  built on the SDK and replaces this platform's Treasury pages.
 - A new prototype must reuse a fixed host `demo` value and agent area. Owner-app `contract.json` is checked at
   runtime only on hosts served through the shared release server (offline E2E; not deployed). See the
   [integration path](docs/integration-path.md#gaps).
