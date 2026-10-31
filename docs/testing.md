@@ -246,7 +246,10 @@ saves `portfolio`'s strategy through `strategy/save`, which turns autopilot off;
 (`message`, `recipient`, `nonce`: the owner's NEP-413 signature from the fixture key, standing in for the wallet an app
 asks; never the platform sign-in text) or `machineCredential` (`scopes`, optional `label` and `ttlSeconds`: the owner
 signs in with the fixture key and issues a `portfolio` credential); its result appears as `<name>.result.json`,
-`{ ok, value }` or `{ ok: false, error }`. Create `stack/stop` to stop. An attached client signs in from the stack's own wallet
+`{ ok, value }` or `{ ok: false, error }`. Create `stack/stop` to stop. Every service the stack starts (gateway, agent
+servers, hosted agents, release servers) also ends on its own when the process that started it dies without stopping it,
+such as a killed stack, a failed start or a test abandoned at its timeout (`test/e2e/exit-with-parent.cjs`;
+`stack-lifetime.spec.mjs`). An attached client signs in from the stack's own wallet
 pages: a page it opens itself has no local test wallet, and its own CDP connection must accept the local certificate. Signatures, deposits and settlement are simulated.
 `stack-app.spec.mjs` runs this entry point as a builder would (`--no-browser --treasury --app`): a separate server's
 setup, consent, payout request held and released by the owner's vote, and a read-only machine credential, through the

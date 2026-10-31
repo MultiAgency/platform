@@ -10,6 +10,10 @@ import { offlineEnvironment } from '../../scripts/test-environment.mjs';
 import { provider, listen, DAO, DAO_SIGNER, OWNER, PAYEE, SECOND } from './provider.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
+/** Every service the stack starts ends with whatever started it. Agent servers take it through NODE_OPTIONS, which a
+ * gateway's hosted agents inherit; release servers through their arguments, so their environment stays exactly theirs. */
+const EXIT_WITH_PARENT_FILE = join(root, 'test/e2e/exit-with-parent.cjs');
+const EXIT_WITH_PARENT = `--require ${JSON.stringify(EXIT_WITH_PARENT_FILE)}`;
 const close = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
 async function freePort(host = '127.0.0.1') {
   const server = httpServer();
@@ -68,7 +72,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
   const invoicesRelease = dist => activate(invoicesReleases, stage(invoicesReleases, dist)).id;
   async function startFrontend(dist = process.env.PROTO_E2E_INVOICES_DIST) {
     invoicesRelease(dist);
-    const child = spawn(process.execPath, [join(import.meta.dirname, '../../src/contract/release-server.mjs')],
+    const child = spawn(process.execPath, ['--require', EXIT_WITH_PARENT_FILE, join(import.meta.dirname, '../../src/contract/release-server.mjs')],
       { cwd: directory, env: frontendEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     services.push(child); frontendProcesses.add(frontendProcess = child);
     let output = '';
@@ -91,7 +95,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
     const ids = { a: stage(root, ownerApp.a), b: stage(root, ownerApp.b), c: stage(root, incompatible) };
     activate(root, ids.a);
     release = { root, ids, env: { HOST: '127.0.0.1', PORT: String(await freePort()), RELEASES_ROOT: root }, activate: name => activate(root, ids[name]) };
-    const child = spawn(process.execPath, [join(import.meta.dirname, '../../src/contract/release-server.mjs')],
+    const child = spawn(process.execPath, ['--require', EXIT_WITH_PARENT_FILE, join(import.meta.dirname, '../../src/contract/release-server.mjs')],
       { cwd: directory, env: release.env, stdio: ['ignore', 'pipe', 'pipe'] });
     services.push(child); frontendProcesses.add(child);
     let output = '';
@@ -103,7 +107,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
     }
     release.origin = `http://127.0.0.1:${release.env.PORT}`;
   }
-  const common = { ...offlineEnvironment(), NODE_OPTIONS: `--require ${JSON.stringify(join(root, 'test/fixtures/offline-network.cjs'))} --require ${JSON.stringify(join(root, 'test/e2e/fastnear-fixture.cjs'))}`, AGENT_ID: simulated.id, AGENT_GRANT_TOKEN: simulated.token,
+  const common = { ...offlineEnvironment(), NODE_OPTIONS: `--require ${JSON.stringify(join(root, 'test/fixtures/offline-network.cjs'))} --require ${JSON.stringify(join(root, 'test/e2e/fastnear-fixture.cjs'))} ${EXIT_WITH_PARENT}`, AGENT_ID: simulated.id, AGENT_GRANT_TOKEN: simulated.token,
     NEAR_INTENTS_AGENT_API_URL: simulated.url, NEAR_RPC_URL: `${simulated.url}/chain`, AUTOPILOT: 'off',
     SESSION_SECRET: 'local-only-session-secret-with-more-than-32-characters', DASHBOARD_AREA: 'payables', ...(payeeFrontend && { INVOICES_FRONTEND_URL: payeeFrontend }) };
   async function start(name, cwd, entry, env, ready) {
@@ -194,6 +198,8 @@ export async function environment(directory, { workspace = false, portfolioOwner
     async restartExecutor() { await stop(executor); await startExecutor(); },
     async restartReviewer() { await stop(reviewer); await startReviewer(); },
     release, frontendEnv, protoPids: () => services.filter(c => !frontendProcesses.has(c)).map(c => c.pid),
+    /** Every process this stack started that is still running. */
+    servicePids: () => services.filter(c => c.exitCode === null && !c.signalCode).map(c => c.pid),
     async stopFrontend() { await stop(frontendProcess); },
     async releaseFrontend(dist) {
       if (frontendProcess.exitCode !== null || frontendProcess.signalCode) return startFrontend(dist);
