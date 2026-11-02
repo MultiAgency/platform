@@ -1,7 +1,8 @@
 import type { z } from "zod";
 import { appAgent, appConsentList, appConsentStored, appRevoked, appSetupStored, type AppOwnerAction, type AppProcedure } from "./app-access.js";
 import type { appConsentSubmission } from "./app-consent.js";
-import { ownerClient, type OwnerCallOptions, type OwnerOutput, type OwnerProcedure, type OwnerResult } from "./owner-client.js";
+import { ownerClient, type OwnerCallOptions, type OwnerFailure, type OwnerOutput, type OwnerProcedure, type OwnerResult } from "./owner-client.js";
+import type { ownerStreams } from "./owner-outputs.js";
 import type { OwnerInputs } from "./owner-inputs.js";
 
 type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -26,6 +27,8 @@ export type AppRouteResult<T> =
 
 /** Procedure inputs as an app may send them: `owner/prepare` takes only actions an app may ask an owner to sign. */
 export type AppInputs = { [P in AppProcedure]: P extends "owner/prepare" ? { action: AppOwnerAction; signer: "wallet" } : OwnerInputs[P] };
+/** The app procedures that answer an event stream. */
+type AppStream = Extract<AppProcedure, (typeof ownerStreams)[number]>;
 type Covered = AppProcedure extends OwnerProcedure ? true : never;
 const covered: Covered = true;
 void covered;
@@ -69,12 +72,16 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
       /** Permanent: the owner signs a new consent to restore access. */
       revoke: (id: string) => route(`/consents/${encodeURIComponent(id)}`, appRevoked, { method: "DELETE" }),
     },
-    /** One Organization's agent: reads and owner actions its live consents cover. */
+    /** One Organization's agent: reads, owner actions and Treasury procedures its live consents cover. */
     agent(organization: string, agent: string) {
       const owner = ownerClient({ base: `${root}/apps/v1/o/${encodeURIComponent(organization)}/a/${encodeURIComponent(agent)}`, fetch: authorized });
       return {
-        call<P extends AppProcedure>(path: P, ...[input, options]: undefined extends AppInputs[P] ? [input?: AppInputs[P], options?: OwnerCallOptions] : [input: AppInputs[P], options?: OwnerCallOptions]): Promise<OwnerResult<OwnerOutput<P>>> {
+        call<P extends Exclude<AppProcedure, AppStream>>(path: P, ...[input, options]: undefined extends AppInputs[P] ? [input?: AppInputs[P], options?: OwnerCallOptions] : [input: AppInputs[P], options?: OwnerCallOptions]): Promise<OwnerResult<OwnerOutput<P>>> {
           return (owner.call as (path: P, input?: unknown, options?: OwnerCallOptions) => Promise<OwnerResult<OwnerOutput<P>>>)(path, input, options);
+        },
+        /** A stream's events (`sweep`, and with `treasury-execute` `rebalance` and `executePlan`), as `ownerClient.stream` reads them. */
+        stream<P extends AppStream>(path: P, input: AppInputs[P], options?: OwnerCallOptions): AsyncGenerator<OwnerOutput<P>, OwnerFailure | undefined> {
+          return owner.stream(path, input as never, options);
         },
       };
     },

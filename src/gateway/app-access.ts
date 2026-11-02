@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { RPCSerializer } from "@orpc/client";
 import { z } from "zod";
 import { ownerPrepareInput } from "../contract/inputs.js";
+import { proposalSigned } from "../contract/treasury-proposals.js";
 import { BadRequest } from "../http.js";
 import { nep413Hash, signatureBytes, verifyEd25519 } from "../nep413.js";
 import type { KeyLookup, KeyStateLookup } from "../signin.js";
@@ -35,6 +36,25 @@ export function submittedCorrelation(input: unknown) {
     const decoded = rpcInput.deserialize(input as Parameters<RPCSerializer["deserialize"]>[0]) as { correlationId?: unknown } | null;
     return typeof decoded?.correlationId === "string" ? decoded.correlationId : null;
   } catch { return null; }
+}
+/**
+ * Why the owner's signature an app relays to `proposals/approve` or `proposals/reject` is refused, or null: it must be a
+ * NEP-413 signature for this host, by a full-access key of the agent's owner now. The agent then checks the text is
+ * exactly the proposal's. A lookup that throws went unanswered and propagates (503).
+ */
+export async function proposalSignatureProblem(input: unknown, host: string, owner: string, lookup: KeyLookup) {
+  let decoded: unknown;
+  try { decoded = rpcInput.deserialize(input as Parameters<RPCSerializer["deserialize"]>[0]); } catch { return "The request body is unreadable."; }
+  const parsed = proposalSigned.safeParse(decoded);
+  if (!parsed.success) return "Send the proposal id and the owner's signed text: message, nonce, publicKey and signature.";
+  const { message, nonce, publicKey, signature } = parsed.data.signed;
+  const nonceBytes = Buffer.from(nonce, "base64");
+  if (nonceBytes.length !== 32) return "The NEP-413 nonce must be 32 bytes.";
+  let signed = false;
+  try { signed = verifyEd25519(publicKey, nep413Hash(message, nonceBytes, host.toLowerCase()), signatureBytes(signature)); } catch { signed = false; }
+  if (!signed) return "The signature doesn't match this text for this host.";
+  if (await lookup(owner, publicKey) !== "FullAccess") return `${publicKey} is not a full-access key of ${owner}.`;
+  return null;
 }
 export function appMayPrepare(input: unknown) {
   let decoded: unknown;

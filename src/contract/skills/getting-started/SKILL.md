@@ -9,7 +9,7 @@ metadata:
   purpose: 'Orients an app or agent author: the two clients, the four identities and their server-side limits, recovery kinds, and the supported surface of this package version.'
   type: lifecycle
   library: '@multiagency/sdk'
-  library_version: '0.3.1'
+  library_version: '0.4.0'
 sources:
   - 'MultiAgency/platform:src/contract/index.ts'
   - 'MultiAgency/platform:src/contract/payee-entry.ts'
@@ -62,11 +62,12 @@ it may retry.
 
 ## What this package version supports
 
-`@multiagency/sdk` 0.3.1, entries:
+`@multiagency/sdk` 0.4.0, entries:
 - `@multiagency/sdk`: `ownerClient` with `OwnerResult`/`OwnerFailure`, `appClient` with `AppRouteResult` and the
   consent and setup texts (`consentMessage`, `setupMessage`), `ownerOutputs` and `OwnerInputs`/`OwnerOutput`
   per procedure, `ownerCapabilities` and `mayCall` (display only), gateway discovery (`gatewayDiscovery`,
-  `gatewayDenialScope`), schemas for runs (`RecordingSchema`) and proposals, `ASSETS` and account helpers. It also
+  `gatewayDenialScope`), schemas for runs (`RecordingSchema`), DAO proposals and Treasury proposals (`proposalView`,
+  `proposalText`; see treasury-app), `ASSETS` and account helpers. It also
   re-exports the payee entry. Peer: zod ^4.6.5. It bundles `@orpc/client` 2.0.0-beta.47 and loads no other oRPC
   package, so it runs beside a host that shares its own oRPC. It depends on `@ag-ui/core` 1.0.3.
 - `@multiagency/sdk/contract`: `ownerContract`, `ownerErrors` and `OwnerContract`, for an app implementing a server

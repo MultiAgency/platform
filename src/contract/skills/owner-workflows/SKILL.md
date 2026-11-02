@@ -9,7 +9,7 @@ metadata:
   purpose: 'Owner reads, owner-signed actions and money streams with ownerClient, with recovery by result kind and retained identities.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.3.1'
+  library_version: '0.4.0'
 requires:
   - getting-started
 sources:
@@ -120,6 +120,8 @@ export function machineClient(origin: string, agent: string, token: string) {
 Result: `await machineClient(origin, "treasury", token).call("overview")` answers like the browser client. A procedure
 outside the credential's scopes, or an expired or revoked credential, answers `forbidden` or `session`. Results, streams
 and recovery are the same as above: a lost `executePlan` or `sweep` is `unknown`, and nothing is sent again.
+`executePlan` runs only while the owner's live grant binds the saved strategy (`treasury:<suffix>`, signed once per
+saved strategy); otherwise it answers one `rejected` event naming the grant, and nothing is claimed.
 
 ## Recover an action that returned no identity
 

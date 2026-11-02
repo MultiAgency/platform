@@ -38,6 +38,8 @@ export const READS = new Set([
   "workOrders/get",
   "workOrders/status",
   "demoGuide/compose",
+  "proposals/get",
+  "proposals/list",
 ]);
 
 export const OWNER_PROPOSALS = new Set([
@@ -47,8 +49,8 @@ export const OWNER_PROPOSALS = new Set([
   "workOrders/create",
   "workOrders/prepare",
 ]);
-const PREPARE = new Set([...OWNER_PROPOSALS, "rebalance", "externalPlan", "steward/propose", "deposit", "treasury/fund", "workOrders/deposit"]);
-const EXECUTE = new Set(["workOrders/file", "compensation/prepare", "compensation/send", "compensation/review", "pay", "payouts/request", "sweep", "executePlan", "autopilot/tick", "autopilot/enable"]);
+const PREPARE = new Set([...OWNER_PROPOSALS, "rebalance", "externalPlan", "steward/propose", "deposit", "treasury/fund", "workOrders/deposit", "proposals/create", "proposals/withdraw"]);
+const EXECUTE = new Set(["proposals/execute", "workOrders/file", "compensation/prepare", "compensation/send", "compensation/review", "pay", "payouts/request", "sweep", "executePlan", "autopilot/tick", "autopilot/enable"]);
 const MANAGE = new Set(["compensation/agreement", "strategy/save", "treasury/link", "treasury/unlink", "treasury/setConfidential", "agreements/decline"]);
 const MAINTAIN = new Set(["autopilot/stop", "recover", "inbox/dismiss", "cancelPreparedInvoice"]);
 
@@ -56,7 +58,8 @@ const MAINTAIN = new Set(["autopilot/stop", "recover", "inbox/dismiss", "cancelP
 export function mayCall(access: Access, path: string): boolean {
   if (READS.has(path)) return true;
   if (PREPARE.has(path)) return access.canSign || access.canPropose;
-  if (path === "owner/submit" || path === "workOrders/submit") return access.canSign;
+  // The owner's signature over a proposal's text is what the agent checks; relaying it is a signer's call.
+  if (path === "owner/submit" || path === "workOrders/submit" || path === "proposals/approve" || path === "proposals/reject") return access.canSign;
   if (EXECUTE.has(path)) return access.canExecute;
   if (MANAGE.has(path)) return access.canManage;
   if (path === "autopilot/set") return access.canManage && access.canExecute;

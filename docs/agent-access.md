@@ -280,7 +280,12 @@ wallet shows the recipient, or refuses one that doesn't match the requesting pag
 credential issued again under the same deployment name acts on every consent that deployment holds.
 The platform doesn't see the app's users: the app's own sign-in and roles decide which of its users act for which
 Organization, so a fault there acts within every consent the deployment holds (for `payout`, within the owner-signed
-policy). Scopes are separate: a consent carries each it needs. Agreements, invoices, compensation and work-order records are not
+policy). With `treasury`, an app reaches Treasury reads, strategy settings (which act on an app's or a machine credential's plans only once the owner's grant binds them,
+[enforcement](enforcement.md#treasury-proposals-offline--and-stack-tested)), autopilot on and off, sweep and proposals:
+its swaps run only after the owner signs each proposal's exact terms (`proposalText`), a check the platform makes, not
+the provider. With `treasury-execute` as well, it can prepare and execute plans within the policy and the strategy's
+cost limit without a signature per swap, only while the owner's live grant binds the plan's strategy
+([enforcement](enforcement.md#treasury-proposals-offline--and-stack-tested)). Scopes are separate: a consent carries each it needs. Agreements, invoices, compensation and work-order records are not
 reachable. Each
 consent, call and revocation is appended to `.app-access/access.jsonl`.
 

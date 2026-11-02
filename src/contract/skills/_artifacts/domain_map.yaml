@@ -1,11 +1,11 @@
 # domain_map.yaml
 # Library: @multiagency/sdk
-# Version: 0.3.1
+# Version: 0.4.0
 # Date: 2026-10-18
 # Status: draft
 library:
   name: '@multiagency/sdk'
-  version: '0.3.1'
+  version: '0.4.0'
   repository: 'MultiAgency/platform'
   description: 'Typed owner and payee clients, schemas and the shared release server for MultiAgency agents behind the gateway.'
   primary_framework: 'framework-agnostic'
@@ -64,6 +64,32 @@ skills:
         correct_pattern: |
           // read payouts/status by the same requestId
         source: 'src/payout-requests.ts'
+        priority: 'CRITICAL'
+        status: 'active'
+  - name: 'Treasury app'
+    slug: 'treasury-app'
+    domain: 'app'
+    description: 'Treasury proposals through an app: propose by requestId, the owner signs proposalText, execute once, recover by state; the treasury and treasury-execute scopes.'
+    type: 'core'
+    covers: ['proposals/create', 'proposalText', 'proposals/approve', 'proposals/execute', 'proposals/get']
+    tasks: ['propose swaps once per requestId', 'have the owner sign the exact approval text', 'execute an approved proposal once and read it after a lost reply']
+    failure_modes:
+      - mistake: 'Building your own approval text'
+        mechanism: 'The platform accepts only proposalText of the proposal it returned; another text is refused, and a summary is not what the owner signs.'
+        wrong_pattern: |
+          // sign `Approve swap of ${amount}` in the app
+        correct_pattern: |
+          // sign proposalText(proposal, "approve")
+        source: 'src/contract/treasury-proposals.ts'
+        priority: 'CRITICAL'
+        status: 'active'
+      - mistake: 'A new requestId after unknown'
+        mechanism: 'The swaps may have run; a new proposal would swap again.'
+        wrong_pattern: |
+          // on unknown, propose again with requestId + "-retry"
+        correct_pattern: |
+          // read proposals/get by the same id
+        source: 'src/proposals/service.ts'
         priority: 'CRITICAL'
         status: 'active'
   - name: 'Owner workflows'

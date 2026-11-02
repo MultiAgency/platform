@@ -16,6 +16,7 @@ export function savePlan(
   instruction: string,
   actions: PlannedAction[],
   now = new Date(),
+  proposalId?: string,
 ): Plan {
   const plan: Plan = {
     ...base,
@@ -25,6 +26,7 @@ export function savePlan(
     expiresAt: new Date(now.getTime() + PLAN_TTL_MS).toISOString(),
     instruction,
     actions,
+    ...(proposalId && { proposalId }),
   };
   mkdirSynced(DIR);
   writeFileSync(join(DIR, `${plan.id}.json`), JSON.stringify({ plan, sha256: digest(plan) }, null, 2));

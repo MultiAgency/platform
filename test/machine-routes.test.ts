@@ -48,6 +48,7 @@ test("shared access routes bind host/owner/agent, sanitize forwarding and retain
   assert.equal((forwarded[0]!.headers as any).authorization, undefined);
   assert.equal((forwarded[0]!.headers as any)["x-gateway"], undefined);
   assert.equal((forwarded[0]!.headers as any)["x-gateway-owner"], undefined);
+  assert.equal((forwarded[0]!.headers as any)["x-gateway-actor"], `machine:${id}`, "the agent holds machine plans to a strategy-bound grant by this actor");
   for (const procedure of ["rebalance", "executePlan", "sweep", "owner/prepare", "autopilot/tick"]) assert.equal((await call(port, rpc + procedure, "POST", token, {})).status, 403);
   assert.equal((await call(port, rpc + "overview", "POST", token, {}, { cookie: "x=y" })).status, 403);
   host = "two.test";

@@ -719,6 +719,51 @@ through both owner types, and payee invoice intake for newly reserved Payables a
 unverified or unimplemented respectively. See `docs/operations.md` for preservation and host limits.
 
 
+## Treasury proposals (offline- and stack-tested)
+
+An app with `treasury` consent proposes swaps; the owner approves their exact terms later by signing `proposalText`;
+the app asks for one execution (`src/proposals/service.ts`; design: the workspace's `coordination/durable-proposals.md`).
+What holds, offline-tested in `test/treasury-proposals.test.ts` with planted faults (each check removed fails a test):
+the platform accepts only the owner's NEP-413 signature over the exact text for its host, by a full-access key of the
+owner (gateway, `test/app-access.test.ts`); a policy revision or digest, strategy or agent change voids the proposal;
+an execution attempt is refused with nothing claimed or sent when a fresh quote is below a signed floor, the provider's
+dry run warns, the balance is short, no live treasury grant is held or the policy isn't in force; each swap is sent
+with a floor at least the signed one; the proposal is claimed under the money lock after every check, immediately
+before its plan's claim, so it runs at most once and a rejection and an execution can't both win; a claimed proposal
+with nothing in the journal reads `stopped` and is never resent; a lost provider reply reads `unknown` and blocks, as
+for any send. `authorize` and `dispatch` are unchanged: every swap still passes both.
+
+Limits: the approval is the platform's check, not the provider's. Whoever holds the agent's treasury grant can swap
+within the policy without it, as with plans. Treasury agents keep `owner_approval` off, since the provider's switch
+holds every action of the agent and an approval lasts 24 hours (observed for a transfer); what a provider-held swap's
+vote commits to has never been observed. Stack-tested on the stack's own Treasury agent through an app
+(`test/e2e/stack-app.spec.mjs`: a price move refused before the claim, one execution, a lost reply never resent, the
+strategy-bound grant for `treasury-execute`); not deployed or mainnet-observed. Which wallets show the text in full is
+not checked.
+
+`treasury-execute`: an app's `executePlan` runs only while the owner's live grant binds the plan's strategy digest,
+checked under the lock before the claim (`src/planning/strategy-grant.ts`). Before this check, a `treasury` send
+accepted any `treasury` or `treasury:*` grant and judged cost against the strategy saved on disk, so an app that could
+save settings could have raised its own cost limit; the owner's own session is unchanged, and the machine route has the
+same check (below).
+
+**Machine-credential plans need the strategy-bound grant (user's choice, 2026-11-02).** `strategy/save` is in the
+`treasury` scope, and a Treasury machine credential (`tmc_`) executes plans against the strategy saved now. Before this
+change, it did so under a plain `treasury` grant, so an app with `treasury` alone could raise `maxCostBps` (at most
+1000 bps) and change targets for plans a machine credential then executed, within the policy's caps and budget. Now the
+gateway forwards machine calls as `machine:<credential id>`, and `executePlan` from an app or a machine credential runs
+only while the owner's live grant binds the saved strategy, checked under the lock before the claim
+(`strategyGrantRequired`, `src/planning/strategy-grant.ts`). Offline: `test/machine-routes.test.ts` (the actor) and
+`test/treasury-proposals.test.ts`; stack: `test/e2e/stack-app.spec.mjs` and `test/e2e/agent-access.spec.mjs` (refused
+under a plain grant, executed after the owner's strategy grant). The owner's own session is unchanged.
+
+Proposals and consents: a proposal is withdrawn, on the app's next call, once the consent it was made under is no
+longer among the app's live consents for that agent (the gateway names them on each call); a second live consent (a renewal) withdraws nothing, and
+a proposal already claimed or closed answers its own state, never a withdrawal. The open-proposal limit is counted
+without a lock, so concurrent proposals can pass it slightly; one unreadable proposal record fails proposal calls for
+the whole agent (closed, not open). The owner's approving key is checked when the approval is relayed, not again at
+execution.
+
 ## Shared machine access candidate
 
 The local shared access implementation is documented in [Agent access](agent-access.md). It delegates

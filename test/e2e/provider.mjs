@@ -319,6 +319,12 @@ export async function provider(directory, { treasury = false, account = OWNER, p
     /** Provider requests refused by a declared outage: the witness that a call reached the provider. */
     outageRefusals: () => outageRefusals,
     dropSwapResponse(after = 1) { dropSwapAt = swaps.length + after; },
+    /** A listed token's whole-dollar price, as `/v1/tokens` reports it and every quote converts by: a price move. */
+    setPrice(asset, price) {
+      const token = TOKENS.find(t => t.asset_id === asset);
+      if (!token || !Number.isInteger(price) || price < 1) throw new Error('Give a listed asset and a whole-dollar price of at least 1');
+      token.price = price;
+    },
     pauseObservationAfterFirstSwap() {
       let release; const wait = new Promise(resolve => { release = resolve; });
       observationGate = { wait, release, reached: false }; return observationGate;

@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { agreementCommand, compensationSend, paymentPreparation, reviewCommand } from "../compensation-contract.js";
+import type { proposalCreateInput, proposalRef, proposalSigned } from "./treasury-proposals.js";
 import type { depositInput, executePlanInput, ownerAction, ownerPrepareInput, ownerStatusInput, ownerSubmitInput, payoutRequestInput, payoutStatusInput } from "./inputs.js";
 
 /**
@@ -38,6 +39,9 @@ export type OwnerInputs = {
   "treasury/link": { accountId: string }; "treasury/unlink": undefined; "treasury/setConfidential": { confidential: boolean };
   "treasury/fund": { asset: "USDC" | "NEAR"; amount: string };
   externalPlan: { swaps: { from: string; to: string; amount: string; minAmountOut?: string }[] };
+  "proposals/create": In<typeof proposalCreateInput>; "proposals/get": In<typeof proposalRef>; "proposals/list": undefined;
+  "proposals/approve": In<typeof proposalSigned>; "proposals/reject": In<typeof proposalSigned>;
+  "proposals/withdraw": In<typeof proposalRef>; "proposals/execute": In<typeof proposalRef>;
   // Streams
   rebalance: undefined; executePlan: In<typeof executePlanInput>; sweep: { execute: boolean }; "steward/propose": { instruction?: string };
 };

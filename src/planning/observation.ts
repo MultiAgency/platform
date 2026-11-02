@@ -23,5 +23,5 @@ export async function observe() {
       book.map((h) => [h.asset, { public: h.public.toString(), confidential: h.confidential.toString() }]),
     ),
   };
-  return { snapshot, book, assets: view.policy?.assets ?? [] };
+  return { snapshot, book, assets: view.policy?.assets ?? [], view };
 }

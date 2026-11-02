@@ -6,7 +6,7 @@ import { chainKeyState, hourlyLimit, type KeyLookup, type KeyStateLookup } from 
 import { appendSynced } from "../synced.js";
 import type { AgentEntry } from "./config.js";
 import { ownerPrepareOutput } from "../contract/owner-outputs.js";
-import { consentKeyHolds, AppConsents, AppCredentials, appMayCall, appMayPrepare, setupConsent, submittedCorrelation, UNBORN, verifyConsent, verifySetup, type ConsentRecord } from "./app-access.js";
+import { consentKeyHolds, AppConsents, AppCredentials, appMayCall, appMayPrepare, proposalSignatureProblem, setupConsent, submittedCorrelation, UNBORN, verifyConsent, verifySetup, type ConsentRecord } from "./app-access.js";
 import { AppConfirms } from "./app-confirm.js";
 import { AuthorityUnanswered, resolveWalletAuthority } from "./machine-authority.js";
 import { forwardRpc } from "./rpc-proxy.js";
@@ -173,6 +173,12 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   if (prepared?.type === "agent_create" && prepared.owner?.public_key !== consent.publicKey) {
     json(res, 403, { error: "Create the agent with the key that signed the setup" }); return true;
   }
+  // An owner's approval or rejection of a proposal: the platform checks it is the owner's, for this host, before the agent
+  // compares its text with the proposal's.
+  if (path === "proposals/approve" || path === "proposals/reject") {
+    const problem = await proposalSignatureProblem(input, host, agent.owner, lookup);
+    if (problem) { json(res, 400, { error: `${problem} Nothing was recorded.` }); return true; }
+  }
   // The checks above waited on the chain: a credential or consent revoked meanwhile, or a stop begun, refuses here.
   if (stopping() || !credentials.authenticate(req.headers.authorization, host) ||
     !consents.live({ deployment: credential.deployment, host, organization, agent: name }).some(c => c.id === consent.id)) {
@@ -204,6 +210,10 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     const meta = Array.isArray(raw.meta) ? raw.meta.filter(entry => !(Array.isArray(entry) && entry[1] === "intent")) : [];
     return { answer: { json: { ...answer, confirm: { url: `https://${host.toLowerCase()}/confirm/${token}`, expiresAt: answer.expiresAt } }, meta } };
   });
-  forwardRpc(req, res, agent, path, undefined, body, `app:${credential.deployment}:${organization}`, release || undefined);
+  // A proposal is bound to the consent it was made under and the host its owner signs for; it is withdrawn once that
+  // consent is no longer among this app's live consents for the agent.
+  const context = path.startsWith("proposals/") ? { consent: consent.id, host: host.toLowerCase(),
+    consents: live.filter(c => matches(c) && c.scopes.includes("treasury")).map(c => c.id) } : undefined;
+  forwardRpc(req, res, agent, path, undefined, body, `app:${credential.deployment}:${organization}`, release || undefined, context);
   return true;
 }

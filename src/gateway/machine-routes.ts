@@ -42,7 +42,7 @@ export async function machineRoutes(req: IncomingMessage, res: ServerResponse, p
       host, agent: agent.name, agentId: authority.agentId, path: call[2], machineCredentialId: credential.id };
     appendSynced(join(".machine-auth", "access.jsonl"), entry);
     if (isIntervention(call[2]!)) { mkdirSync(".evidence", { recursive: true }); appendSynced(join(".evidence", "interventions.jsonl"), entry); }
-    forwardRpc(req, res, agent, call[2]!, undefined, body);
+    forwardRpc(req, res, agent, call[2]!, undefined, body, `machine:${credential.id}`);
     return true;
   }
   const route = pathname.match(/^\/gw\/machine-credentials\/([a-z0-9-]+)(?:\/([0-9a-f-]{36}))?$/);

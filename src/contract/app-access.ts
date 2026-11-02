@@ -19,11 +19,29 @@ export const APP_OWNER = ["owner/prepare", "owner/submit", "owner/status", "owne
  * nothing out.
  */
 export const APP_PAYOUT = ["payouts/request", "payouts/status", "held", "deposit"] as const;
-export type AppProcedure = (typeof APP_READS)[number] | (typeof APP_OWNER)[number] | (typeof APP_PAYOUT)[number];
-const READS = new Set<string>(APP_READS), OWNER = new Set<string>(APP_OWNER), PAYOUT = new Set<string>(APP_PAYOUT);
+/**
+ * Treasury with `treasury` consent (coordination/durable-proposals.md section 8): reads; strategy settings, which an
+ * app's plans, a machine credential's plans and the autopilot use only under a grant binding their digest; autopilot on
+ * (under such a grant) and off; sweeping public balances into the confidential one; and proposals, whose swaps execute
+ * only after the owner signs their exact terms.
+ */
+export const APP_TREASURY = ["strategy/get", "autopilot/get", "autopilot/evidence", "autopilot/log", "treasury/get", "strategy/save",
+  "autopilot/enable", "autopilot/stop", "sweep", "proposals/create", "proposals/get", "proposals/list", "proposals/approve",
+  "proposals/reject", "proposals/withdraw", "proposals/execute"] as const;
+/**
+ * With `treasury-execute` as well: plans prepared and executed within the owner's policy and the strategy's cost limit,
+ * without a signature per swap, and only under a grant binding the plan's strategy (src/planning/strategy-grant.ts).
+ */
+export const APP_TREASURY_EXECUTE = ["rebalance", "externalPlan", "executePlan"] as const;
+export type AppProcedure = (typeof APP_READS)[number] | (typeof APP_OWNER)[number] | (typeof APP_PAYOUT)[number]
+  | (typeof APP_TREASURY)[number] | (typeof APP_TREASURY_EXECUTE)[number];
+const READS = new Set<string>(APP_READS), OWNER = new Set<string>(APP_OWNER), PAYOUT = new Set<string>(APP_PAYOUT),
+  TREASURY = new Set<string>(APP_TREASURY), TREASURY_EXECUTE = new Set<string>(APP_TREASURY_EXECUTE);
 /** Whether consent scopes cover a procedure (the gateway also requires the owner's own access to it). */
 export const appScopesCover = (scopes: readonly AppScope[], path: string) =>
-  (scopes.includes("read") && READS.has(path)) || (scopes.includes("owner") && OWNER.has(path)) || (scopes.includes("payout") && PAYOUT.has(path));
+  (scopes.includes("read") && READS.has(path)) || (scopes.includes("owner") && OWNER.has(path)) || (scopes.includes("payout") && PAYOUT.has(path))
+  || (scopes.includes("treasury") && TREASURY.has(path))
+  || (scopes.includes("treasury") && scopes.includes("treasury-execute") && TREASURY_EXECUTE.has(path));
 
 /**
  * What the app may ask an owner to sign. The app chooses what it asks for, but never what the owner reads: a prepared

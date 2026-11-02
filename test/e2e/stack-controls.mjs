@@ -58,6 +58,15 @@ export function stackControls(stack, { owner }) {
     if (agent === 'portfolio') return portfolio();
     throw new Error('agent is "payout" or "portfolio"');
   };
+  const answered = result => { if (!result.ok) throw new Error(`${result.kind}: ${result.message ?? ''}`); return result.value; };
+  /** `portfolio`'s owner signed in with the fixture key, through the SDK's own client (TypeScript sources load through tsx). */
+  const ownerTreasury = async () => {
+    portfolio();
+    const { ownerClient } = await tsImport('../../src/contract/owner-client.ts', import.meta.url);
+    const cookie = await session(stack, owner), send = stackFetch(stack);
+    return ownerClient({ base: `${stack.dashboard}/a/portfolio`, fetch: (url, init = {}) =>
+      send(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), cookie, origin: stack.dashboard } }) });
+  };
   return {
     fund: ({ agent, amount }) => simulated.fund(agent, amount),
     settle: ({ correlation }) => simulated.settle(correlation),
@@ -71,6 +80,8 @@ export function stackControls(stack, { owner }) {
       if (!Number.isInteger(after) || after < 1) throw new Error('after is a positive whole number');
       portfolio().dropSwapResponse(after);
     },
+    /** A listed token's price moves (whole dollars): every later quote and valuation uses it. */
+    setPrice: ({ asset, price }) => portfolio().setPrice(asset, price),
     /** Funds arriving on `portfolio`'s public balance outside a confidential deposit (raw units): what a sweep shields. */
     fundPublic: ({ asset, amount }) => portfolio().fundPublic(asset, amount),
     /**
@@ -78,18 +89,31 @@ export function stackControls(stack, { owner }) {
      * and any other strategy fields given, the rest kept. Saving turns autopilot off. Answers the saved strategy and digest.
      */
     setTargets: async ({ targetBps, ...settings }) => {
-      portfolio();
       if (typeof targetBps !== 'object' || targetBps === null) throw new Error('Give targetBps');
-      // The SDK's own client: stack.mjs runs on plain Node, so its TypeScript sources load through tsx.
-      const { ownerClient } = await tsImport('../../src/contract/owner-client.ts', import.meta.url);
-      const cookie = await session(stack, owner), send = stackFetch(stack);
-      const treasury = ownerClient({ base: `${stack.dashboard}/a/portfolio`, fetch: (url, init = {}) =>
-        send(url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), cookie, origin: stack.dashboard } }) });
-      const answered = result => { if (!result.ok) throw new Error(`${result.kind}: ${result.message ?? ''}`); return result.value; };
+      const treasury = await ownerTreasury();
       const current = answered(await treasury.call('strategy/get'));
       answered(await treasury.call('strategy/save', { strategy: { ...current.strategy, ...settings, targetBps }, expectedDigest: current.digest }));
       const saved = answered(await treasury.call('strategy/get'));
       return { strategy: saved.strategy, digest: saved.digest };
+    },
+    /**
+     * The owner reviews `portfolio`'s saved strategy and signs a grant bound to it (`treasury:<suffix>`), through its own
+     * route, with the fixture key: what an app's or a machine credential's plans need before they execute. Answers the
+     * digest the grant binds.
+     */
+    authorizeStrategy: async () => {
+      const treasury = await ownerTreasury();
+      const { digest } = answered(await treasury.call('strategy/get'));
+      const prepared = answered(await treasury.call('owner/prepare', { action: { type: 'grant_issue', label: 'treasury', expectedStrategyDigest: digest }, signer: 'wallet' }));
+      const { publicKey, signature } = await sign(owner, prepared.intent.payload);
+      answered(await treasury.call('owner/submit', { correlationId: prepared.correlationId,
+        signedData: { ...prepared.intent, public_key: publicKey, signature } }));
+      for (const deadline = Date.now() + 30_000; Date.now() < deadline; await new Promise(r => setTimeout(r, 250))) {
+        const { status } = answered(await treasury.call('owner/status', { correlationId: prepared.correlationId }));
+        if (status === 'SUCCESS') return { digest };
+        if (status === 'FAILED') throw new Error('The strategy grant failed');
+      }
+      throw new Error('The strategy grant did not settle');
     },
     /**
      * The owner's NEP-413 signature over a text an app asked for: a consent, a setup, or a prepared intent's `payload`.

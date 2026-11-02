@@ -14,7 +14,7 @@ Preserve the complete state when moving an executor. This is the canonical list;
 `scripts/check-shared-image.mjs` and `docs/agent-access-release.md` repeat it, and `test/state-directories.test.ts`
 keeps them equal:
 <!-- state-directories -->
-`.ops/`, `.invoices/`, `.owner-intents/`, `.strategy/`, `.plans/`, `.evidence/`, `.inbox/`, `.agreements/`, `.notify/`, `.work-orders/`, `.hosted/`, `.agent-connections/`, `.machine-auth/`, `.app-access/`, and any legacy `.intake/` files
+`.ops/`, `.invoices/`, `.owner-intents/`, `.strategy/`, `.plans/`, `.evidence/`, `.inbox/`, `.agreements/`, `.notify/`, `.work-orders/`, `.hosted/`, `.agent-connections/`, `.machine-auth/`, `.app-access/`, `.proposals/`, and any legacy `.intake/` files
 <!-- /state-directories -->
 plus each instance's settings file. `.ops/` also holds each executor's `<agent>.submission-evidence.ndjson` (provider answers to failed sends; evidence only, never read to decide a send). `.invoices/` includes its SQLite journals and the compensation store
 (`<agent>.compensation.sqlite`); `.notify/` records which alerts were sent (losing it re-sends them); `.agent-connections/`
@@ -24,7 +24,9 @@ never delete: losing one lets that consent be stored again), held confirm-page a
 named by its token's hash, and a `.claim` file once a submission was made; an older build ignores them) and the access log; run `pnpm app-credential check-keys`
 on a schedule so a removed owner key ends its consents even when no call observes it. Consents belong to the deployment
 name: a credential issued under an existing deployment name acts on all of its consents, so use a new name for an
-app that shouldn't inherit them; `.hosted/` the hosted agent registry. Stop writers before copying state; never start the destination before stopping the
+app that shouldn't inherit them; `.hosted/` the hosted agent registry; `.proposals/` holds Treasury proposals (each proposal, the
+owner's approval, and one final record: claimed for execution with its plan, or closed; never delete: a lost final record
+lets an approved proposal execute again; an older build ignores the directory, and its open proposals wait unexecuted). Stop writers before copying state; never start the destination before stopping the
 source. The lease coordinates processes on one host only.
 
 ## Work-order executors
@@ -388,6 +390,42 @@ with any remaining funds under the signed policy; the consent ends when it expir
 
 Record each step's outcome in `docs/mainnet-log.md` with the date (UTC) and the deployment id; op ids, transaction
 hashes, amounts and payees go only in the private release record.
+
+### What a held swap's approval commits to (prepared, not run)
+
+User-run, on mainnet, on an isolated test agent the laptop CLI owner creates for it (as on 2026-10-13, [mainnet
+log](mainnet-log.md#isolated-test-agent-shield-and-monthly-cap-2026-10-13t0327z)), never a production, staging-hosted or
+treasury agent; never scheduled. It settles the one open question of the durable-proposals design (the workspace's
+`coordination/durable-proposals.md`, section 2a): whether a provider-held confidential swap's `request_hash` covers what
+it buys and its floor. Nothing is swapped: the held swap is rejected.
+
+Before starting: the isolated agent's policy, signed with `pnpm update-policy --policy <file>`, allows `swap`, is
+`confidential`, has `owner_approval` on, lists USDC and wNEAR in `assets`, and has per-transaction, hourly, daily and
+monthly USDC caps and a USD budget just above one tiny swap; a `treasury` grant (`pnpm issue-grant treasury`); a few
+cents of USDC deposited confidential; its own state directory, executor on, autopilot off; no other run on it.
+
+1. Read the starting state: `pnpm inspect` (policy revision, balances, grants). Record the confidential and `available`
+   USDC.
+2. Plan one USDC → wNEAR swap with the agent's own executor: `externalPlan` with a single swap of the tiny amount, then
+   `executePlan` with its id, from the owner's own session on that local executor. The swap goes through `dispatch`,
+   the journal and `authorize` like any other. Expect the plan's event to read `PENDING_APPROVAL` and the plan to stop
+   there; the journal holds the operation as held (it doesn't block sends).
+3. Read, with the provider API on the agent's directory: `getStatus` of its correlation id (`details`, `approval_id`,
+   `dispatch_committed_at` if any, `expires_at`), `getApproval` (`request_type`, `request_data`, `request_hash`,
+   `expires_at`) and `getBalances` (`balance` and `available` for USDC). Recompute sha256 of the canonical JSON of each
+   candidate shape: `{ amount, flow: "swap", kind: "confidential", min_amount_out, token, token_out }` from
+   `request_data`, the same with `chain` or `to` where present, and `{ amount_in, kind: "swap", min_out, token_in,
+   token_out }`. Record which equals `request_hash`, or that none does.
+4. Reject it: prepare an `approval_vote` with verdict `reject` for that approval and sign it as the owner (approving
+   any held swap is refused before signing). Read the status until it ends: expect `FAILED`, reason rejected, and the
+   balances unchanged.
+5. Record it in `docs/mainnet-log.md`: date (UTC), the shapes compared and which matched, whether the hash covers the
+   output asset and floor, the approval's lifetime, and whether `available` excluded the held amount. Op ids, hashes'
+   inputs, amounts and payees go only in the private release record.
+
+Stop rules: the swap reading anything but `PENDING_APPROVAL` after step 2 (a policy that didn't hold it), or an
+unknown outcome: stop, don't reject or resend, and report. Not checked by this run: what the wallet shows for a swap
+vote, and whether an approved swap is held to the floor (approving one isn't built).
 
 ### Staging withdrawals on the same test agent (run 2026-10-30: [mainnet log](mainnet-log.md#payout-withdrawals-on-platform-staging-2026-10-30-utc))
 

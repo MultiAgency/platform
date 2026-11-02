@@ -2,12 +2,14 @@ import { z } from "zod";
 
 /**
  * An agent owner's consent for one app deployment to act for one Organization on one agent: `read` for the listed
- * reads, `owner` to prepare and submit owner actions that only the owner's own wallet signature completes.
+ * reads, `owner` to prepare and submit owner actions that only the owner's own wallet signature completes, `payout` for
+ * payout requests, `treasury` for Treasury reads, settings and proposals the owner approves later, and
+ * `treasury-execute` (only with `treasury`) to prepare and execute plans within the policy without a signature per swap.
  * The owner signs `consentMessage(...)` with NEP-413, recipient the platform host. The platform accepts only the exact
  * canonical text, so what was signed and what is stored are the same bytes.
  */
 export const APP_CONSENT_TYPE = "multiagency.app-consent";
-export const AppScope = z.enum(["owner", "payout", "read"]);
+export const AppScope = z.enum(["owner", "payout", "read", "treasury", "treasury-execute"]);
 export type AppScope = z.infer<typeof AppScope>;
 const name = z.string().regex(/^[a-z0-9-]{1,32}$/);
 /** Stands for an agent its server reports not created yet; only the platform's setup consent carries it, never a signed text. */
@@ -23,7 +25,8 @@ export const appConsent = z.strictObject({
   agent: name,
   /** The agent's provider ID when the owner signs: a replacement agent under the same name isn't covered. */
   agentId: z.string().min(1).max(128).refine(id => id !== UNBORN_AGENT, "Not an agent ID"),
-  scopes: z.array(AppScope).min(1).refine(values => new Set(values).size === values.length, "Scopes must be distinct"),
+  scopes: z.array(AppScope).min(1).refine(values => new Set(values).size === values.length, "Scopes must be distinct")
+    .refine(values => !values.includes("treasury-execute") || values.includes("treasury"), "treasury-execute needs treasury"),
   expiresAt: z.iso.datetime(),
 });
 export type AppConsent = z.output<typeof appConsent>;

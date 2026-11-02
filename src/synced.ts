@@ -1,4 +1,4 @@
-import { closeSync, mkdirSync, fstatSync, fsyncSync, openSync, readSync, statSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, linkSync, mkdirSync, fstatSync, fsyncSync, openSync, readSync, statSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 /** Persist one directory entry; filesystem sync failures propagate. */
@@ -26,6 +26,22 @@ export function claimSynced(path: string): boolean {
     throw error;
   }
   try { fsyncSync(fd); } finally { closeSync(fd); }
+  syncParent(path);
+  return true;
+}
+
+/**
+ * Creates a file once, whole and durable: written beside it, then linked into place, which fails if the file exists.
+ * Never a partial file, never a second writer's. False when it already exists.
+ */
+export function createOnce(path: string, text: string): boolean {
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, text, { flush: true });
+  try { linkSync(tmp, path); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  } finally { rmSync(tmp, { force: true }); }
   syncParent(path);
   return true;
 }

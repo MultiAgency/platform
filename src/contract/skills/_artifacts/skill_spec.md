@@ -10,6 +10,7 @@ links to them instead of copying schemas. Skills grant no authority.
 | getting-started | access | Choose owner or payee client; identities and server enforcement; result kinds; supported surface |
 | owner-workflows | owner | Owner reads, owner-signed actions, plan streams, recovery without resending |
 | app-server | app | An app server's credential, owner consents, relayed owner actions, payout requests by requestId |
+| treasury-app | app | Treasury proposals by requestId, the owner's signed approval text, one execution with recovery by state |
 | payee-workflows | payee | Reports, lost-reply recovery by id, payment status, agent connections |
 
 ## Decisions
@@ -27,4 +28,5 @@ links to them instead of copying schemas. Skills grant no authority.
 - 2026-10-27, version 0.3.0 (unreleased): app-server relays votes on held payouts and shows the prepared vote's proven terms; owner actions come back as a NEP-413 intent or a platform confirm page link (`ownerAction` example).
 - 2026-10-26, version 0.3.0 (unreleased): app-server added (appClient, consent texts, relayed owner actions, payout requests by `requestId` with recovery by state); getting-started gains the app deployment identity and `appClient`; the others are version only. Checked as before, with each new example run against stand-ins of the app routes.
 - 2026-10-30, version 0.3.1 (unreleased): app-server states the platform host as headless (Payables setup only) and the `local_authorization_held` refusal of a vote it can't verify; the others are version only.
+- 2026-10-31, version 0.4.0 (unreleased): treasury-app added (proposals by `requestId`, `proposalText` signed by the owner, one execution with recovery by state, the `treasury` and `treasury-execute` scopes); the others are version only. Checked as before, with each new example run against stand-ins of the proposal procedures.
 - Remaining: owner access outside a browser (beyond Treasury machine credentials) is not supported, so not covered; TanStack Query integration is app-owned and not covered.

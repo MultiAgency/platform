@@ -13,6 +13,9 @@ import { closeWorkOrders, resumeWorkOrders } from "./work-order-pool.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 
+/** A gateway header (`x-gateway-*`): the gateway strips any a caller sent and sets its own. */
+const header = (req: IncomingMessage, name: string) => typeof req.headers[name] === "string" ? req.headers[name] : undefined;
+
 const handler = new RPCHandler(router);
 if (process.env.INVOICES_PORT && !process.env.AGENT_ID) throw new Error("Configure the payout agent before enabling invoices");
 // An approve-only instance (EXECUTOR=off) is not the agent's executor: no lease, and no invoice page, which sends.
@@ -69,7 +72,8 @@ async function serveDashboard(req: IncomingMessage, res: ServerResponse) {
     req.url = req.url.slice("/supplier".length);
     return (await import("./invoice-http.js")).invoiceHandler(req, res);
   }
-  const { matched } = await handler.handle(req, res, { prefix: "/rpc", context: { actor: typeof req.headers["x-gateway-actor"] === "string" ? req.headers["x-gateway-actor"] : undefined } });
+  const { matched } = await handler.handle(req, res, { prefix: "/rpc", context: { actor: header(req, "x-gateway-actor"), consent: header(req, "x-gateway-consent"), host: header(req, "x-gateway-host"),
+    consents: header(req, "x-gateway-consents")?.split(",") } });
   if (matched) return;
 
   const url = URL.parse(req.url ?? "/", "http://localhost");

@@ -10,7 +10,7 @@ metadata:
   purpose: 'An app server''s access to agents: credential, consents, relayed owner actions, and payout requests by requestId with recovery by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.3.1'
+  library_version: '0.4.0'
 requires:
   - getting-started
   - owner-workflows
@@ -25,8 +25,8 @@ sources:
 
 Read getting-started and owner-workflows first. `appClient` runs on your server with the deployment's service credential
 (`tap_…`), issued by the platform operator: a server secret, never sent to a browser. A call reaches an agent only
-under a live owner consent for that Organization and agent, and only within the consent's scopes: `read`, `owner`, and
-`payout`. No production MultiAgency host serves the `/apps/v1` routes yet; the operator runs them on a staging host for
+under a live owner consent for that Organization and agent, and only within the consent's scopes: `read`, `owner`,
+`payout`, and for Treasury `treasury` and `treasury-execute` (see treasury-app). No production MultiAgency host serves the `/apps/v1` routes yet; the operator runs them on a staging host for
 its own tests. Until a production host does, build against the SDK repository's local stack
 (`pnpm test:e2e:stack --app <deployment>`). Use only `/apps/v1` and the confirm page on the platform's host: it serves
 nothing else (no sign-in or owner page), and setup there is for Payables agents only.

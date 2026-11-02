@@ -453,6 +453,32 @@ test("a payout consent reaches payout requests, their status, held payouts and a
   assert.equal(forwarded.length, before);
 });
 
+test("a treasury consent reaches proposals, bound to that consent and host; a relayed signature must be the owner's for this host", async t => {
+  const { port, forwarded, staging, rpc, consent } = await routeHarness(t);
+  const stored = (await consent({ scopes: ["treasury"] })).body.consent;
+  const forged = { "x-gateway-consent": "f".repeat(64), "x-gateway-host": "evil.test", "x-gateway-consents": "f".repeat(64) };
+  assert.equal((await call(port, rpc("org_1", "proposals/list"), "POST", staging, { json: null }, forged)).status, 200);
+  assert.equal(forwarded.at(-1)!.headers["x-gateway-consent"], stored.id, "the consent the call came under, never the caller's");
+  assert.equal(forwarded.at(-1)!.headers["x-gateway-host"], HOST);
+  assert.equal(forwarded.at(-1)!.headers["x-gateway-consents"], stored.id, "this app's live treasury consents for the agent, never the caller's");
+  // A second consent for the same agent and Organization (a renewal): both are live, so both are named.
+  const second = (await consent({ scopes: ["treasury", "read"], expiresAt: later(120) })).body.consent;
+  assert.equal((await call(port, rpc("org_1", "proposals/list"), "POST", staging, { json: null })).status, 200);
+  assert.deepEqual(String(forwarded.at(-1)!.headers["x-gateway-consents"]).split(",").sort(), [stored.id, second.id].sort());
+  assert.equal((await call(port, rpc("org_1", "strategy/get"), "POST", staging, { json: null }, forged)).status, 200);
+  assert.equal(forwarded.at(-1)!.headers["x-gateway-consent"], undefined, "only proposal calls carry it");
+  for (const procedure of ["executePlan", "externalPlan", "rebalance", "pay", "payouts/request", "autopilot/tick", "treasury/link"])
+    assert.equal((await call(port, rpc("org_1", procedure), "POST", staging, {})).status, 403, `${procedure}: treasury alone doesn't reach it`);
+  const before = forwarded.length;
+  const relay = async (recipient: string) => call(port, rpc("org_1", "proposals/approve"), "POST", staging, { json: { id: "a".repeat(32), signed: await signed("text", "owner.near", recipient) } });
+  assert.equal((await relay("other.test")).status, 400, "signed for another host");
+  assert.equal(forwarded.length, before, "nothing forwarded");
+  assert.equal((await relay(HOST)).status, 200);
+  assert.equal(forwarded.at(-1)!.path, "/rpc/proposals/approve");
+  assert.equal((await consent({ organization: "org_2", scopes: ["treasury", "treasury-execute"] })).status, 201);
+  assert.equal((await call(port, rpc("org_2", "executePlan"), "POST", staging, { json: { planId: "00000000-0000-0000-0000-000000000000" } })).status, 200);
+});
+
 test("an unanswered ownership or key check is 503, never a refusal that would ask the owner to sign again", async t => {
   const { port, state, forwarded, staging, rpc, consent } = await routeHarness(t);
   assert.equal((await consent({ scopes: ["read"] })).status, 201);

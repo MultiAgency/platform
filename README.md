@@ -265,6 +265,13 @@ of maintaining separate requirement statuses.
   another signature. See [agent access](docs/agent-access.md#app-access-server-to-server). An app service
   credential is a bearer: whoever holds it acts within the consents owners gave that deployment until it expires or is
   revoked. See [agent access](docs/agent-access.md#app-access-server-to-server).
+- Treasury proposals through apps (`treasury` scope; `treasury-execute` for plans without a signature per swap) are
+  offline-tested (`test/treasury-proposals.test.ts`, `test/app-access.test.ts`) and stack-tested on the stack's own
+  Treasury agent (`test/e2e/stack-app.spec.mjs`), not deployed or mainnet-observed; the platform host doesn't set up
+  Treasury agents yet. The owner's approval of a proposal is
+  enforced by the platform, not the provider: whoever holds the agent's treasury grant can still swap within the policy
+  without it. What a provider-held swap's vote commits to is unobserved, so held swaps are not used
+  ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
 - A provider failure while preparing an owner action is reported as `unknown`: after a mutation, only a proven refusal
   keeps its code for the caller (`src/rpc/base.ts`). Preparing signs and sends nothing, so nothing moved; retrying
   prepares a new intent. Seen on staging 2026-10-30: an `owner_approval` edit failed once this way and succeeded on

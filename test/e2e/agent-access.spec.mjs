@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { request as httpsRequest } from 'node:https';
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { offlineEnvironment } from '../../scripts/test-environment.mjs';
 import { createORPCClient } from '@orpc/client';
 import { RPCLink } from '@orpc/client/fetch';
-import { environment } from './environment.mjs';
+import { environment, strategyFixture } from './environment.mjs';
 import { browserContext } from './wallet.mjs';
 import { PAYEE } from './provider.mjs';
 
@@ -43,12 +43,12 @@ test('shared consent issues once, machine calls stay guarded, and outage revocat
     // Outside the credential's scopes: the gateway's plain route refusal (403, surfaced as oRPC's malformed response).
     await expect(client.sweep({})).rejects.toMatchObject({ response: { status: 403 } });
     await expect(client.autopilot.tick()).rejects.toMatchObject({ response: { status: 403 } });
-    // Offline owner-strategy fixture: one supported swap, autopilot ceiling remains zero.
-    const strategyDir = join(stack.directory, 'portfolio/.strategy'); mkdirSync(strategyDir, { recursive: true });
-    writeFileSync(join(strategyDir, '.env.json'), JSON.stringify({ targetBps: {
+    // Offline owner-strategy fixture: one supported swap, autopilot ceiling remains zero; not yet authorized.
+    const strategy = { targetBps: {
       'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1': 7500,
       'nep141:wrap.near': 2500, 'nep141:eth.omft.near': 0 }, minLegUsd: 2, maxCostBps: 250,
-      autopilot: { everyMin: 60, maxUsd: 0 } }));
+      autopilot: { everyMin: 60, maxUsd: 0 } };
+    await strategyFixture(stack, strategy, { authorized: false });
     const swaps = [{ from: 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1',
       to: 'nep141:wrap.near', amount: '3000000' }];
     swaps.push({ ...swaps[0], amount: '2000000' });
@@ -61,6 +61,11 @@ test('shared consent issues once, machine calls stay guarded, and outage revocat
           TREASURY_URL: stack.dashboard, TREASURY_NAME: 'portfolio', TREASURY_MACHINE_TOKEN: token }, timeout: 30_000 });
       expect(result.stderr).toBe(''); return result.stdout.trim().split('\n').map(line => JSON.parse(line));
     };
+    // A machine credential's plan runs only under a grant binding the saved strategy.
+    const unbound = []; for await (const event of await client.executePlan({ planId: (await client.externalPlan({ swaps })).id })) unbound.push(event);
+    expect(unbound).toEqual([{ type: 'rejected', problems: [expect.stringMatching(/grant doesn't bind the saved strategy/)] }]);
+    expect(stack.portfolio.swaps).toHaveLength(0);
+    await strategyFixture(stack, strategy);
     const plan = skill ? (await helper('prepare', swapsFile))[0] : await client.externalPlan({ swaps });
     expect(plan.source).toBe('external');
     expect(plan.actions.map(({ from, to, amount }) => ({ from, to, amount }))).toEqual(swaps);

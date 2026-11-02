@@ -15,7 +15,7 @@ export type Snapshot = {
 };
 
 /** What proposed the plan; its actions are logged under this kind. */
-export type PlanSource = "steward" | "rebalance" | "external";
+export type PlanSource = "steward" | "rebalance" | "external" | "proposal";
 
 export type Plan = Snapshot & {
   id: string;
@@ -24,4 +24,6 @@ export type Plan = Snapshot & {
   expiresAt: string;
   instruction: string;
   actions: PlannedAction[];
+  /** The owner-approved proposal this plan executes: it runs only as that proposal (src/proposals/service.ts). */
+  proposalId?: string;
 };

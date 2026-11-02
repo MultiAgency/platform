@@ -3,7 +3,7 @@ import type { Holding } from "../holdings.js";
 import { acquireMoneyLock } from "../lock.js";
 import { usdValue } from "../value.js";
 import { blockingWarnings, executeLeg, quoteLeg, warnedReason } from "../treasury.js";
-import type { PlannedAction } from "./model.js";
+import type { Plan, PlannedAction } from "./model.js";
 import { loadPlan, claimPlan } from "./store.js";
 import { observe } from "./observation.js";
 import { checkPlan, feasibility } from "./checks.js";
@@ -31,13 +31,28 @@ const legFor = (book: Holding[], action: Extract<PlannedAction, { type: "swap" }
   return { from, to, amount, usd: usdValue(amount, from.decimals, from.price) };
 };
 
+/** The state read under the lock that a pre-claim check may judge. */
+export type Observed = Awaited<ReturnType<typeof observe>>;
+/**
+ * `beforeClaim`: a caller's own checks, run under the money lock after every check of the plan and immediately before
+ * its claim; any problem rejects the plan with nothing claimed or sent. `proposal`: the proposal this plan executes;
+ * a plan made for a proposal runs only with it, and a plan made for none never runs as one.
+ */
+export type ExecuteOptions = { autopilot?: boolean; onSubmitted?: Sending["onSubmitted"]; proposal?: string;
+  beforeClaim?: (plan: Plan, live: Observed) => Promise<string[]> };
+
 /** Executes a saved plan exactly as previewed, under the money lock, or says why it can't. */
-export async function* executePlan(id: string, now = () => new Date(), { autopilot = false, onSubmitted }: { autopilot?: boolean; onSubmitted?: Sending["onSubmitted"] } = {}): AsyncGenerator<PlanEvent> {
+export async function* executePlan(id: string, now = () => new Date(), { autopilot = false, onSubmitted, proposal, beforeClaim }: ExecuteOptions = {}): AsyncGenerator<PlanEvent> {
   const plan = loadPlan(id);
+  if (plan.proposalId !== proposal) {
+    yield { type: "rejected", problems: [plan.proposalId ? "this plan executes an owner-approved proposal: execute the proposal" : "this plan is not the proposal's"] };
+    return;
+  }
   const lock = await acquireMoneyLock();
   try {
     // Fresh state, read under the lock so nothing else can move it before we act.
-    const { snapshot: live, book, assets } = await observe();
+    const observed = await observe();
+    const { snapshot: live, book, assets } = observed;
     const invalid = feasibility(plan.actions, live.balances);
     if (invalid.length) { yield { type: "rejected", problems: invalid }; return; }
     // Fresh quotes, under the lock: a leg the provider now warns about is rejected before the plan is claimed.
@@ -50,6 +65,8 @@ export async function* executePlan(id: string, now = () => new Date(), { autopil
       yield { type: "rejected", problems };
       return;
     }
+    const owed = beforeClaim ? await beforeClaim(plan, observed) : [];
+    if (owed.length > 0) { yield { type: "rejected", problems: owed }; return; }
 
     // Claimed before the first action: a plan runs at most once, even if it stops partway.
     if (!claimPlan(id)) {

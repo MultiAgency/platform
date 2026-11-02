@@ -15,6 +15,8 @@ export const ownerCapabilities = {
   "treasury-observe-v1": { routes: [], procedures: ["strategy/get", "autopilot/evidence", "autopilot/log", "ledger", "ledgerCsv", "reconcileBooks"] },
   "treasury-strategy-v1": { routes: [], procedures: ["strategy/save", "autopilot/set", "autopilot/enable", "autopilot/tick"] },
   "treasury-plans-v1": { routes: [], procedures: ["rebalance", "externalPlan", "executePlan", "steward/propose"] },
+  /** Proposals an app makes and the owner approves later (coordination/durable-proposals.md); the agent answers apps only. */
+  "treasury-proposals-v1": { routes: [], procedures: ["proposals/create", "proposals/get", "proposals/list", "proposals/approve", "proposals/reject", "proposals/withdraw", "proposals/execute"] },
   "treasury-recovery-v1": { routes: [], procedures: ["recover"] },
   "payables-payments-v1": { routes: [], procedures: ["pay", "paymentHistory", "paymentStatus", "invoices", "cancelPreparedInvoice", "ledger", "ledgerCsv", "reconcileBooks"] },
   "payables-payout-requests-v1": { routes: [], procedures: ["payouts/request", "payouts/status"] },

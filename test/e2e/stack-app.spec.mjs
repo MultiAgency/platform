@@ -6,6 +6,7 @@ import { request as httpsRequest } from 'node:https';
 import { join } from 'node:path';
 import { appClient } from '../../src/contract/app-client.ts';
 import { setupMessage, consentMessage } from '../../src/contract/app-consent.ts';
+import { proposalText } from '../../src/contract/treasury-proposals.ts';
 import { ownerClient } from '../../src/contract/owner-client.ts';
 import { OWNER, PAYEE, PUBLIC_KEY, USDC } from './provider.mjs';
 
@@ -127,6 +128,94 @@ test('a separate app server runs a held payout and a Treasury machine read on th
   });
 });
 
+// Treasury proposals through an app, on the stack's own Treasury agent: the owner consents with `treasury`, approves a
+// proposal's exact text through the signOwner control, and a price move below the signed floor refuses execution with
+// nothing claimed until the price recovers; a lost swap reply reads `unknown` and is never resent.
+test('an app proposes Treasury swaps, the owner approves the exact text, and each proposal executes at most once', async ({}, info) => {
+  test.setTimeout(240_000);
+  await withStack(info, ['--no-browser', '--treasury', '--app', 'dao-local'], async (directory, state) => {
+    const { dashboard, app: appState, treasury } = state(), host = new URL(dashboard).host;
+    const fetch = stackFetch(directory), control = controlFiles(directory);
+    const app = appClient({ base: dashboard, credential: readFileSync(appState.credentialFile, 'utf8'), fetch });
+    const ownerSigned = async message => {
+      const nonce = randomBytes(32).toString('base64'), answer = await control('signOwner', { message, recipient: host, nonce });
+      if (!answer.ok) throw new Error(answer.error);
+      return { message, nonce, publicKey: answer.value.publicKey, signature: answer.value.signature };
+    };
+    const WNEAR = 'nep141:wrap.near';
+    value(await app.consents.submit(await ownerSigned(consentMessage({ host, deployment: 'dao-local', organization: 'org_1', owner: OWNER,
+      agent: 'portfolio', agentId: treasury.agentId, scopes: ['read', 'treasury'], expiresAt: later(90) }))));
+    const agent = app.agent('org_1', 'portfolio');
+    // A stream reaches the app through /apps/v1: a dry sweep lists what is public.
+    const sweep = agent.stream('sweep', { execute: false }), events = [];
+    for (let next = await sweep.next(); !next.done; next = await sweep.next()) events.push(next.value);
+    expect(events, 'a dry sweep streams its plan').toEqual([{ type: 'plan', exposed: [] }]);
+    const ask = (requestId, amount = '1000000') => ({ requestId, legs: [{ from: USDC, to: WNEAR, amount }], expiresAt: later(2) });
+    const approve = async proposal => value(await agent.call('proposals/approve', { id: proposal.id, signed: await ownerSigned(proposalText(proposal, 'approve')) }));
+    const swapped = async () => value(await agent.call("activity")).filter(op => op.kind === "proposal");
+
+    const first = ask('p-1'), proposal = value(await agent.call('proposals/create', first));
+    expect(proposal).toMatchObject({ state: 'proposed', deployment: 'dao-local', organization: 'org_1', agentId: treasury.agentId });
+    expect(proposal.legs).toEqual([{ from: USDC, to: WNEAR, amount: '1000000', minAmountOut: '499500000000000000000000' }]);
+    expect(value(await agent.call('proposals/create', first)).id, 'asked again, the same proposal').toBe(proposal.id);
+    expect(await agent.call('proposals/execute', { id: proposal.id }), 'not approved').toMatchObject({ ok: false, kind: 'refused', code: 'not_approved' });
+    expect(await agent.call('executePlan', { planId: '00000000-0000-0000-0000-000000000000' }), 'treasury alone executes no plan')
+      .toMatchObject({ ok: false, kind: 'forbidden' });
+    expect((await approve(proposal)).state).toBe('approved');
+
+    // wNEAR's price rises: the swap would return less than the signed floor, so nothing is claimed or sent.
+    expect(await control('setPrice', { asset: WNEAR, price: 3 })).toEqual({ ok: true });
+    expect(await agent.call('proposals/execute', { id: proposal.id })).toMatchObject({ ok: false, kind: 'refused', code: 'not_executable' });
+    expect(value(await agent.call('proposals/get', { id: proposal.id })).state, 'still approved').toBe('approved');
+    expect(await control('setPrice', { asset: WNEAR, price: 2 })).toEqual({ ok: true });
+    const done = value(await agent.call('proposals/execute', { id: proposal.id }));
+    expect(done).toMatchObject({ state: 'executed', operations: [expect.objectContaining({ method: 'swap', status: 'SUCCESS' })] });
+    expect(value(await agent.call('proposals/execute', { id: proposal.id })).state, 'asked again, nothing is sent').toBe('executed');
+
+    // The owner's signed rejection ends another proposal before it runs.
+    const rejected = value(await agent.call('proposals/create', ask('p-2')));
+    expect(value(await agent.call('proposals/reject', { id: rejected.id, signed: await ownerSigned(proposalText(rejected, 'reject')) })).state).toBe('rejected');
+    expect(value(await agent.call('proposals/execute', { id: rejected.id })).state).toBe('rejected');
+
+    // With treasury-execute, the app executes a plan under the owner's grant for this strategy; after it saves another
+    // strategy, no plan of its runs until the owner signs a grant for that one.
+    value(await app.consents.submit(await ownerSigned(consentMessage({ host, deployment: 'dao-local', organization: 'org_2', owner: OWNER,
+      agent: 'portfolio', agentId: treasury.agentId, scopes: ['owner', 'treasury', 'treasury-execute'], expiresAt: later(90) }))));
+    const executor = app.agent('org_2', 'portfolio');
+    const runPlan = async planId => { const stream = executor.stream('executePlan', { planId }), seen = [];
+      for (let next = await stream.next(); ; next = await stream.next()) { if (next.done) return { seen, failure: next.value }; seen.push(next.value); } };
+    const unboundGrant = await runPlan(value(await executor.call('externalPlan', { swaps: [{ from: USDC, to: WNEAR, amount: '1000000' }] })).id);
+    expect(unboundGrant.seen, 'a plain treasury grant binds no strategy')
+      .toEqual([{ type: 'rejected', problems: [expect.stringMatching(/grant doesn't bind the saved strategy/)] }]);
+    // The owner signs a grant for the saved strategy, through the app.
+    const saved = value(await executor.call('strategy/get'));
+    const grant = value(await executor.call('owner/prepare', { action: { type: 'grant_issue', label: 'treasury', expectedStrategyDigest: saved.digest }, signer: 'wallet' }));
+    const grantSigned = await control('signOwner', grant.intent.payload);
+    value(await executor.call('owner/submit', { correlationId: grant.correlationId,
+      signedData: { ...grant.intent, public_key: grantSigned.value.publicKey, signature: grantSigned.value.signature } }));
+    await expect.poll(async () => value(await executor.call('owner/status', { correlationId: grant.correlationId })).status).toBe('SUCCESS');
+    const bound = await runPlan(value(await executor.call('externalPlan', { swaps: [{ from: USDC, to: WNEAR, amount: '1000000' }] })).id);
+    expect(bound.seen.map(e => [e.type, e.status])).toEqual([['action', 'SUCCESS']]);
+    const current = value(await executor.call('strategy/get'));
+    value(await executor.call('strategy/save', { strategy: { ...current.strategy, maxCostBps: current.strategy.maxCostBps + 1 }, expectedDigest: current.digest }));
+    const unbound = await runPlan(value(await executor.call('externalPlan', { swaps: [{ from: USDC, to: WNEAR, amount: '1000000' }] })).id);
+    expect(unbound.seen).toEqual([{ type: 'rejected', problems: [expect.stringMatching(/grant doesn't bind the saved strategy/)] }]);
+
+    // A lost swap reply: the outcome is unknown, the agent's sends are blocked, and the proposal is never resent.
+    // The strategy changed above, so this proposal is made and approved under the new one.
+    const lost = value(await agent.call('proposals/create', ask('p-3')));
+    await approve(lost);
+    expect(await control('dropSwapResponse', { after: 1 })).toEqual({ ok: true });
+    expect(await agent.call('proposals/execute', { id: lost.id })).toMatchObject({ ok: false, kind: 'unknown' });
+    expect(value(await agent.call('proposals/get', { id: lost.id })).state).toBe('unknown');
+    expect(value(await agent.call('proposals/execute', { id: lost.id })).state).toBe('unknown');
+    expect(value(await agent.call('proposals/list')).proposals.map(p => [p.requestId, p.state]).sort())
+      .toEqual([['p-1', 'executed'], ['p-2', 'rejected'], ['p-3', 'unknown']]);
+    const swaps = (await swapped()).length;
+    expect(swaps, 'one swap for p-1, one for p-3, none twice').toBe(2);
+  });
+});
+
 // The Treasury agent's own controls, as the treasury app drives them: targets saved through the owner's strategy/save,
 // a public balance to sweep, swaps between every listed pair, an outage and a lost swap reply on `portfolio` only.
 test('the stack controls the Treasury agent: targets, a public balance, every pair, an outage and a lost swap reply', async ({}, info) => {
@@ -157,6 +246,12 @@ test('the stack controls the Treasury agent: targets, a public balance, every pa
     expect(swept.failure).toBeUndefined();
     expect(swept.events.filter(e => e.type === 'shield')).toEqual([expect.objectContaining({ asset: WNEAR, status: 'SUCCESS' })]);
     expect((await run('sweep', { execute: false })).events[0].exposed, 'nothing left public').toEqual([]);
+
+    // A machine credential's plan runs only under the owner's grant for the saved strategy, which an app may have saved.
+    const unbound = await run('executePlan', { planId: value(await machine.call('externalPlan', { swaps: [{ from: USDC, to: WNEAR, amount: '1000000' }] })).id });
+    expect(unbound.events, 'a plain treasury grant binds no strategy')
+      .toEqual([{ type: 'rejected', problems: [expect.stringMatching(/grant doesn't bind the saved strategy/)] }]);
+    expect(await control('authorizeStrategy', {})).toEqual({ ok: true, value: { digest: saved.value.digest } });
 
     // A rebalance toward the saved targets swaps USDC into both wNEAR and ETH, each quoted from the listed prices.
     const planned = await run('rebalance');

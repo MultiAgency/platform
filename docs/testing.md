@@ -241,8 +241,11 @@ refreshed every 250 ms. Write `stack/controls/<name>.json` whole (write another 
 `dropTransferResponse`, `dropSignatureResponse`, `revealOwnerOutcome`, `setUnavailable` (`value`; optional `agent`:
 `payout`, the default, or `portfolio`), `dropSwapResponse` (`portfolio` applies its next swap, or the `after`-th, and
 loses the reply: an `unknown` outcome), `fundPublic` (`asset`, raw `amount`: funds on `portfolio`'s public balance, which
-a sweep shields), `setTargets` (`targetBps` and any other strategy fields: the owner signs in with the fixture key and
-saves `portfolio`'s strategy through `strategy/save`, which turns autopilot off; answers the strategy and its digest), `signOwner`
+a sweep shields), `setPrice` (`asset`, whole-dollar `price`: a listed token's price moves for every later quote and
+valuation), `setTargets` (`targetBps` and any other strategy fields: the owner signs in with the fixture key and
+saves `portfolio`'s strategy through `strategy/save`, which turns autopilot off; answers the strategy and its digest),
+`authorizeStrategy` (the owner signs, with the fixture key and through its own route, a grant bound to the saved
+strategy, which an app's or a machine credential's plans need; answers the digest it binds), `signOwner`
 (`message`, `recipient`, `nonce`: the owner's NEP-413 signature from the fixture key, standing in for the wallet an app
 asks; never the platform sign-in text) or `machineCredential` (`scopes`, optional `label` and `ttlSeconds`: the owner
 signs in with the fixture key and issues a `portfolio` credential); its result appears as `<name>.result.json`,

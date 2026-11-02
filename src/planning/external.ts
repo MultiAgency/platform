@@ -17,16 +17,20 @@ export const ExternalPlanInput = z.strictObject({
     .refine(swap => swap.from !== swap.to, "Swap assets must differ")).min(1).max(8),
 });
 
+/** A chosen swap as `quoteChosen` takes it: raw units, an optional floor the chooser requires. */
+export type ChosenSwap = { from: string; to: string; amount: string; minAmountOut?: string };
+
 /**
- * External intelligence chooses swaps; Treasury supplies quotes and all execution constraints. Never sends. A swap it
- * won't plan is a `PublicError` (the caller reads `refused` and why); a provider failure keeps its own class.
+ * Quotes chosen swaps and checks everything a saved plan must hold (output asset, valuation, no blocking provider
+ * warning, a floor at or above the quote's and at most its output, cost within the strategy, feasibility now and against
+ * a second observation, unchanged policy and strategy), saving nothing and sending nothing. A swap it won't plan is a
+ * `PublicError`; a provider failure keeps its own class.
  */
-export async function prepareExternalPlan(input: unknown): Promise<Plan> {
-  const { swaps } = ExternalPlanInput.parse(input);
+export async function quoteChosen(swaps: ChosenSwap[]) {
   const { snapshot, book, assets } = await observe();
   const strategy = loadStrategy();
   if (strategyDigest(strategy) !== snapshot.strategyDigest) throw new PublicError("Owner strategy changed during observation");
-  const actions: PlannedAction[] = [];
+  const actions: Extract<PlannedAction, { type: "swap" }>[] = [], usdIn: number[] = [];
   for (const swap of swaps) {
     if (!mayBuy(assets, swap.to)) throw new PublicError("Swap output is outside the policy's assets");
     const from = book.find(h => h.asset === swap.from)!;
@@ -45,14 +49,22 @@ export async function prepareExternalPlan(input: unknown): Promise<Plan> {
     if (!Number.isFinite(quote.worstCostBps) || quote.worstCostBps > strategy.maxCostBps) throw new PublicError("Quote exceeds the owner's cost limit");
     actions.push({ type: "swap", from: swap.from, to: swap.to, amount: swap.amount,
       amountOut: quote.amountOut, minAmountOut: floor, costBps: quote.costBps });
+    usdIn.push(usd);
   }
   const live = await observe();
   const now = new Date();
-  const draft: Plan = { ...snapshot, id: "", source: "external", instruction: "External agent's chosen swaps",
+  const draft: Plan = { ...snapshot, id: "", source: "external", instruction: "",
     createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + 300_000).toISOString(), actions };
   const problems = [...feasibility(actions, snapshot.balances), ...feasibility(actions, live.snapshot.balances),
     ...checkPlan(draft, { ...live.snapshot, now, assets: live.assets,
-      quotes: actions.map(action => action.type === "swap" ? action.amountOut : "") })];
+      quotes: actions.map(action => action.amountOut) })];
   if (problems.length) throw new PublicError(problems.join("; "));
-  return savePlan(snapshot, "external", draft.instruction, actions, now);
+  return { snapshot, actions, usdIn, now };
+}
+
+/** External intelligence chooses swaps; Treasury supplies quotes and all execution constraints. Never sends. */
+export async function prepareExternalPlan(input: unknown): Promise<Plan> {
+  const { swaps } = ExternalPlanInput.parse(input);
+  const { snapshot, actions, now } = await quoteChosen(swaps);
+  return savePlan(snapshot, "external", "External agent's chosen swaps", actions, now);
 }

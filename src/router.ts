@@ -5,6 +5,7 @@ import { treasuryRoutes } from "./rpc/treasury.js";
 import { observationsRoutes } from "./rpc/observations.js";
 import { workOrderRoutes } from "./rpc/work-orders.js";
 import { demoGuideRoutes } from "./rpc/demo-guide.js";
+import { proposalRoutes } from "./rpc/proposals.js";
 
 /** Public procedure names stay stable; each module owns one responsibility. */
 export const router = {
@@ -15,6 +16,7 @@ export const router = {
   ...observationsRoutes,
   ...workOrderRoutes,
   ...demoGuideRoutes,
+  ...proposalRoutes,
 };
 
 export type Router = typeof router;

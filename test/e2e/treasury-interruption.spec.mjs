@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { offlineEnvironment } from '../../scripts/test-environment.mjs';
-import { environment } from './environment.mjs';
+import { environment, strategyFixture } from './environment.mjs';
 import { browserContext } from './wallet.mjs';
 import { PAYEE, USDC } from './provider.mjs';
 
@@ -42,10 +42,8 @@ for (const fault of ['lost provider response', 'lost second response after first
         expect(result.stderr).not.toContain(token);
         return result;
       };
-      const strategy = join(stack.directory, 'portfolio/.strategy'); mkdirSync(strategy, { recursive: true });
-      writeFileSync(join(strategy, '.env.json'), JSON.stringify({ targetBps: { [USDC]: 7500,
-        'nep141:wrap.near': 2500, 'nep141:eth.omft.near': 0 }, minLegUsd: 2, maxCostBps: 250,
-        autopilot: { everyMin: 60, maxUsd: 0 } }));
+      await strategyFixture(stack, { targetBps: { [USDC]: 7500, 'nep141:wrap.near': 2500, 'nep141:eth.omft.near': 0 },
+        minLegUsd: 2, maxCostBps: 250, autopilot: { everyMin: 60, maxUsd: 0 } });
       const swaps = ['3000000', '2000000'].map(amount => ({ from: USDC, to: 'nep141:wrap.near', amount }));
       const file = join(stack.directory, 'swaps.json'); writeFileSync(file, JSON.stringify({ swaps }));
       const prepared = await run('prepare', file); expect(prepared.code).toBe(0);

@@ -12,6 +12,7 @@ import { z } from "zod";
 import { appConfirm } from "./app-access.js";
 import { ownerCompensationView } from "../compensation-contract.js";
 import { RecordingSchema } from "./run-log-schema.js";
+import { proposalList, proposalView } from "./treasury-proposals.js";
 // Server modules with filesystem, crypto or AG-UI dependencies stay out of this browser-safe package: their shapes are
 // restated here, and test/contract-owner.test.ts proves every handler output is accepted by these schemas.
 
@@ -158,7 +159,7 @@ const plannedAction = z.discriminatedUnion("type", [
 /** planning/model.ts Plan. */
 const plan = z.looseObject({
   id: z.string(),
-  source: z.enum(["steward", "rebalance", "external"]),
+  source: z.enum(["steward", "rebalance", "external", "proposal"]),
   createdAt: z.string(),
   expiresAt: z.string(),
   instruction: z.string(),
@@ -168,6 +169,7 @@ const plan = z.looseObject({
   policyDigest: z.string().nullable(),
   strategyDigest: z.string(),
   balances: z.record(z.string(), z.looseObject({ public: z.string(), confidential: z.string() })),
+  proposalId: z.string().optional(),
 });
 /** holdings.ts Holding. serializer: `public` and `confidential` are bigint. */
 const holding = z.looseObject({
@@ -757,6 +759,13 @@ export const ownerOutputs = {
   "executePlan": executePlanEvent,
   "sweep": sweepEvent,
   "steward/propose": stewardProposeEvent,
+  "proposals/create": proposalView,
+  "proposals/get": proposalView,
+  "proposals/list": proposalList,
+  "proposals/approve": proposalView,
+  "proposals/reject": proposalView,
+  "proposals/withdraw": proposalView,
+  "proposals/execute": proposalView,
 } as const;
 
 /** Procedures whose output is an event stream: `ownerOutputs` holds the schema of one yielded event. */

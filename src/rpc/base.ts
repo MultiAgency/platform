@@ -8,6 +8,9 @@ import { MoneyLockBusy, UnresolvedOperations } from "../lock.js";
 import { WorkOrderRefusal } from "../work-order-protocol.js";
 import { AuthorizationHeld, provenRefusal } from "../ops.js";
 import { READS } from "../contract/permissions.js";
+
+/** What the gateway says about a call (`x-gateway-*` headers, which it strips from every request it forwards). */
+export type CallContext = { actor?: string; consent?: string; host?: string; consents?: string[] };
 /**
  * Only explicitly constructed ORPCErrors/PublicErrors are public application messages. Arbitrary exceptions
  * and provider detail/title text may contain credentials or private paths, even for admitted owners.
@@ -49,7 +52,7 @@ function logUnclassified(error: unknown, procedure: string) {
 }
 
 /** Converts every failure to its public form, including a stream's, which is thrown after next() resolves. */
-const clientErrors = base.$context<{ actor?: string }>().middleware(async ({ next, path }) => {
+const clientErrors = base.$context<CallContext>().middleware(async ({ next, path }) => {
   const procedure = path.join("/");
   try {
     const result = await next();
@@ -69,9 +72,9 @@ const clientErrors = base.$context<{ actor?: string }>().middleware(async ({ nex
   }
 });
 
-export const os = base.$context<{ actor?: string }>().use(clientErrors);
+export const os = base.$context<CallContext>().use(clientErrors);
 /**
  * Procedures implemented from the published owner contract. Output validation is off: oRPC would otherwise parse
  * (and strip) every answer. Reads add `readOutput` (validate only); mutations and streams are not validated here.
  */
-export const owner = implement(ownerContract).$context<{ actor?: string }>().$config({ disableOutputValidation: true }).use(clientErrors);
+export const owner = implement(ownerContract).$context<CallContext>().$config({ disableOutputValidation: true }).use(clientErrors);

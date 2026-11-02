@@ -8,6 +8,19 @@ import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import { offlineEnvironment } from '../../scripts/test-environment.mjs';
 import { provider, listen, DAO, DAO_SIGNER, OWNER, PAYEE, SECOND } from './provider.mjs';
+import { tsImport } from 'tsx/esm/api';
+
+/**
+ * Offline owner-strategy fixture for `portfolio`: the strategy written straight to its file, and, with `authorized`,
+ * the simulated grant relabelled as the owner's grant for it (`treasury:<suffix>`), which a machine credential's plans
+ * need. Stands in for the owner saving and signing through the dashboard; `authorizeStrategy` signs for real.
+ */
+export async function strategyFixture(stack, strategy, { authorized = true } = {}) {
+  const { Strategy, strategyLabelSuffix } = await tsImport('../../src/strategy-digest.ts', import.meta.url);
+  const parsed = Strategy.parse(strategy), dir = join(stack.directory, 'portfolio/.strategy');
+  mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, '.env.json'), JSON.stringify(parsed));
+  if (authorized) for (const grant of stack.portfolio.grants) { grant.label = `treasury:${strategyLabelSuffix(parsed)}`; grant.owner_message.label = grant.label; }
+}
 
 const root = resolve(import.meta.dirname, '../..');
 /** Every service the stack starts ends with whatever started it. Agent servers take it through NODE_OPTIONS, which a

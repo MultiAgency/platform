@@ -9,6 +9,7 @@ import { exportRunLog } from "../run-log-export.js";
 import { agentId, executes, saveEnv } from "../env.js";
 import { steward } from "../llm.js";
 import { executePlan } from "../plans.js";
+import { strategyGrantProblems, strategyGrantRequired } from "../planning/strategy-grant.js";
 import { ExternalPlanInput, prepareExternalPlan } from "../planning/external.js";
 import { ASSETS } from "../policy.js";
 import { PublicError } from "../public-error.js";
@@ -86,6 +87,12 @@ export const treasuryRoutes = {
       .input(z.object({ instruction: z.string().trim().max(2000).optional() }))
       .handler(({ input }) => steward({ instruction: input.instruction || undefined })),
   },
-  /** Executes a saved plan (including an external agent's chosen swaps) exactly as previewed, or refuses if anything material changed. */
-  executePlan: owner.executePlan.handler(({ input }) => executePlan(input.planId)),
+  /**
+   * Executes a saved plan (including an external agent's chosen swaps) exactly as previewed, or refuses if anything
+   * material changed. An app's call (`app:`, under `treasury-execute`) or a machine credential's (`machine:`) runs only
+   * under a grant binding the plan's strategy, checked under the lock before the claim: the owner's signature, not an
+   * app's saved settings, lets a strategy act.
+   */
+  executePlan: owner.executePlan.handler(({ input, context }) =>
+    executePlan(input.planId, undefined, strategyGrantRequired(context.actor) ? { beforeClaim: strategyGrantProblems } : {})),
 };

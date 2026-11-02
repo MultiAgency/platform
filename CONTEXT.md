@@ -364,10 +364,24 @@ that the key is a full-access key of the configured owner, binds the consent to 
 re-checks ownership and the signing key on every call: once the chain reports the key removed (on a call or the operator's
 `check-keys` sweep), the consent is revoked for good. Scopes today: `read` (a fixed list of reads; no workflow records), `owner` (prepare, submit and follow owner actions,
 which only the owner's own wallet signature completes; the app receives an intent only when it is NEP-413, and a NEP-366
-one only as a confirm page link) and `payout` (payout requests, their status, held payouts and a deposit address to fund the agent). Wallet owners
+one only as a confirm page link), `payout` (payout requests, their status, held payouts and a deposit address to fund the agent),
+`treasury` (Treasury reads, strategy settings, autopilot on and off, sweep and **Treasury proposals**) and
+`treasury-execute`, only beside `treasury` (plans prepared and executed without a signature per swap, only under a
+grant binding the plan's strategy). Wallet owners
 only; DAO consent is not available yet. Revocable by the deployment or the operator; a revocation is a permanent tombstone. Offline- and stack-tested;
 mainnet-observed on platform staging (2026-10-28); not in production. See docs/agent-access.md.
 
+
+**Treasury proposal**:
+Swaps an app proposes under its own `requestId` for the owner to approve later: at most 8, each with a floor, bound to
+the policy revision, mandate digest and strategy it was proposed under, valid at most 7 days. The owner approves by
+signing its exact text (`proposalText`, NEP-413, recipient the platform host). The app then asks for one execution:
+fresh quotes, each floor at least the signed one, a saved plan run through `executePlan` and `dispatch`; the proposal is
+claimed under the money lock after every check, immediately before the plan's claim, and never runs twice. States:
+proposed, approved, executing, executed, stopped, unknown (read from the claim and the journal), rejected, withdrawn,
+expired, invalidated (a policy, strategy or agent change). The approval is the platform's check, not the provider's.
+Offline- and stack-tested; not deployed. Not a DAO's Sputnik proposal (`/gw/proposals`).
+_Avoid_: request (for a proposal), order
 
 **Confirm page**:
 The platform's own page, `/confirm/<token>`, where an owner signs a NEP-366 owner action an app prepared. The platform

@@ -5,7 +5,7 @@ import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
-import { appClient, ownerClient } from "@multiagency/sdk";
+import { appClient, ownerClient, proposalText, type ProposalView } from "@multiagency/sdk";
 import { payeeClient } from "@multiagency/sdk/payee";
 import { owner as setupOwner } from "./examples/owner-workflows-1.ts";
 import { heldPayouts } from "./examples/owner-workflows-2.ts";
@@ -20,6 +20,8 @@ import { platformFor } from "./examples/app-server-1.ts";
 import { connect } from "./examples/app-server-2.ts";
 import { ownerAction } from "./examples/app-server-3.ts";
 import { payOnce } from "./examples/app-server-4.ts";
+import { approve, propose } from "./examples/treasury-app-1.ts";
+import { execute as executeProposal } from "./examples/treasury-app-2.ts";
 
 const listen = async (handle: (req: IncomingMessage, res: ServerResponse) => void) => {
   const server = createServer(handle);
@@ -218,7 +220,19 @@ const appSent: { path: string; authorization: string | null; body: string }[] = 
 let dropConsent = 1;
 const requested: unknown[] = [];
 const appSubmitted: unknown[] = [];
-const appRouter = { payouts: {
+const proposal: ProposalView = { id: "a".repeat(32), requestId: "p-1", agentId: "agent-1", deployment: "staging", organization: "org_1", source: "external",
+  legs: [{ from: "nep141:usdc", to: "nep141:wrap.near", amount: "1000000", minAmountOut: "1" }], quoted: [{ amountOut: "2", costBps: 0, usdIn: 1 }],
+  policyRevision: 1, policyDigest: `sha256:${"0".repeat(64)}`, strategyDigest: `sha256:${"1".repeat(64)}`, createdAt: new Date().toISOString(),
+  expiresAt: new Date(Date.now() + 86_400_000).toISOString(), note: null, sha256: "2".repeat(64), state: "proposed", reason: null, approvedAt: null,
+  planId: null, operations: [] };
+const proposalCalls: { path: string; input: unknown }[] = [];
+let dropCreate = 1, dropExecute = 1;
+const appRouter = { proposals: {
+  create: os.handler(({ input }) => { proposalCalls.push({ path: "create", input }); if (dropCreate-- > 0) throw new Error("reply lost"); return proposal; }),
+  approve: os.handler(({ input }) => { proposalCalls.push({ path: "approve", input }); return { ...proposal, state: "approved" }; }),
+  execute: os.handler(({ input }) => { proposalCalls.push({ path: "execute", input }); if (dropExecute-- > 0) throw new Error("reply lost"); return { ...proposal, state: "executed" }; }),
+  get: os.handler(({ input }) => { proposalCalls.push({ path: "get", input }); return { ...proposal, state: "executed", planId: "plan-1" }; }),
+}, payouts: {
   request: os.handler(({ input }) => { requested.push(input); throw new Error("reply lost"); }),
   status: os.handler(({ input }) => ({ requestId: (input as { requestId: string }).requestId, state: "held", status: "PENDING_APPROVAL", correlationId: "op-1", code: null })),
 }, owner: {
@@ -278,5 +292,21 @@ deepStrictEqual(payout, { ok: true, value: { requestId: "wo-1", state: "held", s
 equal(requested.length, 1, "a lost payout request is read by its requestId, never sent again");
 deepStrictEqual(appSent.filter(s => s.path.startsWith("/apps/v1/o/org_1/a/payout/rpc/payouts/")).map(s => s.path.replace("/apps/v1/o/org_1/a/payout/rpc/", "")), ["payouts/request", "payouts/status"]);
 ran.appPayout = "request sent once; its lost answer read by payouts/status";
+const request = { requestId: "p-1", legs: [{ from: "nep141:usdc", to: "nep141:wrap.near", amount: "1000000" }], expiresAt: proposal.expiresAt };
+const proposed = await propose(app, "org_1", "payout", request);
+ok(proposed.ok && proposed.value.id === proposal.id, JSON.stringify(proposed));
+deepStrictEqual(proposalCalls.splice(0).map(c => [c.path, c.input]), [["create", request], ["create", request]], "a lost answer is asked again with the same request");
+let ownerSigned = "";
+const proposalApproved = await approve(app, "org_1", "payout", "platform.test", proposal, async (message, recipient, nonce) => {
+  ownerSigned = message; equal(recipient, "platform.test"); equal(nonce.length, 32); return { publicKey: "ed25519:k", signature: "s" };
+});
+ok(proposalApproved.ok && proposalApproved.value.state === "approved", JSON.stringify(proposalApproved));
+equal(ownerSigned, proposalText(proposal, "approve"), "the owner signs exactly the platform's text");
+const relayed = proposalCalls.splice(0)[0]!.input as { id: string; signed: { message: string; nonce: string } };
+deepStrictEqual([relayed.id, relayed.signed.message, Buffer.from(relayed.signed.nonce, "base64").length], [proposal.id, ownerSigned, 32]);
+const proposalExecuted = await executeProposal(app, "org_1", "payout", proposal.id);
+ok(proposalExecuted.ok && proposalExecuted.value.state === "executed", JSON.stringify(proposalExecuted));
+deepStrictEqual(proposalCalls.splice(0).map(c => c.path), ["execute", "get"], "a lost execution answer is read, never asked again");
+ran.treasuryProposal = "created once (lost answer asked again with the same request), approved with the platform's text, executed once and read back";
 await platform.close();
 console.log(JSON.stringify(ran));
