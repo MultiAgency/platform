@@ -10,6 +10,7 @@ import { createExecutorLifecycle } from "./executor-lifecycle.js";
 import { crossSite, serveStatic } from "./http.js";
 import { resumeOwnerIntents, setAgentCreationHandler } from "./owner-intents.js";
 import { closeWorkOrders, resumeWorkOrders } from "./work-order-pool.js";
+import { listeningMessage } from "./gateway/agent-origin.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 
@@ -49,6 +50,8 @@ const dashboard = createServer(async (req, res) => {
   }
 }).listen(PORT, "127.0.0.1", () => {
   console.log(`Treasury dashboard on http://localhost:${PORT}`);
+  // The gateway that started this process reaches it only after this (src/gateway/agent-origin.ts).
+  if (process.send) { process.send(listeningMessage(PORT)); process.channel?.unref(); }
   resumeOwnerIntents();
 });
 

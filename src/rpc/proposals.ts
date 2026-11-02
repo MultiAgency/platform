@@ -3,7 +3,7 @@ import { approveProposal, createProposal, executeProposal, getProposal, listProp
 import { os } from "./base.js";
 import { readOutput } from "./read-output.js";
 
-/** Treasury proposals, through an app only (src/proposals/service.ts; coordination/durable-proposals.md). */
+/** Treasury proposals, through an app only (src/proposals/service.ts; docs/enforcement.md, "Treasury proposals"). */
 export const proposalRoutes = {
   proposals: {
     create: os.input(proposalCreateInput).handler(({ input, context }) => createProposal(context, input)),

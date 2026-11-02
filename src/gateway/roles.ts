@@ -5,6 +5,7 @@ import { z } from "zod";
 import { type DaoPolicy, daoPolicy, groupOf, permits } from "../chain.js";
 import { daoOwner } from "../dao-owner.js";
 import type { Router } from "../router.js";
+import { agentOrigin } from "./agent-origin.js";
 
 /**
  * What a signed-in account may do with each agent, read from the agent's owner itself. A Sputnik DAO's
@@ -67,7 +68,7 @@ export async function ownerOf(account: string, now = Date.now()): Promise<Owner>
   return owner;
 }
 
-type Agent = { name: string; owner: string; port: number };
+type Agent = { name: string; owner: string; port: number; envFile?: string };
 const reported = new Map<string, { owner: AgentOwner; at: number }>();
 /** One read per agent at a time: requests arriving while it's in flight share it. */
 const reading = new Map<string, Promise<AgentOwner | undefined>>();
@@ -87,8 +88,11 @@ function agentOwner(agent: Agent, now: number): Promise<AgentOwner | undefined> 
   if (hit && now - hit.at <= CACHE_MS) return Promise.resolve(hit.owner);
   const inFlight = reading.get(agent.name);
   if (inFlight) return inFlight;
+  // Its own child not listening yet: unanswered, as when the server doesn't answer.
+  let origin: string;
+  try { origin = agentOrigin(agent); } catch { return Promise.resolve(hit?.owner); }
   // Marked as the gateway's own read, apart from the calls it forwards.
-  const link = new RPCLink({ origin: `http://127.0.0.1:${agent.port}`, url: "/rpc", headers: { "x-gateway": "owner-check" } });
+  const link = new RPCLink({ origin, url: "/rpc", headers: { "x-gateway": "owner-check" } });
   const client: RouterClient<Router> = createORPCClient(link);
   const read = client.ownerIdentity(undefined, { signal: AbortSignal.timeout(3_000) })
     .then(answer => {

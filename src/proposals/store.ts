@@ -8,8 +8,8 @@ import { createOnce, mkdirSynced } from "../synced.js";
 import { proposalText, type ProposalState, type ProposalView } from "../contract/treasury-proposals.js";
 
 /**
- * Treasury proposals' records (coordination/durable-proposals.md), three files per proposal under `.proposals/`, each
- * written once, whole (`createOnce`):
+ * Treasury proposals' records (docs/enforcement.md, "Treasury proposals"), three files per proposal under
+ * `.proposals/`, each written once, whole (`createOnce`):
  * - `<id>.json`: the proposal and its sha256;
  * - `<id>.approval.json`: the owner's signature over its approval text;
  * - `<id>.final.json`: how it ended its waiting, one way only: claimed for execution (with the plan it runs, taken

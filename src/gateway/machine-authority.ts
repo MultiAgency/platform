@@ -5,7 +5,8 @@ import { z } from "zod";
 import { daoPolicy } from "../chain.js";
 import type { Router } from "../router.js";
 import { accessOf, type Access } from "./roles.js";
-type Agent = { name: string; owner: string; port: number };
+import { agentOrigin } from "./agent-origin.js";
+type Agent = { name: string; owner: string; port: number; envFile?: string };
 // Both null: a server whose agent isn't created yet. Otherwise both present.
 const identity = z.object({ agentId: z.string().min(1).nullable(), owner: z.object({ type: z.literal("near"), account_id: z.string().min(1) }).nullable() })
   .refine(value => (value.agentId === null) === (value.owner === null));
@@ -25,7 +26,7 @@ export async function resolveWalletAuthority(account: string, agent: Agent): Pro
   let answer: unknown;
   try {
     if (await daoPolicy(agent.owner)) return null;
-    const link = new RPCLink({ origin: `http://127.0.0.1:${agent.port}`, url: "/rpc", headers: { "x-gateway": "owner-check" } });
+    const link = new RPCLink({ origin: agentOrigin(agent), url: "/rpc", headers: { "x-gateway": "owner-check" } });
     const client: RouterClient<Router> = createORPCClient(link);
     answer = await client.ownerIdentity(undefined, { signal: AbortSignal.timeout(3_000) });
   } catch { throw new AuthorityUnanswered(); }

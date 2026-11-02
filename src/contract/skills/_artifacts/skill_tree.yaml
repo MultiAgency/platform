@@ -26,7 +26,7 @@ skills:
     domain: 'app'
     path: skills/treasury-app/SKILL.md
     requires: ['getting-started', 'app-server']
-    sources: ['MultiAgency/platform:src/contract/treasury-proposals.ts', 'MultiAgency/platform:src/contract/app-access.ts', 'MultiAgency/platform:src/proposals/service.ts', 'MultiAgency/platform:coordination/durable-proposals.md']
+    sources: ['MultiAgency/platform:src/contract/treasury-proposals.ts', 'MultiAgency/platform:src/contract/app-access.ts', 'MultiAgency/platform:src/proposals/service.ts', 'MultiAgency/platform:docs/enforcement.md']
   - name: 'Payee workflows'
     slug: 'payee-workflows'
     domain: 'payee'

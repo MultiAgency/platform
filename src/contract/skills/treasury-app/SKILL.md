@@ -16,7 +16,7 @@ sources:
   - 'MultiAgency/platform:src/contract/treasury-proposals.ts'
   - 'MultiAgency/platform:src/contract/app-access.ts'
   - 'MultiAgency/platform:src/proposals/service.ts'
-  - 'MultiAgency/platform:coordination/durable-proposals.md'
+  - 'MultiAgency/platform:docs/enforcement.md'
 ---
 
 # Treasury proposals from an app's server

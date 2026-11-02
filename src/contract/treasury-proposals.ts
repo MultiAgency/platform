@@ -3,10 +3,10 @@ import { ASSETS } from "./assets.js";
 import { payoutRequestId } from "./inputs.js";
 
 /**
- * Treasury proposals (coordination/durable-proposals.md): an app proposes swaps now; the owner approves their exact terms
- * later by signing `proposalText` (NEP-413, recipient the platform host); the platform executes them once, through the
- * same plan execution as any saved plan, under the owner's policy. Pure schemas and the text builder, shared by the
- * platform and apps, so an app can show and check the text it relays.
+ * Treasury proposals (docs/enforcement.md, "Treasury proposals"): an app proposes swaps now; the owner approves their
+ * exact terms later by signing `proposalText` (NEP-413, recipient the platform host); the platform executes them once,
+ * through the same plan execution as any saved plan, under the owner's policy. Pure schemas and the text builder,
+ * shared by the platform and apps, so an app can show and check the text it relays.
  */
 
 /** At most this long between proposing and expiry: Sputnik's default `proposal_period`. */

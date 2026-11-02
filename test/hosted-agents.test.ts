@@ -5,7 +5,8 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync, unlinkSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
-import { HostedAgents, authorizeSetup, hostedEnvironment } from "../src/gateway/hosted-agents.js";
+import { createServer } from "node:net";
+import { HostedAgents, authorizeSetup, boundPorts, hostedEnvironment } from "../src/gateway/hosted-agents.js";
 
 test("new owners inherit only infrastructure, never existing-owner notifications, intake or credentials", () => {
   const env = hostedEnvironment({ name: "own-test", owner: "alice.near", kind: "wallet", area: "payables", port: 9000, envFile: ".hosted/own-test.env", executor: true }, {
@@ -126,4 +127,23 @@ test("one app deployment can't take the host: its Organization agents are capped
   assert.ok(registry.reserve(input, { deployment: "production", organization: "o4" }), "another deployment still can");
   assert.ok(registry.reserve(input), "and so can self-service");
   assert.ok(registry.reserve(input, { deployment: "staging", organization: "o1" }), "an existing reservation is always found again");
+});
+
+test("a new reservation skips ports another process holds; existing reservations keep theirs", async t => {
+  const dir = mkdtempSync(join(tmpdir(), "hosted-agents-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const registry = new HostedAgents(dir, []);
+  const input = { owner: "alice.near", kind: "wallet" as const, area: "treasury" as const };
+  assert.deepEqual(registry.unreservedPorts(3), [9000, 9001, 9002]);
+  const first = registry.reserve(input, undefined, new Set([9000, 9001]));
+  assert.equal(first.port, 9002);
+  assert.deepEqual(registry.reserve(input, undefined, new Set([9002])), first, "an existing reservation is never moved");
+  assert.deepEqual(registry.unreservedPorts(2), [9000, 9001]);
+  // The probe: a port this test holds is bound; once released, it isn't.
+  const held = createServer();
+  const port = await new Promise<number>(done => held.listen(0, "127.0.0.1", () => done((held.address() as { port: number }).port)));
+  t.after(() => { if (held.listening) held.close(); });
+  assert.deepEqual([...await boundPorts([port])], [port]);
+  await new Promise(done => held.close(done));
+  assert.deepEqual([...await boundPorts([port])], []);
 });

@@ -21,10 +21,11 @@ import { claim, close, loadProposal, proposalIdOf, proposalIds, proposalState, p
   saveProposal, textOf, type ProposalRecord } from "./store.js";
 
 /**
- * Treasury proposals through an app (coordination/durable-proposals.md): the app proposes, the owner signs the exact
- * terms later, the app asks for execution. Execution saves a plan from fresh quotes and runs it through `executePlan`,
- * whose every send goes through `dispatch`; the proposal is claimed under the money lock after all checks, immediately
- * before the plan's own claim, so a refused attempt claims nothing and a claimed proposal never runs twice.
+ * Treasury proposals through an app (docs/enforcement.md, "Treasury proposals"): the app proposes, the owner signs the
+ * exact terms later, the app asks for execution. Execution saves a plan from fresh quotes and runs it through
+ * `executePlan`, whose every send goes through `dispatch`; the proposal is claimed under the money lock after all
+ * checks, immediately before the plan's own claim, so a refused attempt claims nothing and a claimed proposal never
+ * runs twice.
  */
 
 const refused = (code: string, message: string) => new ORPCError("BAD_REQUEST", { message, data: { kind: "refused", code } });

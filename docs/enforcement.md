@@ -724,7 +724,7 @@ unverified or unimplemented respectively. See `docs/operations.md` for preservat
 ## Treasury proposals (offline- and stack-tested)
 
 An app with `treasury` consent proposes swaps; the owner approves their exact terms later by signing `proposalText`;
-the app asks for one execution (`src/proposals/service.ts`; design: the workspace's `coordination/durable-proposals.md`).
+the app asks for one execution (`src/proposals/service.ts`).
 What holds, offline-tested in `test/treasury-proposals.test.ts` with planted faults (each check removed fails a test):
 the platform accepts only the owner's NEP-413 signature over the exact text for its host, by a full-access key of the
 owner (gateway, `test/app-access.test.ts`); a policy revision or digest, strategy or agent change voids the proposal;

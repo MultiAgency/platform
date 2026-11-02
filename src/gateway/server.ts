@@ -23,7 +23,8 @@ import { type AgentEntry, childEnv, hostOf, loadConfig } from "./config.js";
 import { recentSignProposals } from "./proposals.js";
 import { ownerOf, resolveAccess, resolveAgentAccess } from "./roles.js";
 import { appendSynced } from "../synced.js";
-import { HostedAgents, authorizeSetup, hostedEnvironment, setupRequest, type HostedAgent } from "./hosted-agents.js";
+import { HostedAgents, authorizeSetup, boundPorts, hostedEnvironment, setupRequest, type HostedAgent, type OrganizationScope, type SetupRequest } from "./hosted-agents.js";
+import { AgentNotListening, agentOrigin, childReported, childStopped } from "./agent-origin.js";
 
 /**
  * The hosted dashboard: the one public process. It signs members in, decides per request what each
@@ -134,7 +135,9 @@ const server = createServer(async (req, res) => {
       if (!route || !agent) return json(res, 404, { error: "Contributor entry not found" });
       if (route.path === "/" && !["GET", "HEAD"].includes(req.method ?? "")) return json(res, 405, { error: "Use the invoice API" });
       if (req.method === "GET" && await servePayeeFrontend(res, route.path)) return;
-      return forwardInvoice(req, res, `http://127.0.0.1:${agent.port}`, `/supplier${route.path}${url.search}`, request as typeof import("node:https").request, supplierCookie(agent.name));
+      let origin: string;
+      try { origin = agentOrigin(agent); } catch (error) { if (error instanceof AgentNotListening) return json(res, 503, { error: error.message }); throw error; }
+      return forwardInvoice(req, res, origin, `/supplier${route.path}${url.search}`, request as typeof import("node:https").request, supplierCookie(agent.name));
     }
     if (site?.demo === "invoices" && (config.invoiceUpstream || pathname.startsWith("/invoice-ui/static/")) && req.method === "GET" && await servePayeeFrontend(res, pathname)) return;
     // Each app serves its own skill from its active release; there is no shared or fallback copy.
@@ -165,7 +168,7 @@ const server = createServer(async (req, res) => {
     if (await confirmRoutes(req, res, pathname, signingHost, confirms, APP_ROOT, selected, DIST, () => stopping)) return;
     if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, config.appSetup.length ? { setup: async ({ owner, area, deployment, organization }) => {
       if (!config.appSetup.includes(area) || (site && !site.hostedAreas?.includes(area))) throw new Error("This area is not available on this host");
-      return reserveHosted({ owner, kind: "wallet", area }, { deployment, organization });
+      return await reserveHosted({ owner, kind: "wallet", area }, { deployment, organization });
     } } : {})) return;
     // Anything under /apps/ or /confirm/ that neither answered: never the file server's pages.
     if (config.headless) return json(res, 404, { error: "Not found" });
@@ -210,7 +213,7 @@ const server = createServer(async (req, res) => {
       try { authorizeSetup(account, parsed.data.kind, await ownerOf(parsed.data.owner)); }
       catch { return json(res, 403, { error: "Owner access could not be verified. Use your own wallet or a DAO where you can propose owner actions." }); }
       if (stopping) return json(res, 503, { error: "Gateway is stopping. No reservation was made." });
-      return json(res, 200, { name: reserveHosted(parsed.data).name });
+      return json(res, 200, { name: (await reserveHosted(parsed.data)).name });
     }
 
     // A DAO's recent signing proposals, for a viewer who may see one of the agents it owns.
@@ -275,14 +278,21 @@ const server = createServer(async (req, res) => {
 const supervisor = new Supervisor((agent: AgentEntry & { envFile: string }) => {
   const managed = "kind" in agent ? agent as HostedAgent : undefined;
   const environment = managed ? { ...hostedEnvironment(managed, process.env), ...supplierEnvironment(managed, payeeHost, SECRET) } : childEnv(agent);
-  return spawn(process.execPath, workerArguments(...(managed ? [] : ["--env-file-if-exists=.env"]), join(APP, "src/server.ts")), {
+  childStopped(agent);
+  const child = spawn(process.execPath, workerArguments(...(managed ? [] : ["--env-file-if-exists=.env"]), join(APP, "src/server.ts")), {
     env: environment,
-    stdio: ["ignore", "inherit", "inherit"],
+    stdio: ["ignore", "inherit", "inherit", "ipc"],
   });
+  child.on("message", message => childReported(agent, message));
+  child.once("close", () => childStopped(agent));
+  return child;
 });
-/** Reserves (or finds) a hosted agent and starts its process once. Callers check who may set it up. */
-function reserveHosted(...input: Parameters<HostedAgents["reserve"]>) {
-  const reserved = hosted.reserve(...input);
+/**
+ * Reserves (or finds) a hosted agent and starts its process once. Callers check who may set it up. A new reservation
+ * skips the next ports another process holds now; one taken after the probe leaves the agent unreachable, not misrouted.
+ */
+async function reserveHosted(raw: SetupRequest, scope?: OrganizationScope) {
+  const reserved = hosted.reserve(raw, scope, await boundPorts(hosted.unreservedPorts(16)));
   if (!agents.some(a => a.name === reserved.name)) { agents.push(reserved); start(reserved); }
   return reserved;
 }

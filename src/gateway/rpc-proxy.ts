@@ -1,5 +1,6 @@
 import { request, type IncomingMessage, type ServerResponse } from "node:http";
 import { sendJson as json } from "../http.js";
+import { AgentNotListening, agentOrigin } from "./agent-origin.js";
 import type { AgentEntry } from "./config.js";
 
 export const RPC_IDLE_TIMEOUT_MS = 15 * 60_000;
@@ -14,6 +15,7 @@ const MAX_HELD_REPLY = 1 << 20;
  */
 export function forwardRpc(req: IncomingMessage, res: ServerResponse, agent: AgentEntry, path: string, timeoutMs = RPC_IDLE_TIMEOUT_MS, body?: string, actor?: string,
   hold?: (reply: unknown) => string | null | { answer: unknown }, context?: { consent: string; host: string; consents: string[] }) {
+  try { agentOrigin(agent); } catch (error) { if (error instanceof AgentNotListening) return json(res, 503, { error: error.message }); throw error; }
   const headers: import("node:http").OutgoingHttpHeaders = { ...req.headers, host: `127.0.0.1:${agent.port}` };
   delete headers.origin;
   delete headers.cookie;

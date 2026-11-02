@@ -14,7 +14,7 @@ export const strategyGrantRequired = (actor: string | undefined) => !!actor && /
 /**
  * Why an app or machine credential may not execute this plan, or nothing: the strategy it was planned under must be the
  * one saved now and the one the owner's live grant binds by digest (`treasury:<suffix>`). An app with `treasury` may save
- * strategy settings (coordination/durable-proposals.md section 8); only the owner's grant makes them count. Run under the
+ * strategy settings (docs/enforcement.md, "Treasury proposals"); only the owner's grant makes them count. Run under the
  * money lock, before the plan's claim.
  */
 export async function strategyGrantProblems(plan: Plan): Promise<string[]> {

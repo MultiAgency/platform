@@ -20,7 +20,7 @@ export const APP_OWNER = ["owner/prepare", "owner/submit", "owner/status", "owne
  */
 export const APP_PAYOUT = ["payouts/request", "payouts/status", "held", "deposit"] as const;
 /**
- * Treasury with `treasury` consent (coordination/durable-proposals.md section 8): reads; strategy settings, which an
+ * Treasury with `treasury` consent (docs/enforcement.md, "Treasury proposals"): reads; strategy settings, which an
  * app's plans, a machine credential's plans and the autopilot use only under a grant binding their digest; autopilot on
  * (under such a grant) and off; sweeping public balances into the confidential one; and proposals, whose swaps execute
  * only after the owner signs their exact terms.

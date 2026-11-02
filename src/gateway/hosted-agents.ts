@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
 import { z } from "zod";
@@ -12,7 +13,7 @@ export const setupRequest = z.strictObject({
   kind: z.enum(["wallet", "dao"]),
   area: z.enum(["treasury", "payables"]),
 });
-type SetupRequest = z.infer<typeof setupRequest>;
+export type SetupRequest = z.infer<typeof setupRequest>;
 /**
  * An app's setup also names its deployment and Organization: that Organization gets its own agent per owner and area,
  * reachable only by that deployment's calls for that Organization. Self-service setups (`/gw/agents`) have no scope.
@@ -52,6 +53,17 @@ export function authorizeSetup(account: string, kind: SetupRequest["kind"], owne
 }
 
 /** Additive state. Reservations precede process startup and never replace an existing settings file. */
+const PORTS = Array.from({ length: 1000 }, (_, i) => 9000 + i);
+
+/** Which of these loopback ports another process holds now (a probe: the answer can change right after). */
+export async function boundPorts(ports: readonly number[]): Promise<Set<number>> {
+  const bound = await Promise.all(ports.map(port => new Promise<boolean>(done => {
+    const probe = createServer().once("error", () => done(true));
+    probe.listen(port, "127.0.0.1", () => probe.close(() => done(false)));
+  })));
+  return new Set(ports.filter((_, i) => bound[i]));
+}
+
 export class HostedAgents {
   constructor(private directory: string, private configured: AgentEntry[], private capacity = 32, private perDeployment = PER_DEPLOYMENT) { this.list(); }
   list(): HostedAgent[] {
@@ -69,7 +81,16 @@ export class HostedAgents {
       });
     } catch { throw new Error("Hosted agent registry is unavailable. Preserve registry and settings before recovery."); }
   }
-  reserve(raw: SetupRequest, scope?: OrganizationScope): HostedAgent {
+  /** The next `count` ports no configured or hosted agent has reserved, lowest first. */
+  unreservedPorts(count: number): number[] {
+    const ports = new Set([...this.configured, ...this.list()].map(a => a.port));
+    return PORTS.filter(p => !ports.has(p)).slice(0, count);
+  }
+  /**
+   * The owner's existing agent for this area and scope, or a new reservation on a port neither reserved nor in `bound`
+   * (ports another process held when probed: an agent server that can't bind its port never becomes reachable).
+   */
+  reserve(raw: SetupRequest, scope?: OrganizationScope, bound: ReadonlySet<number> = new Set()): HostedAgent {
     const input: Reservation = { ...setupRequest.parse(raw), ...(scope && z.strictObject(organizationScope).parse(scope)) };
     mkdirSynced(this.directory);
     // One lock for both files: they share names, ports and capacity.
@@ -87,7 +108,7 @@ export class HostedAgents {
       if (scope && entries.filter(a => a.deployment === scope.deployment).length >= this.perDeployment)
         throw new Error("This app deployment has reached its hosted agent limit on this host. Existing agents remain available.");
       const ports = new Set([...this.configured, ...entries].map(a => a.port));
-      const port = Array.from({ length: 1000 }, (_, i) => 9000 + i).find(p => !ports.has(p));
+      const port = PORTS.find(p => !ports.has(p) && !bound.has(p));
       if (!port) throw new Error("Hosted agent capacity reached.");
       const name = nameOf(input);
       const envFile = join(this.directory, `${name}.env`);

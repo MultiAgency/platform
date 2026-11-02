@@ -10,6 +10,7 @@ import type { Router } from "../router.js";
 import type { AgentEntry } from "./config.js";
 import { type DaoProposal, signRequestOf } from "./sign-requests.js";
 import type { Decoded, ProposalCheck as Check } from "../contract/proposals.js";
+import { agentOrigin } from "./agent-origin.js";
 
 /**
  * "What am I voting on?" A proposal asking `v1.signer` to sign shows members only a hash. Every owner
@@ -113,7 +114,9 @@ const near = new Near(mainnet);
 
 /** What an agent server waits for the DAO to sign, read over loopback; null if it doesn't answer. */
 async function agentRequests(agent: AgentEntry): Promise<DaoRequest[] | null> {
-  const client: RouterClient<Router> = createORPCClient(new RPCLink({ origin: `http://127.0.0.1:${agent.port}`, url: "/rpc" }));
+  let origin: string;
+  try { origin = agentOrigin(agent); } catch { return null; }
+  const client: RouterClient<Router> = createORPCClient(new RPCLink({ origin, url: "/rpc" }));
   // The server's `state` is a plain string in its type; it only ever holds DaoRequest's three.
   return client.owner.pending(undefined, { signal: AbortSignal.timeout(10_000) }).then((r) => r as DaoRequest[], () => null);
 }
