@@ -10,12 +10,10 @@ through `@multiagency/sdk`. Not yet: Payables and the Treasury prototype still c
 
 The [shared frontend integration](docs/shared-frontend-integration.md) keeps Proto as the static
 three-idea showcase and serves independently built Treasury and Payables frontends. Invoices is
-Payables' payee-facing entry. The 2026-10-16 UTC [release record](docs/proto-release-execution.md)
-identifies the deployed artifact and verified sign-in, private access and routing boundaries.
-Agents retain separate balances, authority and executors. [Source ownership and scope](docs/shared-backend-scope.md)
-describe how this integration relates to the sibling Treasury and Payables directories.
-A new prototype reuses the platform through the [integration path](docs/integration-path.md);
-the [reuse map](docs/reuse-map.md) lists which platform pieces each existing workflow used (offline runs).
+Payables' payee-facing entry. The 2026-10-16 UTC [release record](docs/archive/proto-release-execution.md)
+records that release's sign-in, private access and routing checks.
+Agents retain separate balances, authority and executors.
+A new prototype reuses the platform through the [integration path](docs/integration-path.md).
 
 
 An AI agent manages a treasury on [NEAR Intents](https://near.org/intents) through the
@@ -80,7 +78,7 @@ The command line has only what the dashboard doesn't: owner actions signed with 
 | `pnpm reconcile [--poll]` | Operations without a proven outcome; `--poll` reads their statuses once, resending nothing |
 | `pnpm books [--csv]` | Balances against chain transfers and recorded executions; `--csv` prints the ledger |
 | `pnpm smoke` | Read-only check of the hosted dashboard and invoice page |
-| `pnpm run-report` | The unattended-run report ([operations](docs/operations.md#unattended-run-observing-the-treasury-autopilot)) |
+| `pnpm run-report` | The unattended-run report ([unattended run](docs/unattended-run.md)) |
 
 ## Hosted demo
 
@@ -93,7 +91,7 @@ Four public entry points share Railway routing. Signing in with a NEAR wallet si
 - **Invoices**, https://invoices.multiagency.ai: payee routing to the existing payout executor,
   where payees request agreements, file invoices and follow their existing payment identities.
   Hosted sign-in, retained private access and payee page routing were checked in the
-  [2026-10-16 UTC release](docs/proto-release-execution.md); no money action was performed.
+  [2026-10-16 UTC release](docs/archive/proto-release-execution.md); no money action was performed.
 
 With `walkthroughs: true` or `selfService: true`, the signed-in entry is **Your agents**. Choose an existing
 agent or **Create your own agent**, select Portfolio or Payables, and continue setup. A regular NEAR
@@ -294,10 +292,10 @@ of maintaining separate requirement statuses.
 
 - FastNear deposit batching awaits a verified raw-transaction hash mapping; deployed indexer
   freshness remains unverified. Single-hash receipt reads remain in place. See the
-  [infrastructure follow-up](docs/infrastructure-review.md#follow-up-review-2026-10-16).
+  [infrastructure follow-up](docs/archive/infrastructure-review.md#follow-up-review-2026-10-16).
 
 - The shared-host infrastructure hardening is local, not deployed; see the
-  [architecture review](docs/infrastructure-review.md) for failure reproductions, source provenance
+  [architecture review](docs/archive/infrastructure-review.md) for failure reproductions, source provenance
   and remaining isolation/recovery limits. Coordinated [credential rotation](docs/credential-rotation.md)
   after the diagnostic exposure remains outstanding and requires owner-controlled maintenance.
 

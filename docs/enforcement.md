@@ -1,81 +1,5 @@
 # Enforcement: what the signed policy guarantees today
 
-Work orders bind one immutable invoice to a dedicated agent. The local dispatch check compares
-payee, asset, exact amount, invoice identity, policy digest and grant deadline, after the final provider
-reads; `test/work-order-binding.test.ts` covers changed terms, policy changes, deadline crossing,
-concurrent filing and an interrupted outcome. These are offline application checks, not evidence of
-provider enforcement against a bypassed executor. The signed transfer policy restricts destination
-and per-payment cap; the grant carries its expiry. Neither expresses a lifetime one-payment limit,
-exact invoice matching, nor completion by a deadline. Held payouts still need owner approval.
-No dedicated work-order payment has been mainnet-observed; residual-fund recovery and payee
-conversion/forwarding remain unimplemented.
-
-Scheduling is not settlement evidence: the timer counts from the latest inbox `run` summary, which
-precedes the final after-observation and tick end. An interrupted evidence start alone does not pause
-that timer. Unresolved operations still block sends at the money lock. A dedicated durable scheduler
-checkpoint is not implemented; `test/autopilot.test.ts` checks the current cadence offline, and
-[operations](operations.md#scheduling-cadence-and-local-refactoring) describes its preservation needs.
-
-Unreadable inbox history now defers scheduled ticks with a logged error; damaged agreement records
-make their history unavailable. A new DAO delegate preparation refuses unreadable peer owner-intent
-records instead of treating them as no pending action. These behaviors are offline-tested in
-`test/record-corruption.test.ts`, `test/scheduler-corruption.test.ts` and
-`test/delegate-waiting.test.ts`. Records still require verified recovery; automatic reconstruction
-is not implemented.
-
-Own and peer owner-intent readers also reject malformed lifecycle states and unsigned preparations
-that retain a signature or outcome. Missing stages remain compatible only for unsigned legacy
-preparations. Offline regressions reproduce the prior duplicate signature submission from retained records and verify
-refusal without rewriting the evidence (`test/owner-records.test.ts`, `test/delegate-waiting.test.ts`).
-The local reader also refuses a settled record without a recognized terminal outcome; a lifecycle
-label alone cannot stop outcome polling. Peer records with incomplete settlement evidence remain
-blocking. These checks do not independently prove the provider's terminal outcome.
-
-Server startup and onboarding now share executor activation: acquire the single-host lease before
-publishing a newly created agent identity, then start reconciliation, notifications and scheduling
-once. A failed acquisition leaves creation recoverable with the original signature attempt;
-approve-only instances start no money loops and retain their first agent identity. Shutdown cannot
-publish an identity or start loops after waiting for a lease. This is offline-tested in `test/onboarding-executor.test.ts`,
-`test/executor-lifecycle.test.ts` and `test/executor-creation.test.ts`, not observed on a deployed host.
-
-Held-payout refresh now records released `PROCESSING` and `QUEUED` observations, which block new
-sends until reconciliation establishes an outcome. A tick binds its captured ceiling, grant check
-and plan to one strategy digest; replacing the strategy during provider reads stops that tick.
-`test/payout-review.test.ts`, `test/lock.test.ts` and `test/autopilot.test.ts` reproduce these failures
-and verify the corrections offline.
-
-DAO delegate preparation now takes an owner-scoped lock across the pending-action scan, delegate
-construction and durable preparation. It acquires the instance lock first, never locks a peer's
-instance file, and rechecks ownership before persistence. A contender refuses for retry; a different
-owner key can proceed independently. All participating processes must share owner-intent storage
-on one host. This is not distributed fencing or coordination with external signing clients.
-
-A peer delegate with an unresolved submission blocks new preparation even after its signing window
-expires. A nonce read alone cannot clear it. Recovery on the original instance must record owner
-success or a settled terminal outcome (including its proven signing-window closure). An owner
-approval recorded as successful does not block merely because the released payout is still settling.
-Settled records lacking outcome evidence remain blocked. Preparation never reconciles or rewrites a
-peer record. This relies on the existing provider-status trust boundary and does not independently
-prove RPC freshness or chain nonce consumption.
-
-`test/dao-delegate-race.test.ts` uses real child processes, locks and persisted delegates with mocked
-RPC/provider observations. It previously reproduced two prepared actions sharing an owner nonce;
-it now requires one preparation and one refusal, including under lock loss, and checks recovery from
-success, failure, and unknown status, separately from payout settlement. These are offline tests,
-not mainnet observations. No signatures are submitted by these fixtures.
-
-Settings writers now share a lock on the canonical file target, including symlink aliases. Contention
-refuses the competing update for retry; it cannot silently overwrite a newer schedule stop or grant
-update. This is covered by real child-process tests in `test/settings-concurrency.test.ts`, not a
-mainnet observation or distributed fencing guarantee. Running processes do not automatically reload
-settings written by another process. Upgrade and preservation requirements are in
-[operations](operations.md#settings-and-record-read-hardening).
-
-Schedule-stop contention is visible in the Portfolio, Payables and recovery controls: an offline
-browser fixture returns the settings-lock retry error, verifies the schedule stays on and no success
-message appears, then retries successfully. The mutation is not automatically retried. These cases
-are covered in the Treasury app's `test/browser/strategy.cjs`; they are not deployed-browser observations.
-
 What this prototype can claim about staying inside the owner's policy, the evidence for each part, the
 gaps, and what a stronger claim would need. Dated runs are in the [mainnet log](mainnet-log.md). Further source pins and evidence are in the release record
 (GUARANTEE.md), kept privately outside this repository.
@@ -200,6 +124,84 @@ does not establish a failure of the Agent API's USD budget, and the API's docume
 does not independently verify its deployed implementation. The relationship between the custody
 description, pinned serialization tests and our deployed route remains a provider clarification.
 We retain the existing provider controls and local checks; this review introduces no local budget engine.
+
+## Recent checks
+
+Work orders bind one immutable invoice to a dedicated agent. The local dispatch check compares
+payee, asset, exact amount, invoice identity, policy digest and grant deadline, after the final provider
+reads; `test/work-order-binding.test.ts` covers changed terms, policy changes, deadline crossing,
+concurrent filing and an interrupted outcome. These are offline application checks, not evidence of
+provider enforcement against a bypassed executor. The signed transfer policy restricts destination
+and per-payment cap; the grant carries its expiry. Neither expresses a lifetime one-payment limit,
+exact invoice matching, nor completion by a deadline. Held payouts still need owner approval.
+No dedicated work-order payment has been mainnet-observed; residual-fund recovery and payee
+conversion/forwarding remain unimplemented.
+
+Scheduling is not settlement evidence: the timer counts from the latest inbox `run` summary, which
+precedes the final after-observation and tick end. An interrupted evidence start alone does not pause
+that timer. Unresolved operations still block sends at the money lock. A dedicated durable scheduler
+checkpoint is not implemented; `test/autopilot.test.ts` checks the current cadence offline, and
+[operations](operations.md#scheduling-cadence-and-local-refactoring) describes its preservation needs.
+
+Unreadable inbox history now defers scheduled ticks with a logged error; damaged agreement records
+make their history unavailable. A new DAO delegate preparation refuses unreadable peer owner-intent
+records instead of treating them as no pending action. These behaviors are offline-tested in
+`test/record-corruption.test.ts`, `test/scheduler-corruption.test.ts` and
+`test/delegate-waiting.test.ts`. Records still require verified recovery; automatic reconstruction
+is not implemented.
+
+Own and peer owner-intent readers also reject malformed lifecycle states and unsigned preparations
+that retain a signature or outcome. Missing stages remain compatible only for unsigned legacy
+preparations. Offline regressions reproduce the prior duplicate signature submission from retained records and verify
+refusal without rewriting the evidence (`test/owner-records.test.ts`, `test/delegate-waiting.test.ts`).
+The local reader also refuses a settled record without a recognized terminal outcome; a lifecycle
+label alone cannot stop outcome polling. Peer records with incomplete settlement evidence remain
+blocking. These checks do not independently prove the provider's terminal outcome.
+
+Server startup and onboarding now share executor activation: acquire the single-host lease before
+publishing a newly created agent identity, then start reconciliation, notifications and scheduling
+once. A failed acquisition leaves creation recoverable with the original signature attempt;
+approve-only instances start no money loops and retain their first agent identity. Shutdown cannot
+publish an identity or start loops after waiting for a lease. This is offline-tested in `test/onboarding-executor.test.ts`,
+`test/executor-lifecycle.test.ts` and `test/executor-creation.test.ts`, not observed on a deployed host.
+
+Held-payout refresh now records released `PROCESSING` and `QUEUED` observations, which block new
+sends until reconciliation establishes an outcome. A tick binds its captured ceiling, grant check
+and plan to one strategy digest; replacing the strategy during provider reads stops that tick.
+`test/payout-review.test.ts`, `test/lock.test.ts` and `test/autopilot.test.ts` reproduce these failures
+and verify the corrections offline.
+
+DAO delegate preparation now takes an owner-scoped lock across the pending-action scan, delegate
+construction and durable preparation. It acquires the instance lock first, never locks a peer's
+instance file, and rechecks ownership before persistence. A contender refuses for retry; a different
+owner key can proceed independently. All participating processes must share owner-intent storage
+on one host. This is not distributed fencing or coordination with external signing clients.
+
+A peer delegate with an unresolved submission blocks new preparation even after its signing window
+expires. A nonce read alone cannot clear it. Recovery on the original instance must record owner
+success or a settled terminal outcome (including its proven signing-window closure). An owner
+approval recorded as successful does not block merely because the released payout is still settling.
+Settled records lacking outcome evidence remain blocked. Preparation never reconciles or rewrites a
+peer record. This relies on the existing provider-status trust boundary and does not independently
+prove RPC freshness or chain nonce consumption.
+
+`test/dao-delegate-race.test.ts` uses real child processes, locks and persisted delegates with mocked
+RPC/provider observations. It previously reproduced two prepared actions sharing an owner nonce;
+it now requires one preparation and one refusal, including under lock loss, and checks recovery from
+success, failure, and unknown status, separately from payout settlement. These are offline tests,
+not mainnet observations. No signatures are submitted by these fixtures.
+
+Settings writers now share a lock on the canonical file target, including symlink aliases. Contention
+refuses the competing update for retry; it cannot silently overwrite a newer schedule stop or grant
+update. This is covered by real child-process tests in `test/settings-concurrency.test.ts`, not a
+mainnet observation or distributed fencing guarantee. Running processes do not automatically reload
+settings written by another process. Upgrade and preservation requirements are in
+[operations](operations.md#settings-and-record-read-hardening).
+
+Schedule-stop contention is visible in the Portfolio, Payables and recovery controls: an offline
+browser fixture returns the settings-lock retry error, verifies the schedule stays on and no success
+message appears, then retries successfully. The mutation is not automatically retried. These cases
+are covered in the Treasury app's `test/browser/strategy.cjs`; they are not deployed-browser observations.
 
 ## Status
 | Constraint | Status |

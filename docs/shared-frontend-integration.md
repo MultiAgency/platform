@@ -2,14 +2,14 @@
 
 Local infrastructure hardening changes the error contract: arbitrary exceptions now return generic
 `INTERNAL_SERVER_ERROR`, while explicitly public application errors and provider codes remain
-available. See [interface ownership and compatibility](infrastructure-review.md#repository-and-interface-ownership).
+available. See [errors at the RPC boundary](architecture.md#errors-at-the-rpc-boundary).
 Consumers must not branch on raw exception prose or automatically replay an action after a transport
 error. Scoped RPC forwarding now has a fifteen-minute inactivity timeout (settlement may wait 180 seconds per leg); active streams may run longer.
 These changes are offline-tested, not part of the deployed r2 artifact.
 
 Proto can serve an independently built product frontend on a configured host while retaining its
 same-origin gateway, host-bound sign-in and per-agent authorization. The frozen r2 integration
-was deployed on 2026-10-16 UTC; see the [execution record](proto-release-execution.md) for
+was deployed on 2026-10-16 UTC; see the [execution record](archive/proto-release-execution.md) for
 the exact deployment, hosted checks and remaining limits. Offline integration tests remain
 separate evidence and do not establish live money flows or state migration.
 
@@ -172,7 +172,7 @@ failure for both names did not establish two frontend dependencies.
 
 For this infrastructure phase retain the frozen r2 Payables artifact at
 `/tmp/proto-infrastructure-review-20261015-r2/frontends/payables`, with the provenance in
-[the release review](proto-release-review.md). Do not substitute the current Payables build.
+[the release review](archive/proto-release-review.md). Do not substitute the current Payables build.
 No production configuration or archive bytes were changed. Compensation remains a separate
 Payables-owned feature integration covering its records, contributor endpoints and review flow;
 Proto owns shared authentication, scoped routing, executor lifecycle and durable dispatch. Its

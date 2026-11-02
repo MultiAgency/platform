@@ -1,84 +1,81 @@
-# Building a new prototype on Proto
+# Building an app on the platform
 
-How a team adds a prototype that reuses Proto's identity, access, records and guarded execution
-instead of copying them. The worked example is `examples/minimal-prototype/`: one page built
-with the SDK, no server of its own. Product walkthroughs live in their own repositories; this page covers
-the platform only. Which existing workflows already reuse each piece is in [the reuse map](reuse-map.md).
+How a team builds an app that uses the platform's identity, consent, records and guarded execution instead of copying
+them. Apps live in their own repositories and depend only on `@multiagency/sdk`. Start with the package README
+(`src/contract/README.md`, shipped as the package's `README.md`) and its bundled skills. This page covers what the
+platform side expects. The [reuse map](archive/reuse-map.md) records which workflows reused each piece as of 2026-10-16.
 
 ## Who owns what
 
-| Proto provides | The prototype owns | Out of scope for a prototype |
+| The platform provides | The app owns | Never in an app |
 | --- | --- | --- |
-| Host-bound wallet sign-in and a host-local session (`/gw/challenge`, `/gw/session`, `/gw/me`) | Its UI, copy and navigation | A gateway, executor, grant token or provider credential of its own |
-| Per-agent, per-procedure authorization on every call to `/a/<agent>/rpc/<procedure>` | Non-authoritative drafts and preferences (browser storage) | Authoritative payment, treasury or owner-intent records |
-| Owner intents: prepare, wallet signature, single submission, durable status | Which owner actions it offers, and its explanation of each | Signing on the owner's behalf, or treating approval as settlement |
-| One send site (`dispatch`), unresolved-operation blocking, reconciliation | Its release, rollback and asset retention | Callbacks into Proto (none exist; a demonstrated need comes first) |
-| Agent registry, executor assignment and host routing (`dashboard.json`) | Its `contract.json` declaring what it needs | Choosing hosts or agents from a request |
-| The isolated stack and simulator for local proof | Its own tests and recipes | Live funds, credentials or production state |
+| Owner consent and app credentials (`/apps/v1`), or host-bound sign-in for a browser product (`/gw/*`) | Its UI, copy, navigation and server | A gateway, executor, grant token or provider credential |
+| Per-agent, per-procedure authorization on every call | Non-authoritative drafts and preferences | Authoritative payment, treasury, proposal or owner-intent records |
+| Owner actions: prepare, the owner's signature (in the app, or on the platform's confirm page), one submission, durable status | Which owner actions it offers, and how it explains each | Signing for the owner, or treating approval as settlement |
+| One send site (`dispatch`), unresolved-operation blocking, reconciliation | Its own release and rollback | Callbacks into the platform (none exist; a demonstrated need comes first) |
+| The isolated stack and simulated provider for local proof | Its own tests | Live funds, credentials or production state |
 
-## Steps
+## An app with its own server: `appClient`
 
-1. **Choose a host and the agents it may reach.** A host entry in `dashboard.json` names its
-   `demo` value, its agents and, for an independent build, `frontendDist`. Today `demo` is a fixed
-   enum (`showcase`, `payables`, `treasury`, `invoices`) and agents have area `payables` or
-   `treasury`. The example uses the existing `showcase` value with the `payout` agent. A new area
-   needs a reviewed config change in Proto; ask before adding one.
-2. **Declare capabilities.** Ship a `contract.json` with `version`, `product` and `required`
-   capabilities (`ownerCapabilities` and `payeeContract` in the SDK name them). For a host served by the shared
-   release server (`frontend` host config) and for payee frontends, the gateway checks it before serving HTML and
-   refuses an incompatible release. A legacy `frontendDist` directory, like the example's, is not checked.
-3. **Use `@multiagency/sdk`** for every route it covers, rather than the RPC wire format. Start with the package
-   README (`src/contract/README.md`, shipped as the package's `README.md`): how to install it, which client fits which
-   caller and access, and first reads. Its bundled skills (`getting-started`, `owner-workflows`, `payee-workflows`)
-   carry complete, verified examples. Install it from npm (`pnpm add @multiagency/sdk zod@^4.6.5`; the owner entry brings
-   its own oRPC and AG-UI), or link an SDK
-   repository checkout for development against unreleased source (`pnpm sdk:dev --once` in the SDK repository, then
-   `"@multiagency/sdk": "link:../sdk/packages/sdk"`). A linked checkout can differ from the published package of the
-   same version; record which one each release was built with.
-   What changed in each version, and what apps must do: [SDK changes](sdk-changes.md), shipped as `CHANGES.md`.
-4. **Call only through the gateway, same-origin.** Sign in with `/gw/challenge` → wallet `signMessage` →
-   `/gw/session`; read the account from `/gw/me` with `gatewayDiscovery`. Read and act with
-   `ownerClient({ base: "/a/<agent>" })`: each result is `{ ok: true, value }` or a failure `kind`. `session` means
-   sign in, `forbidden` means this account may not see the agent or call the procedure (not that the session expired),
-   `unavailable` is a read that is safe to repeat, and `unknown` is an action that may have taken effect.
-5. **Keep human signing, and keep the action's identity.** Owner actions are `owner/prepare` → keep the returned
-   `correlationId` durably → show `preview.summary` → the wallet signs `intent.payload` (NEP-413) → `owner/submit`
-   once → follow the record for the same `correlationId` (`owner/actions`, `owner/status`). After a lost reply or a
-   reload, follow that record; never sign or submit again. If the preparation's own reply is lost, no
-   `correlationId` reached the page, so it has nothing to follow: nothing was signed or submitted, and a prepared
-   action has no effect until it is.
-6. **Release independently.** Follow the Invoices asset-service convention
-   ([invoices-extraction.md](invoices-extraction.md)): an immutable built artifact that serves only
-   public assets, keeps old hashed assets during rollout, and rolls back without touching backend
-   records. An owner app can be served by the shared release server (`frontend` host config): the gateway
-   checks each release's `contract.json` capabilities, refuses an incompatible release (503, records
-   unchanged) and binds the served page to the checked release. A legacy host still serves a directory
-   (`frontendDist`). Offline E2E only (`owner-release`, `treasury-migration` specs); not deployed.
-7. **Test on the stack.** From Proto, build the example (`pnpm example:build`), then
-   `pnpm test:e2e:stack --frontend examples/minimal-prototype/dist` (or your own build's absolute path) starts the real
-   gateway, agent servers and simulated provider, with owner and payee wallet contexts. See [testing.md](testing.md).
-   Write the prototype's own end-to-end check like `test/e2e/minimal-prototype.spec.mjs`.
+The path for the separate app repositories; the dashboard and Treasury are moving to it. The `app-server` skill has
+the complete examples, and `treasury-app` covers Treasury proposals.
 
-## The worked example
+1. **Get a service credential.** The platform operator issues the deployment's `tap_…` credential
+   (`pnpm app-credential`). It is a server secret: never in a browser, URL or log.
+2. **Ask the owner for consent.** The app's server builds `consentMessage(...)` (or `setupMessage(...)` for a hosted
+   agent that doesn't exist yet), the owner's wallet signs it with NEP-413 in the app, and the server submits it. The
+   consent names one host, deployment, Organization, agent and its scopes (`read`, `owner`, `payout`, `treasury`,
+   `treasury-execute`), and it expires.
+3. **Call within the consent.** `appClient({ base, credential }).agent(organization, agent).call(...)` reaches only the
+   reads and actions its scopes list. Everything else is refused before it reaches the agent.
+4. **Relay owner actions.** `owner/prepare` answers either a NEP-413 intent the owner reads and signs in the app, or,
+   for a NEP-366 action, a `confirm` link to the platform's confirm page (`/confirm/<token>`). A NEP-366 action is bytes
+   the wallet can't show, so the page shows the agent's own record of its terms and releases the bytes only to the key
+   the action names: an app can't hand the wallet a different action. The app then follows `owner/status`; it never
+   signs or submits again.
+5. **Send money once.** A payout request or a proposal's execution carries the app's `requestId`, recorded before the
+   call; the platform acts on it at most once. After `unknown`, read its status by that id; never retry under a new one.
+6. **Test on the stack.** `pnpm test:e2e:stack --app <deployment>` (add `--treasury` for Treasury) starts the real
+   gateway, agent servers and simulated provider, and issues the app's credential at startup.
+   `test/e2e/stack-app.spec.mjs` is the reference app server.
 
-`examples/minimal-prototype/` is one page bundled with rsbuild (`app.ts`, `index.html`, `rsbuild.config.ts`). It imports
-`@multiagency/sdk` (inside Proto the import resolves to the SDK's source; a product installs the package), signs in
-through the gateway, reads `overview` for the `payout` agent with `ownerClient`, and pauses or resumes the agent with an
-owner-signed `agent_freeze`/`agent_unfreeze` intent. It keeps the prepared owner action's `correlationId` in browser
-storage before asking for a signature, and follows that action through a lost reply or a reload without signing or
-submitting again. It contains no gateway, executor, credential or callback code.
+Status: wallet-owned agents only; DAO consent is not built. The `read`, `owner` and `payout` scopes are mainnet-observed
+on platform staging (2026-10-28, 2026-10-30) through the platform's own stand-in app; `treasury` and `treasury-execute`
+are offline- and stack-tested. No production host serves `/apps/v1` yet. Details: [agent access](agent-access.md),
+"App access".
 
-`test/e2e/minimal-prototype.spec.mjs` builds it and runs it on the real gateway with a simulated provider: owner
-sign-in, scoped read, two wallet signatures and two submissions, signed-out scoped calls refused (401), and no transfers.
-A second case loses the preparation's reply (the page asks for no signature and keeps nothing), then loses a
-submission's reply and the record reads until a reload: after the reload the page reads the recorded outcome, with one
-signature and one submission in total. Signatures come from the unfunded fixture key; freeze/unfreeze outcomes come from
-the simulator, not an observed provider.
+## A browser product on a configured host: `ownerClient`
+
+A page the platform serves on one of its hosts, using the owner's session there.
+
+1. **Choose a host and its agents.** A host entry in `dashboard.json` names its `demo` value, its agents and, for an
+   independent build, `frontendDist`. `demo` is a fixed enum (`showcase`, `payables`, `treasury`, `invoices`) and agents
+   have area `payables` or `treasury`; a new value needs a reviewed platform config change.
+2. **Declare capabilities.** Ship a `contract.json` with `version`, `product` and `required` capabilities
+   (`ownerCapabilities` and `payeeContract` in the SDK name them). On a host served by the shared release server
+   (`frontend` host config) the gateway checks it before serving HTML and refuses an incompatible release (503, records
+   unchanged). A legacy `frontendDist` directory is not checked.
+3. **Call same-origin through the gateway.** Sign in with `/gw/challenge` → wallet `signMessage` → `/gw/session`, read
+   the account from `/gw/me` with `gatewayDiscovery`, then use `ownerClient({ base: "/a/<agent>" })`.
+4. **Keep the owner action's identity.** `owner/prepare` → keep the `correlationId` durably → show `preview.summary` →
+   the wallet signs `intent.payload` (NEP-413) → `owner/submit` once → follow `owner/status` for that `correlationId`.
+   After a lost reply or a reload, follow that record; never sign or submit again.
+5. **Release independently.** Follow the Invoices asset-service convention ([invoices-extraction.md](invoices-extraction.md)):
+   an immutable artifact that keeps old hashed assets during rollout and rolls back without touching backend records.
+   Offline E2E only (`owner-release`, `treasury-migration` specs); not deployed.
+6. **Test on the stack.** `pnpm example:build`, then `pnpm test:e2e:stack --frontend examples/minimal-prototype/dist`
+   (or your build's absolute path). See [testing.md](testing.md).
+
+`examples/minimal-prototype/` is the reference: one rsbuild page that signs in through the gateway, reads `overview` for
+the `payout` agent and pauses or resumes it with an `agent_freeze`/`agent_unfreeze` intent, keeping the `correlationId`
+across a lost reply and a reload. `test/e2e/minimal-prototype.spec.mjs` runs it on the real gateway with a simulated
+provider, including a lost preparation reply and a lost submission reply, with one signature and one submission in
+total. It is offline-tested only.
 
 ## Gaps
 
-- Host `demo` and agent `area` are fixed enums; a new prototype reuses an existing value or needs a Proto config change.
+- DAO-owned agents can't use app access yet.
+- Host `demo` and agent `area` are fixed enums.
 - Owner procedures outside the Treasury/Payables set (for example `ownerIdentity`, `demoGuide/compose`) have no packaged contract.
-- Independent owner-app releases are proven on the local stack only; no deployed host uses the `frontend` release origin yet.
+- Independent owner-app releases are proven on the local stack only.
 - No app-callback channel exists. Any server-side need is reviewed first.
-- The example is offline-tested only; it has not been deployed or observed on mainnet.

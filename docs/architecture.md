@@ -1,9 +1,6 @@
 # Architecture
 
-The [2026-10-16 shared-host review](infrastructure-review.md) records local gateway supervision,
-transport and error-boundary fixes, their offline reproductions, repository ownership and remaining
-limitations. These changes are not deployed. The [credential rotation procedure](credential-rotation.md)
-remains an owner-controlled production gate.
+The [credential rotation procedure](credential-rotation.md) remains an owner-controlled production gate.
 
 Two areas, Payables and Treasury, share one core. Each agent runs in its own instance of the server (`src/server.ts`),
 with its own wallet, grant, money lock and logs; the hosted gateway signs members in and forwards
@@ -379,7 +376,7 @@ selects both options for the prepared proto deployment. Nothing here establishes
 
 ## Shared MultiAgency services
 
-The 2026-10-16 UTC [release record](proto-release-execution.md) identifies the deployed
+The 2026-10-16 UTC [release record](archive/proto-release-execution.md) records that deployment's
 runtime and bounded hosted observations. New-owner and scoped payee lifecycles remain
 offline-tested; deployment alone does not establish those flows on mainnet.
 
@@ -398,8 +395,8 @@ Neither route retries or follows redirects. Keys, draft namespaces and records r
 
 New-instance templates do not carry the agency’s agents, grants or intake upstream. The populated
 rollout configuration deliberately retains those original instances. No standalone volume or grant
-is imported; integration and rollout boundaries are in [shared-backend-scope.md](shared-backend-scope.md)
-and [shared-demos-rollout.md](shared-demos-rollout.md).
+is imported; the original integration and rollout boundaries are in the archived
+[shared-backend-scope.md](archive/shared-backend-scope.md) and [shared-demos-rollout.md](archive/shared-demos-rollout.md).
 
 ### Gateway lifecycle ownership
 
@@ -407,8 +404,38 @@ Proto uses pinned Effect 4.1.0 internally for child supervision. A gateway scope
 child lifetimes and restart sleeps; scope closure cancels restarts and runs bounded child cleanup
 in parallel. The public start/stop facade, HTTP/oRPC contracts and independently built consumer
 frontends retain their interfaces. Signaling failures or forced termination are unclean shutdowns.
-See the [adoption decision and offline fault evidence](effect-supervisor-trial.md). This local
-candidate is not a deployment observation. Effect does not replace the journal or executor lease.
+Effect stays inside this infrastructure; it does not replace the journal or executor lease, and
+existing money-path code is not converted to it. The [adoption record](archive/effect-supervisor-trial.md)
+has the original comparison and fault evidence.
+
+Startup validates configuration and the hosted registry before serving, reuses existing reservations
+and starts one supervised child per configured managed name; each child still acquires its executor
+lease before activation. External loopback agents without `envFile` are not supervised. Gateway
+`/health` is process liveness, not child readiness, provider availability or settlement.
+
+On SIGINT/SIGTERM the gateway stops accepting requests, cancels restart timers and signals its own
+children (`src/gateway/supervisor.ts`: 30-second grace, then SIGKILL and up to 5 more seconds); HTTP
+connections close at 30 seconds (`src/gateway/server.ts`). A forced or unconfirmed shutdown exits
+nonzero. A child shutdown may interrupt work; the gateway replays no submission. Deployment grace must
+exceed the 35-second bound. The supervisor waits only for its direct children: an externally killed
+gateway, machine failure or detached descendant still needs the stopped-writer checks in
+[operations](operations.md). There is no automatic failover to another host.
+
+### Errors at the RPC boundary
+
+`toClientError` in `src/rpc/base.ts` decides what a caller sees. Clients branch on `data.kind`, never
+on message text, and never infer from a failed response that an action was not accepted:
+- `unresolved` and `busy` (CONFLICT): raised before anything is sent.
+- `refused` (BAD_REQUEST): a `PublicError`, work-order or compensation refusal, or a send held by this
+  server's own checks (`local_authorization_held`); proven not to have taken effect.
+- `provider` (BAD_REQUEST): a provider failure on a read, or one whose answer proves nothing executed. It carries
+  the provider's code and validated refusal metadata, never its title or detail text.
+- Anything else is INTERNAL_SERVER_ERROR with fixed guidance, which the SDK reports as `unknown`. The
+  server logs an `unclassified_error` line with the procedure, error class, throw site and provider
+  status/code/request ID, never a message or body.
+
+To give a workflow a specific message, raise a reviewed `PublicError` where the refusal happens; never
+echo arbitrary exception text.
 
 
 ### FastNear read lifetime and failures

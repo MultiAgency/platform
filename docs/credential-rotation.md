@@ -1,6 +1,6 @@
 # Coordinated credential rotation
 
-Prepared 2026-10-16 UTC; not executed. The [release record](proto-release-execution.md) reports a
+Prepared 2026-10-16 UTC; not executed. The [release record](archive/proto-release-execution.md) reports a
 diagnostic exposure. Inspect credential names and consumer relationships only in shared output.
 Never print environment objects, secret values, cookies, signed payloads, credential-bearing URLs
 or raw diagnostic logs. Do not paste replacements into commands, source control or this document.

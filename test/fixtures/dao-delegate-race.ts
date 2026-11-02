@@ -29,13 +29,9 @@ Object.assign(Near.prototype, {
   },
   getAccount: async () => {
     writeFileSync(`${id}.checked`, "passed pending-delegate check");
-    if (barrier === "wait") {
-      const deadline = Date.now() + 10_000;
-      while (!existsSync("release")) {
-        if (Date.now() > deadline) throw new Error("Delegate barrier timed out");
-        await setTimeout(10);
-      }
-    }
+    // Held until the test releases it; the test's spawn timeout bounds the wait. A deadline here would let a slow
+    // run give up the lock and pass the contender through, which reads as a lock failure.
+    if (barrier === "wait") while (!existsSync("release")) await setTimeout(10);
     return {};
   },
 });

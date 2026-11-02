@@ -26,8 +26,8 @@ payment intake and owner-approved payouts. Both regular NEAR wallet owners and D
 the catalog brief emphasizes DAO membership confidentiality. Idea 03 includes separate
 agents per order and supplier conversion/forwarding. The buyer flow is implemented and offline-tested;
 supplier settlement and mainnet work-order verification remain outstanding. See the canonical
-[scope audit](agent-connect-audit.md), [Payables requirements](facilitator.md) and
-[Treasury requirements](treasury.md). Steward stays experimental and absent from navigation.
+[scope audit](../agent-connect-audit.md), [Payables requirements](../facilitator.md) and
+[Treasury requirements](../treasury.md). Steward stays experimental and absent from navigation.
 
 ## Read-only infrastructure observation, 2026-10-15 UTC
 
@@ -49,7 +49,7 @@ exported. Repeated CLI/Node process entries alone do not establish duplicate exe
 
 ## Architecture and reviewable configuration
 
-Use [deploy/shared-demos.json](../deploy/shared-demos.json) on **dao**, with the packaged gateway
+Use [deploy/shared-demos.json](../../deploy/shared-demos.json) on **dao**, with the packaged gateway
 (`scripts/package-shared-frontends.mjs` → `Dockerfile.gateway`) and existing /data/state. It explicitly assigns four hosts to demos and agents.
 Do not replace the default deployment configuration until the rollout is approved. Existing
 settings, credentials, record formats, grants and executor assignments are preserved. New owners may
@@ -95,7 +95,7 @@ stopped-executor migration. No grant copying or second executor is part of this 
 
 ## Before production authorization
 
-1. Review this candidate and the separate [Treasury correction patch](../deploy/treasury-showcase-correction.patch).
+1. Review this candidate and the separate [Treasury correction patch](treasury-showcase-correction.patch).
    That patch corrects the uncommitted proposal in ../treasury; it has not been applied there. Proto
    must never be deployed as Treasury's redirect alias. The integration candidate supersedes that
    proposal's domain-move instructions; do not execute both plans.
@@ -117,7 +117,7 @@ stopped-executor migration. No grant copying or second executor is part of this 
 
 1. Privately record deployment IDs, image digests, volume IDs, domain attachments, DNS values and
    current settings for all four services. Back up with writers stopped, using
-   [operations](operations.md#executor-migration-and-state-preservation).
+   [operations](../operations.md#executor-migration-and-state-preservation).
 2. Preserve each entire volume, including settings files, SQLite databases and WAL/SHM files as
    appropriate to the stopped backup procedure; .ops/, .invoices/, .owner-intents/, .strategy/,
    .plans/, .evidence/, .inbox/, .agreements/, .notify/, .work-orders/, .hosted/, .treasuries/, .payables/,

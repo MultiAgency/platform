@@ -290,7 +290,7 @@ purchase orders, supplier invoices and payment tracking. Invoices is the supplie
 into Payables, with a standalone frontend repository and shared Proto backend. Its independent frontend
 integration remains undeployed. Both wallet owners and DAO owners retain their approval flows.
 The shared-host implementation was deployed on 2026-10-16 UTC; the bounded hosted
-observations and unverified flows are recorded in docs/proto-release-execution.md.
+observations and unverified flows are recorded in docs/archive/proto-release-execution.md.
 
 **Shared MultiAgency infrastructure**: This repository’s gateway, owner setup registry, isolated
 agent processes and supplier HTTP routing, used by all three prototype workflows. A regular NEAR

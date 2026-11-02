@@ -1,8 +1,7 @@
 # Operations
 
-For the deployed four-domain integration, start with the [release execution record](proto-release-execution.md)
-and [reviewed release procedure](proto-release-review.md). The earlier
-[shared-demo plan](shared-demos-rollout.md) is historical preparation, not the current deployment recipe.
+The 2026-10-16 four-domain release is recorded in [archive/](archive/) (the
+[execution record](archive/proto-release-execution.md) and [release review](archive/proto-release-review.md)).
 Future production changes require their own authorization and must preserve executor assignments
 and all four volumes. No deployment or restart is implied by committing source changes.
 
@@ -10,9 +9,8 @@ and all four volumes. No deployment or restart is implied by committing source c
 These instructions describe the repository configuration. Deploys, restarts and money actions are
 performed by the owner. For the product and recorded results, see [README](../README.md).
 
-Preserve the complete state when moving an executor. This is the canonical list; AGENTS.md,
-`scripts/check-shared-image.mjs` and `docs/agent-access-release.md` repeat it, and `test/state-directories.test.ts`
-keeps them equal:
+Preserve the complete state when moving an executor. This is the canonical list; AGENTS.md and
+`scripts/check-shared-image.mjs` repeat it, and `test/state-directories.test.ts` keeps them equal:
 <!-- state-directories -->
 `.ops/`, `.invoices/`, `.owner-intents/`, `.strategy/`, `.plans/`, `.evidence/`, `.inbox/`, `.agreements/`, `.notify/`, `.work-orders/`, `.hosted/`, `.agent-connections/`, `.machine-auth/`, `.app-access/`, `.proposals/`, and any legacy `.intake/` files
 <!-- /state-directories -->
@@ -292,173 +290,7 @@ executor keeps reconciling. To stop one host from sending, set `EXECUTOR=off` th
 
 ## Platform staging
 
-A `staging` environment in the platform's Railway project serves app access for the dashboard's staging
-(`dev.multiagency.ai`) at `api.dev.multiagency.ai`; production would be `api.multiagency.ai`. Consents and setups name
-this host as their NEP-413 recipient, so it isn't renamed once owners have signed. Staging runs on mainnet (the provider
-has no test network) with its own state and test agents, never the live demo hosts' records.
-
-Staging is meant to run the `platform` package (`scripts/package-platform.mjs`, built by every release candidate beside
-`dao`): the gateway as a headless host (`headless` in its config), which serves `/health`, app access (`/apps/v1`) and
-the confirm page with its own assets, and answers 404 to everything else, before reading any session: no sign-in,
-owner app, owner RPC, machine credentials or demo hosts. App setup is limited to the areas `appSetup` lists (Payables
-only). It has run it since 2026-10-31T01:03Z (release candidate `b9221b45`, commit `01add07`, Railway deployment
-`4900d1c4`, image `1b74b1fa`); before, it ran the `dao` package, which also served the prototype's owner app and
-sign-in there. Read-only checks on 2026-10-31T01:06Z: `/health` 200; `/apps/v1/agents/x` 401 without a credential and
-403 with a browser `Origin`; `/`, `/gw/challenge`, `/gw/me`, `/a/x/access`, `/machine/v1/…`, an unmatched `/confirm/…`,
-owner-app assets and `/build-manifest.json` 404; `POST /gw/session` 404. Switching needed no migration: the state
-directory, hosted agents and consents are kept, and the host is unchanged, so signed consents and setups stay valid.
-
-1. In the platform's Railway project, create `staging` as an empty environment (a duplicate copies production's
-   services and variables) and add one empty service, `gateway`, with its own volume at `/data`, one replica,
-   healthcheck `/health`.
-2. Variables: `DASHBOARD_FILE=/app/deploy/platform-staging.json` (host `api.dev.multiagency.ai`, `headless`, app setup
-   for Payables, no configured agents: every agent is a hosted agent created through app setup), `NEAR_INTENTS_AGENT_API_KEY` (a separate
-   key for staging from the same partner account, so it can be revoked without touching production's), `NEAR_INTENTS_AGENT_API_URL`,
-   `FASTNEAR_API_KEY`, and a new `SESSION_SECRET`. No `DAO_ENV`, `PAYOUT_ENV` or `RESTORE_*`.
-3. Deploy the release candidate's `platform` package: from `<release>/platform`, `railway up --service gateway
-   --environment staging`. To check before DNS, set
-   `DASHBOARD_HOST` to the Railway domain, then point a CNAME for `api.dev.multiagency.ai` (Namecheap) at the domain
-   `railway domain status` shows and remove `DASHBOARD_HOST`.
-4. Read-only checks: `/health` 200; `/apps/v1/agents/x` without a credential 401, with a browser `Origin` 403, on another
-   host 421; `/`, `/gw/challenge` and `/a/x/access` 404 (offline-tested in `test/platform-host.test.ts`).
-5. On the staging service, the operator issues the dashboard's credential from the gateway's own state directory (it
-   writes `.app-access/` there, beside the gateway): `cd /data/state && /app/node_modules/.bin/tsx
-   /app/src/app-credential.ts issue multiagency-dashboard api.dev.multiagency.ai 90 "MultiAgency dashboard"`. The token
-   goes only into the dashboard staging's server secrets (`PLATFORM_APP_CREDENTIAL`, with
-   `PLATFORM_URL=https://api.dev.multiagency.ai` and `PLATFORM_DEPLOYMENT=multiagency-dashboard`). Deployment names follow
-   `<publisher>-<app>` and are the same on every host: the host separates staging from production, and a credential is
-   bound to one host (user, 2026-10-31; provisional until the first real owner on production). `staging` is the
-   platform's own test deployment (the stand-in runs below); a credential under it acts on that deployment's consents.
-6. Rollback: redeploy the previous image; state stays on the staging volume. Nothing here touches proto.multiagency.ai
-   or invoices.multiagency.ai.
-
-Production (`api.multiagency.ai`, not set up) is the same package with `deploy/platform.json`, the image's default
-`DASHBOARD_FILE`: a new service in the platform's Railway project with its own volume, its own provider key and session
-secret, and the production app credentials issued on it. Production's `dao` service is unchanged.
-
-### Staging evidence on a test agent (run 2026-10-28: [mainnet log](mainnet-log.md#app-access-on-platform-staging-2026-10-28-utc))
-
-User-run, on mainnet, with a small amount of the user's own USDC; never scheduled. It shows the app path end to end:
-setup, creation on the confirm page, consent, a payout request held for the owner, and the owner's vote relayed by an
-app. Until an app's own screens exist, the app is the local testing UI, `scripts/staging-app.ts`: it holds the
-staging credential in one local process and has the owner's wallet sign app texts in a localhost page. It switches
-between Organizations and agents, shows the agent's policy, balances, held payouts and recent owner actions ("Refresh
-view"), and keeps every call and answer in a history that can be copied out for this log. Test tooling only; never
-deployed. The runs below used its earlier, single-Organization form, whose buttons were named differently: "Sign setup
-text and submit" (now "Sign setup text"), "Sign consent (owner, payout, read)" (now "Sign consent", scopes chosen
-beside it), "Add payee" and "Agree payee for withdrawal" (now "Add transfer payee" and "Add withdrawal payee", which add
-to the payees in force instead of replacing them), "Vote approve on the held payout" (now "Vote approve") and "Held"
-(now part of "Refresh view"). Edits it builds from the policy name the revision and digest they were read under, so the
-platform refuses them if the policy changed in between.
-
-Before starting: staging deployed from a candidate that includes app votes and the confirm page; a staging credential
-issued (step 5); an owner wallet whose key is a full-access key of the owner account (check with `view_access_key`) and
-that signs NEP-413 messages, and for the confirm page NEP-366 delegate actions (Meteor and Intear did when last checked);
-a payee account that exists on NEAR, ideally the user's own second account; no other staging run in progress.
-
-1. Start the stand-in from the repository root, with the credential only in the environment:
-   `PLATFORM_URL=https://api.dev.multiagency.ai PLATFORM_APP_CREDENTIAL=tap_… PLATFORM_DEPLOYMENT=staging
-   ORGANIZATION=org_step8 pnpm exec tsx scripts/staging-app.ts`, then open `http://127.0.0.1:4318/` and connect the wallet.
-2. Set up: sign the setup text. Expect the Organization's agent name in the answer.
-3. Create the agent. Per the provider's docs creation is NEP-366, so the platform's confirm page opens: check that it
-   names this deployment, Organization and agent and shows the payout policy at creation, then sign twice (the page's
-   own text, then the action). Read the owner status until `SUCCESS`. Record the standard that came back, the wallet,
-   and what the wallet showed for each of the two signatures.
-4. Sign the consent (owner, payout, read). Expect it stored.
-5. Issue the payout grant (NEP-413 per the provider's docs: signed in the stand-in). Read the owner status until
-   `SUCCESS`.
-6. Add the payee. The payout agent was created with transfers on and no payees, so the first payee changes only
-   `destinations`, which per the provider's docs is signed NEP-413: expect it signed in the stand-in, not on the confirm
-   page. Record which standard came back; if the confirm page opens instead, check it shows `destinations` before and
-   after.
-7. Fund the agent: take a deposit address in the stand-in ("Deposit address", the agent's `deposit` under the payout
-   consent) and send the USDC there, with the memo if one is given, before it expires and above any minimum shown. A
-   deposit credits the confidential balance directly (mainnet-observed 2026-10-13 on a treasury agent; not yet on a
-   payout agent).
-8. Request a payout with a new request ID and the amount. Expect `held` (the payout policy holds every payout for the
-   owner). Ask again with the same request ID and terms: expect the same answer and nothing new sent.
-9. Vote approve from the stand-in. Before signing, check the prepared vote's `payment.terms` against the request.
-   Record what the wallet shows for the vote; the recorded format (`approve:{approval_id}:{wallet_pubkey}:{request_hash}`,
-   2026-10-11) names no payee or amount, so expect only an identifier and a hash. Read the payout status until
-   `succeeded`; the payee checks the receipt in near.com.
-10. Optionally freeze and unfreeze, each on the confirm page.
-
-Stop rules: a payout reading `unknown`, or `processing` that doesn't settle, is never retried under a new request ID;
-stop and report. A refusal is recorded with its code. Afterwards the agent remains (hosted agents are never released)
-with any remaining funds under the signed policy; the consent ends when it expires or the operator revokes it
-(`pnpm app-credential revoke-consent <consent id>` on the host).
-
-Record each step's outcome in `docs/mainnet-log.md` with the date (UTC) and the deployment id; op ids, transaction
-hashes, amounts and payees go only in the private release record.
-
-### What a held swap's approval commits to (prepared, not run)
-
-User-run, on mainnet, on an isolated test agent the laptop CLI owner creates for it (as on 2026-10-13, [mainnet
-log](mainnet-log.md#isolated-test-agent-shield-and-monthly-cap-2026-10-13t0327z)), never a production, staging-hosted or
-treasury agent; never scheduled. It settles the one open question of the durable-proposals design (the workspace's
-`coordination/durable-proposals.md`, section 2a): whether a provider-held confidential swap's `request_hash` covers what
-it buys and its floor. Nothing is swapped: the held swap is rejected.
-
-Before starting: the isolated agent's policy, signed with `pnpm update-policy --policy <file>`, allows `swap`, is
-`confidential`, has `owner_approval` on, lists USDC and wNEAR in `assets`, and has per-transaction, hourly, daily and
-monthly USDC caps and a USD budget just above one tiny swap; a `treasury` grant (`pnpm issue-grant treasury`); a few
-cents of USDC deposited confidential; its own state directory, executor on, autopilot off; no other run on it.
-
-1. Read the starting state: `pnpm inspect` (policy revision, balances, grants). Record the confidential and `available`
-   USDC.
-2. Plan one USDC → wNEAR swap with the agent's own executor: `externalPlan` with a single swap of the tiny amount, then
-   `executePlan` with its id, from the owner's own session on that local executor. The swap goes through `dispatch`,
-   the journal and `authorize` like any other. Expect the plan's event to read `PENDING_APPROVAL` and the plan to stop
-   there; the journal holds the operation as held (it doesn't block sends).
-3. Read, with the provider API on the agent's directory: `getStatus` of its correlation id (`details`, `approval_id`,
-   `dispatch_committed_at` if any, `expires_at`), `getApproval` (`request_type`, `request_data`, `request_hash`,
-   `expires_at`) and `getBalances` (`balance` and `available` for USDC). Recompute sha256 of the canonical JSON of each
-   candidate shape: `{ amount, flow: "swap", kind: "confidential", min_amount_out, token, token_out }` from
-   `request_data`, the same with `chain` or `to` where present, and `{ amount_in, kind: "swap", min_out, token_in,
-   token_out }`. Record which equals `request_hash`, or that none does.
-4. Reject it: prepare an `approval_vote` with verdict `reject` for that approval and sign it as the owner (approving
-   any held swap is refused before signing). Read the status until it ends: expect `FAILED`, reason rejected, and the
-   balances unchanged.
-5. Record it in `docs/mainnet-log.md`: date (UTC), the shapes compared and which matched, whether the hash covers the
-   output asset and floor, the approval's lifetime, and whether `available` excluded the held amount. Op ids, hashes'
-   inputs, amounts and payees go only in the private release record.
-
-Stop rules: the swap reading anything but `PENDING_APPROVAL` after step 2 (a policy that didn't hold it), or an
-unknown outcome: stop, don't reject or resend, and report. Not checked by this run: what the wallet shows for a swap
-vote, and whether an approved swap is held to the floor (approving one isn't built).
-
-### Staging withdrawals on the same test agent (run 2026-10-30: [mainnet log](mainnet-log.md#payout-withdrawals-on-platform-staging-2026-10-30-utc))
-
-User-run, on mainnet, with small amounts of the user's own wNEAR and USDC; never scheduled. It shows what is offline-
-and stack-tested only: a withdrawal to a NEAR account arriving (wNEAR as native NEAR, USDC as USDC), the fee 1Click
-takes, the registration refusal, and what a held withdrawal's approval carries. The stand-in drives it, as above.
-
-Before starting: staging deployed from a candidate that includes withdrawals and the registration check; the test agent
-from the run above, with its consent, grant and payee; the payee registered on the USDC contract (`storage_balance_of`
-answers an object, not `null`); a second NEAR account that exists and is not registered on USDC (`null`); no other
-staging run in progress.
-
-1. Start the stand-in as above and enter the agent's name. Each policy edit below opens the confirm page: check the
-   fields it shows before and after, then sign twice. Read the owner status until `SUCCESS`.
-2. Agree the payee for withdrawal ("Add withdrawal payee"). Expect `actions` to gain `withdraw` and `destinations`
-   a `withdraw` entry on chain `near` with no memo.
-3. Allow wNEAR with a small cap ("Allow wNEAR", in yoctoNEAR). Expect `assets` to gain `nep141:wrap.near` and `limits` a
-   wNEAR cap per payout, day and month, every other cap unchanged.
-4. Turn owner approval off. Every payout within the policy is then paid without a vote, transfers included, until
-   step 9.
-5. Fund wNEAR: "Deposit address" with asset wNEAR, then send wNEAR as the answer says.
-6. Request a small wNEAR withdrawal (delivery "withdraw to chain near"). Expect `succeeded`. Record the payee's native
-   NEAR received against the amount (the fee), and how long it took.
-7. Request a small USDC withdrawal to the same payee. Expect `succeeded`; record the USDC received against the amount.
-8. Request a USDC withdrawal to the unregistered account. Expect the refusal `recipient_not_registered`, with nothing
-   recorded (`payouts/status` reads `not_found`) and nothing sent.
-9. Turn owner approval on. Request a small wNEAR withdrawal: expect `held`. Record what `held` and the owner status show
-   for it. Vote approve: expect it refused before the wallet is asked (approving a held withdrawal isn't available).
-   Vote reject (signed in the stand-in): expect `failed` and nothing paid.
-
-Stop rules as above. Record each outcome in `docs/mainnet-log.md`; amounts, fees and payees go only in the private
-release record. What step 9 shows decides whether approving a held withdrawal can be bound and enabled
-([enforcement](enforcement.md)).
+The staging host, its configuration and the dated staging runs are in [platform staging](platform-staging.md).
 
 ## Payout executor
 
@@ -556,106 +388,7 @@ a separate owner action.
 
 ## Unattended run: observing the treasury autopilot
 
-How a 24-hour observation of the scheduled autopilot is started, recorded and reported. It answers one
-question: does the scheduler run on its own without missed ticks, duplicate execution, actions outside its
-schedule, or manual recovery? It says nothing about custody guarantees or economic benefit
-([enforcement](enforcement.md)).
-
-### What records the evidence
-- **The scheduler itself**, not a watcher, appends synced lines to `.evidence/<agent id>.jsonl` in the
-  agent's state directory (on `dao`, `/data/state/.evidence/`, a volume with backups enabled). See
-  src/evidence.ts.
-  - **`start`, written before the tick acts:** a unique tick id, the trigger (`schedule` or `operator`),
-    the scheduler's recorded settings (on, interval, limit, and the run its schedule counts from), and the
-    build: Railway's deployment id plus sha256 digests of the `src/` tree, `pnpm-lock.yaml` and
-    `package.json`. Also the policy revision and digest, the strategy digest, and the live grant's id and
-    label (never the token).
-  - **`end`, written after:** the book, drift, budget usage and unresolved operations before and after;
-    the plan with its legs and quotes; each step's and shield's status and correlation id; rejection
-    reasons; a proven refusal's code; and the tick's own summary.
-- **Write failures:**
-  - If the start can't be written, the tick doesn't run and the inbox says so.
-  - If the end can't be written, the inbox says so.
-  - A start without an end is reported as incomplete (interrupted, or outcome unknown), never as success
-    or failure.
-  - A line that doesn't parse, such as a torn final line, is counted as unreadable, not trusted.
-  - Every log here appends through one function (`src/synced.ts`). After a torn final line, the next
-    record starts its own line, so a crash mid-append loses only the torn line (offline-tested,
-    `test/synced.test.ts`).
-- **Interventions:** the gateway records every call classified by `isIntervention` in
-  `.evidence/interventions.jsonl` (account, agent, procedure, time) before forwarding it. If the record
-  can't be written, the call isn't run. Calls made on a host directly (CLI, shell) are not in this record.
-  An unreadable line in the record is counted and fails the "no operator interventions" criterion, since
-  it may have been a call. Builds up to c25b61b skipped such lines instead; `pnpm run-report` refuses a
-  gateway that doesn't count them.
-- **Reading the records:** `autopilot/evidence` on the treasury agent server, and `/gw/interventions`
-  (execution or settings permission). In the build under observation (fe3330c), `autopilot/evidence` is operator-only too, so
-  the gateway records each read of it in the intervention record; the report lists those reads separately as
-  operator reads, not interventions. Later builds make it a member read, which the gateway doesn't record.
-- **The report:** `pnpm run-report` (src/run-report.ts, logic in src/report.ts, tests in
-  test/report.test.ts). It reads the evidence, the intervention record and the books, and reports:
-  - each criterion;
-  - configuration segments (build, mandate or scheduler settings);
-  - every tick's outcome: executed, no-op, refused, failed, skipped or incomplete;
-  - the incident behind each failed criterion.
-
-Nothing depends on a chat session or a laptop staying up. Collection runs only while a build containing
-src/evidence.ts runs on `dao`.
-
-### How the report judges
-- **Scheduled work:**
-  - Only completed scheduled ticks count. Operator, skipped and incomplete ticks are named inside any gap
-    they fall in.
-  - Each gap is judged by the interval the later tick recorded, plus 3 minutes.
-  - Records are sorted, and both window bounds apply.
-- **Duplicates:**
-  - "Duplicate references" (an operation or plan named by two ticks) is reported apart from duplicate
-    execution.
-  - Duplicate execution is confirmed only when one plan leg settled twice. An execution no tick recorded
-    with the same terms as one a tick recorded is a suspected duplicate: separate operations can share
-    terms.
-  - If executions no tick recorded exist without such a match, the answer is "cannot be established",
-    not "yes".
-- **Unresolved operations** seen at a tick are reported as an observation. Interventions come only from
-  the gateway's record and operator-triggered ticks, so "none" means none recorded there.
-- **Refusals** show a control was invoked, not that it refused correctly. A failed shield or step, or an error, is a failure.
-
-### Starting a window
-1. Deploy a build whose `src/` contains authorization, evidence collection and the execution-mode
-   removal, from a reviewed snapshot. Record the deployment id, image digest, and the snapshot's `src/`,
-   lockfile and `package.json` digests.
-2. Confirm the autopilot is on and hourly, and that the live grant approves the strategy in force.
-3. Wait for the first scheduled tick. Its start line must match the deployment id and all three digests.
-   Its end line fixes the starting book, budget and mandate.
-4. The window starts at that tick, in UTC, and ends 24 h later.
-
-### During the window
-- Don't press "Run now".
-- Don't force imbalances, raise limits or manufacture trades.
-- A correct no-op or refusal is a valid outcome.
-- Any operator action, payment or approval in the window is reported as an incident, not hidden.
-- If the build, policy, strategy or grant changes, the report starts a new segment. Evidence from earlier
-  segments still counts for its own configuration.
-
-### Generating the report
-Sign in to the dashboard with execution or settings permission. Save the `dao_session` cookie to a 0600 file, never
-pasted anywhere. Then run:
-
-    DASHBOARD_URL=https://proto.multiagency.ai REPORT_COOKIE_FILE=<file> \
-    SINCE=<window start> UNTIL=<window end> OUT=<report.md> pnpm run-report
-
-### Success
-- **The run succeeds when** it has, with incidents recorded honestly:
-  - no unexplained missed ticks;
-  - no duplicate execution;
-  - no execution outside scheduled ticks;
-  - no unresolved operation needing manual recovery;
-  - every tick able to read its book and mandate.
-- **No particular number of swaps is required.**
-- **Reported separately from the result:** operational reliability is one thing. Custody guarantees (atomic
-  budgets, strict monthly caps, the bought asset) and economic benefit are separate claims that one day
-  doesn't support.
-
+How a 24-hour observation of the autopilot is started, recorded and reported (`pnpm run-report`): [unattended run](unattended-run.md).
 
 ## Run progress rollout
 
@@ -708,8 +441,7 @@ An inherited `EXECUTOR=off` remains a process-lifetime restriction even if the i
 contains `EXECUTOR=on` or settings are saved at runtime. Changing executor ownership requires the
 existing stopped-executor procedure; instance-file loading cannot lift that restriction.
 
-
-### Self-service walkthrough deployment (prepared, not deployed)
+## Self-service setup and hosted reservations (prepared, not deployed)
 
 The prepared `deploy/dashboard.json` enables `walkthroughs` and `selfService`. The first selects
 sign-in and real-funds guided walkthroughs as the entry; the second admits verified wallets to
@@ -743,8 +475,9 @@ payments; their payee invoice intake is not provisioned. The existing payout exe
 invoice service keep their current roles. Offline tests cover reservations, restart, ownership
 binding and browser setup; real wallet/Trezu creation must be separately observed after user deployment.
 
+## FastNear reads
 
-### Offline infrastructure follow-up (2026-10-16)
+### Scan bounds and status report (offline-tested, 2026-10-16)
 
 Indexer scans for public transfers and DAO signatures have a 100-page, two-minute bound;
 repeated cursors fail explicitly. An incomplete read is not an empty history or permission to replay.
@@ -753,8 +486,7 @@ for a sanitized read-only status report (latency, HTTP status and numeric indexe
 Missing fields remain null; published source does not establish the deployed service version.
 This diagnostic has been offline-tested, not run against production in this follow-up.
 
-
-### Effect-based indexed reads (local candidate)
+### Request bounds and failures (local candidate)
 
 FastNear failures retain safe operator guidance and now distinguish authentication, rate limit,
 unavailability, malformed responses, incomplete evidence and cancellation internally. No upstream

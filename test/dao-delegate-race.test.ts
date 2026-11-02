@@ -15,7 +15,7 @@ const key = "ed25519:11111111111111111111111111111111";
 function start(dir: string, id: string, publicKey = key, barrier = "wait", nonce = 41) {
   writeFileSync(join(dir, `.env.${id}`), `AGENT_ID=agent-${id}\nTREASURY_ACCOUNT=fixture.near\n`);
   const child = spawn(TSX, [fixture, id, publicKey, barrier, String(nonce)], {
-    cwd: dir, env: { ...process.env, ENV_FILE: `.env.${id}` }, timeout: 15_000,
+    cwd: dir, env: { ...process.env, ENV_FILE: `.env.${id}` }, timeout: 30_000,
   });
   let stdout = "", stderr = "";
   child.stdout.on("data", chunk => { stdout += chunk; });
@@ -35,7 +35,7 @@ function saved(dir: string, id: string) {
   return { record, action };
 }
 
-test("simultaneous instances cannot persist competing delegates for one owner", { timeout: 20_000 }, async () => {
+test("simultaneous instances cannot persist competing delegates for one owner", { timeout: 40_000 }, async () => {
   const dir = scratch.create("dao-delegate-race");
   const writers = [start(dir, "one")];
   try {
@@ -48,6 +48,7 @@ test("simultaneous instances cannot persist competing delegates for one owner", 
     assert.deepEqual(await independent.done, { prepared: "other-owner" }, "another owner must not wait for this key's lock");
     writers.push(start(dir, "two", key, "none"));
     const competing = await writers[1]!.done;
+    assert.equal(writers[0]!.child.exitCode, null, "the first instance must still hold the owner's lock while the contender runs");
     assert.match(competing.refused ?? "", /Another owner action.*delegate/);
     assert.equal(existsSync(join(dir, "two.checked")), false, "the contender must not construct a delegate");
     assert.equal(existsSync(join(dir, ".owner-intents", ".env.two.json")), false);

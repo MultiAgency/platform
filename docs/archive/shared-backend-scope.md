@@ -20,7 +20,7 @@ emphasizes hiding DAO membership from requesters. Idea 03 means isolated purchas
 fixed supplier and invoice terms, expiry, and a separate supplier-settlement workflow. A general
 invoice form alone does not satisfy it. Buyer work orders are implemented and offline-tested;
 supplier conversion/forwarding and mainnet work-order demonstration remain outstanding.
-The supplied Agent Connect experiment catalog and [scope audit](agent-connect-audit.md) define
+The supplied Agent Connect experiment catalog and [scope audit](../agent-connect-audit.md) define
 these ideas; domain names do not define scope or establish completion. Existing evidence stages
 remain in the canonical inventory. Steward remains hidden and experimental.
 

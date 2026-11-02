@@ -8,7 +8,7 @@ was performed. Gateway processes are application isolation, not OS sandboxes or 
 
 | Priority | Finding / reproduction | Owner and correction | Acceptance / remaining limitation |
 | --- | --- | --- | --- |
-| Release gate | The release execution record reports credentials printed by a diagnostic | Owner-controlled rotation; Proto prepares the [rotation procedure](credential-rotation.md) | Still outstanding. Baseline variable names do not establish the complete exposure set. |
+| Release gate | The release execution record reports credentials printed by a diagnostic | Owner-controlled rotation; Proto prepares the [rotation procedure](../credential-rotation.md) | Still outstanding. Baseline variable names do not establish the complete exposure set. |
 | High: disclosure | An actual HTTP RPC response returned a synthetic credential and private path from an arbitrary exception; streaming uses the same conversion | Proto `rpc/base.ts`: generic internal errors; provider detail/title omitted; explicitly public application errors retained | `rpc-errors.test.ts` covers HTTP, stream failures and provider metadata. This does not certify every successful response or private log as secret-free. |
 | High: build confidentiality | Both repository Docker ignore files omitted `.test-artifacts` (containing the private whole-volume archive), hosted/work-order state and backup patterns | Proto: exclude private artifacts, state and backups in both contexts | `build-context.test.ts` pins the exclusion policy. No upload or Docker build was performed. No evidence of an earlier upload is claimed. |
 | High: lifecycle | A real gateway exited successfully before a real synthetic child completed its delayed signal handler | Proto: a supervisor owns children and restart timers; shutdown waits for children and HTTP connections | `gateway-lifecycle.test.ts` failed before the fix; supervisor tests cover failed spawn, crash restart, duplicate start, shutdown during startup and forced termination. |
@@ -61,7 +61,7 @@ separate review and consumer tests; never deploy a sibling server configuration 
 source from the gateway. Existing `send-path` tests retain the single dispatch site. Type-only router
 imports are allowed. This is a bounded dependency check, not proof against arbitrary dynamic loading.
 
-The existing [frontend integration contract](shared-frontend-integration.md) remains authoritative:
+The existing [frontend integration contract](../shared-frontend-integration.md) remains authoritative:
 `/gw/me` advertises explicit `setupAreas`; `/gw/agents` reserves local setup without signing; scoped
 oRPC uses `/a/<instance>/rpc/`; unknown procedures deny by default; selected-agent supplier links are
 authoritative and missing mappings never fall back to another owner. Exact work-order identity and

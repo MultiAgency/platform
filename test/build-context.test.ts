@@ -23,11 +23,12 @@ test("every Dockerfile names what it runs: no root default, and each config sele
   assert.equal(JSON.parse(readFileSync("deploy/railway.gateway.json", "utf8")).build.dockerfilePath, "Dockerfile");
 });
 
-test("every gateway configuration the operations guide deploys is in a package (the prototype's or the platform's)", () => {
+test("every gateway configuration the operations and staging guides deploy is in a package (the prototype's or the platform's)", () => {
   const packaged = ["scripts/package-shared-frontends.mjs", "scripts/package-platform.mjs"].map(script =>
     readFileSync(script, "utf8").match(/for \(const name of \[([^\]]*)\]\) copy\(join\(root, 'deploy', name\)/)?.[1]).join(",");
   assert.ok(packaged.includes("'"), "the packages copy named deploy files");
-  const named = [...readFileSync("docs/operations.md", "utf8").matchAll(/DASHBOARD_FILE=\/app\/deploy\/([\w.-]+)/g)].map(([, file]) => file);
+  const guides = ["docs/operations.md", "docs/platform-staging.md"].map(doc => readFileSync(doc, "utf8")).join("\n");
+  const named = [...guides.matchAll(/DASHBOARD_FILE=\/app\/deploy\/([\w.-]+)/g)].map(([, file]) => file);
   assert.ok(named.length);
   for (const file of named) {
     assert.ok(existsSync(`deploy/${file}`), file);

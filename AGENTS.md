@@ -14,7 +14,9 @@ policy, grant, purpose, authorization, operation, unresolved, held payout, refus
   known, what isn't covered.
 - `docs/architecture.md` — which files are shared core, facilitator or treasury; the one send site; how
   the money path stays safe on one host (journal, reconciliation, checks before each send, invoices).
-- `docs/operations.md` — deployment, executor migration, state preservation, the unattended-run report.
+- `docs/operations.md` — deployment, executor migration, state preservation.
+- `docs/platform-staging.md` — the staging host and its dated runs.
+- `docs/unattended-run.md` — the unattended-run report.
 - `docs/enforcement.md` — what the signed policy guarantees today, how each part is known, and what a
   stronger claim needs (threat model, obligations, open cases, provider questions).
 - `docs/mainnet-log.md` — every dated mainnet run, with proposal numbers; op ids and tx hashes are in the private release record.
@@ -23,8 +25,8 @@ policy, grant, purpose, authorization, operation, unresolved, held payout, refus
 ## The money path
 Files: `src/agent.ts` (dispatch), `authorize.ts`, `lock.ts`, `ops.ts`, `plans.ts`, `treasury.ts`, `autopilot.ts`,
 `invoices.ts`, `invoice-store.ts`, `payouts.ts`, `payout-requests.ts`, `recipients.ts`, `payment-approval.ts`, `owner-intents.ts`,
-`owner-requests.ts`, `owner.ts`, `recover.ts`, `reconcile.ts`. Invariants every change keeps:
-- **One send site.** Every submission (dashboard, CLI, invoice, payout request, autopilot) goes through `dispatch`:
+`owner-requests.ts`, `owner.ts`, `recover.ts`, `reconcile.ts`, `planning/execution.ts`, `proposals/service.ts`. Invariants every change keeps:
+- **One send site.** Every submission (dashboard, CLI, invoice, payout request, autopilot, proposal) goes through `dispatch`:
   under the money lock, no unresolved operation, write-ahead record, then send.
   `test/send-path.test.ts` enforces it.
 - **Fail safe.** An unknown outcome stays unresolved and blocks new sends; it never authorizes
