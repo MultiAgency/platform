@@ -3,9 +3,10 @@
 Every SDK change appends a note under the next version's heading when it is made: what changed for the apps, and any
 wire change all apps must update for together. The first change after a release moves `package-version.ts` to the next
 version, so a package staged or packed from changed sources never carries a released version's number. The release
-candidate dates the heading. Under 0.x, any public-interface change bumps at least the minor version.
+commit dates the heading, before its candidate runs; staging copies this file as it is. Under 0.x, any
+public-interface change bumps at least the minor version.
 
-## 0.4.1
+## 0.4.1 (2026-11-03)
 
 No code, type or wire change.
 

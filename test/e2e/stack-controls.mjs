@@ -117,7 +117,7 @@ export function stackControls(stack, { owner }) {
     },
     /**
      * The owner's NEP-413 signature over a text an app asked for: a consent, a setup, or a prepared intent's `payload`.
-     * Never the platform's sign-in text, which an app must not ask an owner to sign (docs/agent-access.md).
+     * Never the platform's sign-in text, which an app must not ask an owner to sign (docs/app-access.md).
      */
     signOwner: async ({ message, recipient, nonce }) => {
       if (typeof message !== 'string' || typeof recipient !== 'string' || typeof nonce !== 'string') throw new Error('Give message, recipient and nonce');

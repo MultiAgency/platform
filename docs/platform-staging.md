@@ -9,7 +9,7 @@ Staging is meant to run the `platform` package (`scripts/package-platform.mjs`, 
 `dao`): the gateway as a headless host (`headless` in its config), which serves `/health`, app access (`/apps/v1`) and
 the confirm page with its own assets, and answers 404 to everything else, before reading any session: no sign-in,
 owner app, owner RPC, machine credentials or demo hosts. App setup is limited to the areas `appSetup` lists: Payables
-only on the deployed staging host. From 2026-11-02 `deploy/platform-staging.json` lists Treasury too (user's choice; not
+only on the deployed staging host. From 2026-11-02 `deploy/platform-staging.json` lists Treasury too (not
 deployed): an app sets up an Organization's own Treasury agent, as stack-tested in `test/e2e/app-access.spec.mjs`
 (simulated provider and signatures); `deploy/platform.json` stays Payables only until a staging run of that path is
 recorded. It has run it since 2026-10-31T01:03Z (release candidate `b9221b45`, commit `01add07`, Railway deployment
@@ -38,7 +38,7 @@ directory, hosted agents and consents are kept, and the host is unchanged, so si
    goes only into the dashboard staging's server secrets (`PLATFORM_APP_CREDENTIAL`, with
    `PLATFORM_URL=https://api.dev.multiagency.ai` and `PLATFORM_DEPLOYMENT=multiagency-dashboard`). Deployment names follow
    `<publisher>-<app>` and are the same on every host: the host separates staging from production, and a credential is
-   bound to one host (user, 2026-10-31; provisional until the first real owner on production). `staging` is the
+   bound to one host (provisional until the first real owner on production). `staging` is the
    platform's own test deployment (the stand-in runs below); a credential under it acts on that deployment's consents.
 6. Rollback: redeploy the previous image; state stays on the staging volume. Nothing here touches proto.multiagency.ai
    or invoices.multiagency.ai.

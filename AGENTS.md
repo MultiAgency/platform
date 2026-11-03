@@ -17,6 +17,7 @@ policy, grant, purpose, authorization, operation, unresolved, held payout, refus
 - `docs/operations.md` — deployment, executor migration, state preservation.
 - `docs/platform-staging.md` — the staging host and its dated runs.
 - `docs/unattended-run.md` — the unattended-run report.
+- `docs/app-access.md` — `/apps/v1` for app servers: consent, scopes, the confirm page, limits and how each is known.
 - `docs/enforcement.md` — what the signed policy guarantees today, how each part is known, and what a
   stronger claim needs (threat model, obligations, open cases, provider questions).
 - `docs/mainnet-log.md` — every dated mainnet run, with proposal numbers; op ids and tx hashes are in the private release record.

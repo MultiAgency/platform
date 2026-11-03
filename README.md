@@ -231,186 +231,103 @@ of maintaining separate requirement statuses.
 
 ## Not done yet
 
-- `MultiAgency/payables` still carries its own copy of the gateway and money path, including
-  `test/send-path.test.ts`, so a fix made here doesn't reach it. Its frontend calls the platform through the SDK but
-  still imports modules from that copy, so the copy can't be retired yet. `MultiAgency/treasury-prototype` (not
-  archived) still carries one too. The Treasury app (`MultiAgency/treasury`) is built on the SDK and is to replace the
-  prototype and this platform's Treasury pages, which still run on the prototype's hosts.
-- A new prototype must reuse a fixed host `demo` value and agent area. Owner-app `contract.json` is checked at
-  runtime only on hosts served through the shared release server (offline E2E; not deployed). See the
+Each line is a gap; the linked page says how the rest is known. The
+[enforcement assessment](docs/enforcement.md#status) tracks the signed spending envelope.
+
+**Apps and the platform**
+- `MultiAgency/payables` and `MultiAgency/treasury-prototype` (not archived) still carry their own copies of the
+  gateway and money path, so a fix here doesn't reach them; Payables' frontend still imports from its copy. The
+  Treasury app (`MultiAgency/treasury`) is to replace the prototype and this platform's Treasury pages.
+- A new prototype must reuse a fixed host `demo` value and agent area; owner-app `contract.json` is checked at runtime
+  only on hosts served by the shared release server (offline E2E, not deployed). See the
   [integration path](docs/integration-path.md#gaps).
-- Agent connections exist only for a contractor's own reports and are offline-tested and stack-tested, not deployed.
-  A connection token is a bearer: whoever holds it can act within its permissions until it expires (at most 24 hours)
-  or is revoked. Owner connections are not built. See [agent access](docs/agent-access.md#agent-connections-contractor-reports).
-- App access (`/apps/v1`) covers reads, wallet-signed owner actions and payout requests (sent at most once per
-  `requestId`): confidential USDC transfers, mainnet-observed on staging 2026-10-28 ([mainnet log](docs/mainnet-log.md));
-  and withdrawals of wNEAR (arriving as native NEAR, per the provider's docs) or USDC to agreed NEAR accounts (USDC only
-  to an account registered on the USDC contract, else refused before sending): USDC
-  both mainnet-observed on staging 2026-10-30, paid without a vote, rejected when held, and the USDC refusal of an
-  unregistered account ([mainnet log](docs/mainnet-log.md)). A held withdrawal can be rejected, not approved: its
-  approval's hash is now observed, but approving one isn't built yet; so under the payout
-  template, which holds every payout for the owner, a withdrawal is paid only once the owner turns that off
-  ([enforcement](docs/enforcement.md)). Consents and hosted agent setup work for wallet-owned
-  agents only; DAO consent and setup are not built. Hosted
-  agents an app sets up belong to that deployment and Organization (one per owner and area), and nothing else reaches
-  them; each is its own process, at most 32 per host, so many Organizations need more hosts. With `owner` scope an app
-  receives an owner intent only when it is NEP-413 (a text the wallet can show); a NEP-366 one (creation, freeze, unfreeze,
-  on-chain policy edits) reaches the app only as a link to the platform's confirm page, where the owner reads the
-  agent's record and signs; the bytes go only to a visitor who first signs the link's readable text with the owner's
-  key. A dishonest app that gets the owner to sign that text on its own page could still ask for a blind signature. Votes on
-  held payouts can be relayed: the platform binds each to the held payout's provider evidence and returns its proven
-  terms for the app to show; the vote's own text names no payee or amount, so that display is the only place the owner
-  sees them. Whether each wallet shows NEP-413 text is not checked. These limits bind only the app route: an owner who signs the platform's sign-in text on an
-  app's page gives that app a full platform session, which can send payouts within the signed policy without
-  another signature. See [agent access](docs/agent-access.md#app-access-server-to-server). An app service
-  credential is a bearer: whoever holds it acts within the consents owners gave that deployment until it expires or is
-  revoked. See [agent access](docs/agent-access.md#app-access-server-to-server).
-- Treasury proposals through apps (`treasury` scope; `treasury-execute` for plans without a signature per swap) are
-  offline-tested (`test/treasury-proposals.test.ts`, `test/app-access.test.ts`) and stack-tested on the stack's own
-  Treasury agent (`test/e2e/stack-app.spec.mjs`), not deployed or mainnet-observed; the platform host doesn't set up
-  Treasury agents yet. The owner's approval of a proposal is
-  enforced by the platform, not the provider: whoever holds the agent's treasury grant can still swap within the policy
-  without it. What a provider-held swap's vote commits to is unobserved, so held swaps are not used
-  ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
-- A provider failure while preparing an owner action is reported as `unknown`: after a mutation, only a proven refusal
-  keeps its code for the caller (`src/rpc/base.ts`). Preparing signs and sends nothing, so nothing moved; retrying
-  prepares a new intent. Seen on staging 2026-10-30: an `owner_approval` edit failed once this way and succeeded on
-  retry, with nothing recorded for the failure. Every failure that reaches a caller as `unknown` is now logged for the
-  operator (`unclassified_error`: procedure, error class, throw site, and a provider error's status, code and request
-  ID; never its message or detail), from source after 2026-10-30; the builds deployed on staging and production log
-  nothing for it.
-- A vote the platform's own checks refuse (for example approving a held withdrawal) reaches the app as `refused`, code
-  `local_authorization_held`, from source after 2026-10-30 (offline- and stack-tested). The builds deployed on staging
-  and production still answer `unknown` for it (seen on staging 2026-10-30), which there also means nothing reached the
-  provider.
-- Payables' frontend (`97ddec7`, re-checked 2026-10-16) passes the source contract preflight now that
-  The platform serves `compensation`; this is a source-type check only. Its build is not yet exercised in the
-  real-stack E2E suite, and owner-app builds are not checked for compatibility at runtime.
-  See [consumer compatibility](docs/shared-frontend-integration.md#consumer-source-contract-preflight).
+- Payables' frontend (`97ddec7`, 2026-10-16) passes the source contract preflight only; its build isn't in the
+  real-stack E2E suite. See
+  [consumer compatibility](docs/shared-frontend-integration.md#consumer-source-contract-preflight).
+- App access (`/apps/v1`) isn't in production. Mainnet-observed on staging: confidential USDC payouts (2026-10-28) and
+  withdrawals of wNEAR or USDC to agreed NEAR accounts (2026-10-30) ([mainnet log](docs/mainnet-log.md)). Wallet-owned
+  agents only; a held withdrawal can be rejected, not approved, so under the payout template it is paid only once the
+  owner turns approval off; at most 32 hosted agents per host. A dishonest app can still get a blind NEP-366 signature
+  by having the owner sign the confirm link's text on its own page; a held payout's vote text names no payee or amount,
+  so the app's display is the only place the owner sees them; an owner who signs the platform's sign-in text on an
+  app's page gives it a full session; a service credential is a bearer. See [app access](docs/app-access.md).
+- Treasury proposals (`treasury`, `treasury-execute`) are offline- and stack-tested only, and the platform host
+  doesn't set up Treasury agents yet. A proposal's approval is the platform's check, not the provider's: whoever holds
+  the treasury grant can swap within the policy without it. Held swaps aren't used: what their vote commits to is
+  unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
+- Agent connections exist only for a contractor's own reports (offline- and stack-tested, not deployed); a token is a
+  bearer for at most 24 hours; owner connections aren't built. See
+  [agent access](docs/agent-access.md#agent-connections-contractor-reports).
+- A provider failure while preparing an owner action reaches the caller as `unknown`; nothing was signed or sent, and
+  retrying prepares a new intent (seen on staging 2026-10-30). The deployed staging and production builds predate two
+  source changes after 2026-10-30 ([errors at the RPC boundary](docs/architecture.md#errors-at-the-rpc-boundary)): there
+  a vote the platform's own checks refuse answers `unknown`, not `refused` (`local_authorization_held`), and a failure
+  that reaches a caller as `unknown` isn't logged (`unclassified_error`).
 
-- A send whose provider reply is lost blocks its executor's later sends until reviewed, and no review procedure exists
-  yet. Nothing is sent twice, and the payout stays approvable from the provider's history, but the block does not clear
-  after settlement, and `pnpm reconcile` does not clear it. See [enforcement](docs/enforcement.md) (lost provider reply).
+**Money path and recovery**
+- A send whose provider reply is lost blocks its executor's later sends, with no review procedure yet; nothing is sent
+  twice, but the block doesn't clear after settlement or with `pnpm reconcile` ([enforcement](docs/enforcement.md)).
+- A provider `FAILED` status is treated as terminal; it isn't verified to make a replacement payment safe
+  ([recovery guidance](DEMO.md#the-live-moment-one-invoice-end-to-end-facilitator)).
+- Payment recovery reads and owner-action discovery are offline-tested only. Discovery scans at most 250 provider
+  records from the past day (an incomplete scan says so); original terms depend on provider and local retention; owner
+  actions are found only on the instance holding their records; the dashboard's repeat-signing guard is not a
+  cross-instance lock. Unverified ownership after a cold gateway restart stays denied.
+- Prepared-invoice continuation is offline-tested (`test/invoice-http.test.ts`), not on a deployed host; it refuses
+  revised or submission-attempted invoices and doesn't resolve unknown outcomes.
+- The local duplicate check covers only a manual payout matching a held one; provider replay deduplication is
+  unverified.
+- The auto-execute ceiling compares exact decimal sums; raw-amount conversion, valuations and the plan-preview total
+  still use floating point. Provider caps and the USD budget are unaffected.
 
-- FastNear deposit batching awaits a verified raw-transaction hash mapping; deployed indexer
-  freshness remains unverified. Single-hash receipt reads remain in place. See the
-  [infrastructure follow-up](docs/archive/infrastructure-review.md#follow-up-review-2026-10-16).
+**Policy and provider**
+- The policy's asset list limits what the agent spends, not what it buys: the wallet lets a swap into an unlisted
+  asset through. This server refuses one before sending; the wallet should.
+- The owner can't verify the enforced policy: it is stored encrypted to the custody keystore, and the public
+  `store_wallet_policy` takes no `agent_policy_hash`. The mandate digest is this server's own.
+- A refusal says `policy_denied` without naming the rule. Confidential credits from outside the API can't be
+  attributed: nothing public indexes `intents.far`.
+- Signing requests stay open 5 to 10 minutes, so a slow council misses the window. Trezu shows these proposals as a
+  generic "sign on v1.signer"; the dashboard's "What am I voting on?" shows what each does.
+- DAO delegate preparations are serialized per owner on one host only (offline-tested); file them one at a time.
 
-- The shared-host infrastructure hardening is local, not deployed; see the
-  [architecture review](docs/archive/infrastructure-review.md) for failure reproductions, source provenance
-  and remaining isolation/recovery limits. Coordinated [credential rotation](docs/credential-rotation.md)
-  after the diagnostic exposure remains outstanding and requires owner-controlled maintenance.
+**Owners, wallets and payees**
+- A wallet-owned agent was created, granted and swapped on its own from a local dashboard on mainnet (2026-10-13,
+  [mainnet log](docs/mainnet-log.md)); behind the hosted gateway it is offline-tested only. The dashboard offers the
+  wallets HOT's near-connect list declares for delegate signing (today HOT, Meteor, Intear, Ledger and NEAR Mobile);
+  Meteor has signed so far.
+- The wallet picker loads that list from its `main` branch, unpinned, and each wallet's code from where it points. The
+  server checks every owner signature before relaying it, but a changed wallet could phish for keys.
+- Agreed terms (an amount per invoice and a deadline) are shown to voters beside each held payout; nothing refuses an
+  invoice outside them. A DAO or other contract account can be paid but can't ask to be paid on the invoice page
+  (sign-in there needs a full-access key).
+- Multi-owner hosted onboarding, scoped payee journeys and self-service hosted creation are offline-tested only:
+  hosted creation, grants and payments for arbitrary wallet and DAO owners, Trezu setup, capacity under load and
+  invoice intake for new Payables agents aren't observed. The 32-instance cap isn't abuse-resistant admission. Payee
+  conversion and forwarding aren't built.
+- Work orders have no mainnet lifecycle yet; partial invoices, amendments, automatic residual return and archival
+  aren't built; executors run on one host, eight by default. Exact invoice matching and one payment identity are
+  local checks, not provider guarantees. See [operations](docs/operations.md#work-order-executors). The live
+  owner-to-payee work-order journey and fresh payee sign-in are unverified
+  ([bounded journey check](docs/shared-frontend-integration.md#bounded-payables-journey-check--2026-10-16-utc)).
+- Campaign winner identity and prize validation aren't built.
 
-- General live AG-UI agent orchestration is not implemented. Short-guide guidance is deterministic
-  UI observation; the existing Treasury run recordings remain separate evidence.
+**Treasury**
+- The autopilot (off by default) hasn't run unattended for days; outside the dashboard its warnings reach the owner
+  only through the optional Telegram notices.
+- The inline strategy workflow is offline- and browser-fixture-tested only. Stop prevents future ticks, but a tick
+  already started can still submit; configuration coordination is single-host.
+- Sweep covers managed USDC, wNEAR and ETH only.
+- The run-log adapter, export and recording inspector are offline-tested, with no timed playback, live stream or
+  real-recording validation
+  ([Treasury](docs/treasury.md#run-log-adapter-and-export-offline-tested),
+  [progress rollout](docs/operations.md#run-progress-rollout)).
 
-- Multi-owner shared-host onboarding and scoped payee journeys remain offline-tested only. Complete hosted
-  owner creation, grant issuance and payments for arbitrary wallet and DAO owners have not been
-  observed on mainnet through this build. Payee conversion and forwarding remain unimplemented.
-
-
-Self-service hosted creation is offline-tested only. Mainnet wallet and Trezu setup, capacity under load, and invoice intake for newly created Payables agents have not been demonstrated. Reservations are bounded to 32 instances; the cap is not abuse-resistant admission or distributed execution.
-
-Work orders have no mainnet lifecycle evidence yet. Partial invoices, amendments, automatic residual-fund
-return, automatic archival, and payee conversion/forwarding are not implemented. Work-order executors
-run on one host, with a default capacity of eight; this is not distributed fencing. Exact invoice matching
-and one retained payment identity are local checks, not provider guarantees of lifetime spending or
-settlement by a deadline. See [operations](docs/operations.md#work-order-executors) before rollout.
-
-The guided walkthroughs are locally implemented and tested with offline browser fixtures, not verified
-on the deployed hosts. They depend on existing permissions, configured services and retained records;
-they cannot guarantee a swap, immediate owner approval, or settlement.
-
-Sweep covers managed USDC, wNEAR and ETH only; it does not establish that other assets are confidential.
-Campaign winner identity and prize validation are not built. The local duplicate check covers only
-a manual payout matching an existing held payout; provider replay deduplication remains unverified.
-
-- The local auto-execute ceiling now sums and compares the decimal representations of individual
-  numeric USD estimates exactly (offline-tested, not verified on the deployed hosts). Raw-amount
-  conversion, individual valuations and the earlier plan-preview total still use floating-point
-  arithmetic; their precision limitations remain. Provider-enforced policy caps and USD-budget
-  accounting are unchanged; see [enforcement](docs/enforcement.md).
-
-- Payment recovery reads and owner-action discovery are locally implemented and offline-tested, not
-  verified on the deployed hosts. Recent payout discovery scans at most 250 provider records and
-  filters to the past day; incomplete scans are explicit. Original terms depend on provider/local
-  retention, and owner actions are discoverable only on the instance holding their durable records.
-  The dashboard withholds repeat signing while a recorded action is prepared or submitted; this is
-  not a new cross-instance lock or a stronger payment-settlement guarantee.
-  During setup failure, read-only Activity depends on the gateway continuing to authorize access.
-  Unverified ownership after a cold gateway restart remains denied; retained records are not fresh
-  provider outcomes. Setup recovery is locally tested, not verified on deployed hosts.
-
-- The inline Treasury strategy workflow is locally implemented and offline/browser-fixture tested,
-  not deployed or mainnet-observed. Accounts with settings permission edit allocations and limits, save with the schedule off,
-  and explicitly enable only after the owner authorizes the saved strategy. Server controls reject
-  stale reviews; stop does not require provider availability and prevents future scheduled ticks. A tick
-  already started can submit further operations; submitted operations may finish. Configuration coordination is single-host,
-  not distributed fencing; direct file edits and provider changes after a read remain outside it.
-- Prepared-invoice continuation is locally implemented and offline-tested (`test/invoice-http.test.ts`),
-  but not yet verified on a deployed host. It reuses the authenticated payee’s stored terms and operation
-  identity; revised or submission-attempted invoices are refused. It does not resolve unknown outcomes.
-
-- Payee work-order selection now retains the selected order in the URL across reloads;
-  **Check work orders** retries that exact record after an initial read failure
-  (offline browser-tested, not deployed). An exact live owner-to-payee work-order journey
-  and fresh payee-wallet sign-in remain unverified; see the
-  [bounded journey check](docs/shared-frontend-integration.md#bounded-payables-journey-check--2026-10-16-utc).
-
-- The AG-UI run-log adapter, private dashboard export and read-only recording inspector are offline-tested
-  ([Treasury](docs/treasury.md#run-log-adapter-and-export-offline-tested)). The inspector steps through
-  recorded observations, with each recorded stage's start and return grouped together and individual
-  observations available on demand; it provides no timed playback or live stream. A missing stage
-  return stays unknown even after a run end is recorded. New exports use envelope version 3 with
-  AG-UI protocol 1.0 lifecycle validation: an unclosed stage or explicitly failed run ends with
-  `RUN_ERROR`, not a fabricated stage completion. Versions 1/2 remain readable as legacy recordings.
-  New ticks record intermediate
-  stages and provider-accepted submissions for the polling run view; older ticks retain only their
-  original evidence. See the [progress rollout](docs/operations.md#run-progress-rollout) before deployment.
-  No real-recording or mainnet validation is claimed for these additions.
-
-The [enforcement assessment](docs/enforcement.md#status) tracks the current evidence for the signed
-spending envelope, including cumulative limits, policy binding and execution-artifact trust.
-A provider `FAILED` status is currently treated as terminal locally; it is not independently verified
-as proof that a replacement payment is safe. See [recovery guidance](DEMO.md#the-live-moment-one-invoice-end-to-end-facilitator).
-
-- The API keeps signing requests open for 5 to 10 minutes, so a slow council misses the window.
-- Trezu shows these proposals as a generic "sign on v1.signer", so a member voting there sees only a hash.
-  The dashboard's "What am I voting on?" shows what each one does; check it there first.
-- DAO delegate preparations sharing owner-intent storage on one host are serialized per owner and
-  refuse while an earlier delegate submission is unresolved (offline-tested). Other hosts and signing
-  clients are not coordinated; file those actions one at a time. See [enforcement](docs/enforcement.md).
-- The policy's asset list limits what the agent spends, not what it buys: the wallet lets a swap into an
-  unlisted asset through. This server refuses one before sending, but the wallet should enforce it.
-- The owner can't verify the enforced policy: it is stored encrypted to the custody keystore, and the
-  public `store_wallet_policy` takes no `agent_policy_hash`. The mandate digest is this server's own;
-  the signed payload isn't shown to commit to it.
-- Confidential credits from outside the API can't be attributed: nothing public indexes `intents.far`.
-- A refusal says `policy_denied` without naming the rule that refused.
-- An agent owned by a person's wallet was created and granted from a local dashboard on mainnet, and its
-  autopilot then swapped under that grant on its own (2026-10-13, [mainnet log](docs/mainnet-log.md));
-  behind the hosted gateway it is offline-tested only. Creating one signs a NEAR delegate
-  action; the dashboard offers only the wallets HOT's near-connect list declares it for (today HOT, Meteor,
-  Intear, Ledger and NEAR Mobile), read live; Meteor has signed through it so far.
-- The owner's wallet picker loads HOT's near-connect wallet list from its `main` branch, unpinned, and each
-  wallet's code from wherever that list points. The server checks every owner signature against what it
-  prepared before relaying it, but a changed wallet could still phish for the owner's keys.
-- Agreed terms (an amount per invoice and a deadline) are shown to voters beside each held payout;
-  nothing refuses an invoice outside them.
-- A DAO or other contract account can be paid, but can't ask to be paid on the invoice page: sign-in
-  there needs a full-access key.
-- The autopilot (off by default) hasn't yet run unattended for days. Outside the dashboard, its warnings
-  reach the owner only through the optional Telegram notices (Notifications, above).
-
-The signed-in `/demos` collection offers short guides for all three workflows. `/treasury`,
-`/payables` and `/invoices` select an accessible agent for the corresponding complete walkthrough.
-After selection, `/a/<instance>/demos/<workflow>` and `/a/<instance>/walkthrough/<workflow>` use the
-same private action controls. Existing `/a/<instance>/demo` links remain valid. Full-app links point
-to the dedicated product domains. Opening, switching versions or reloading submits nothing.
-
-Short guides consume validated AG-UI CUSTOM events projected from UI observations. Guidance is
-currently deterministic, not LLM-directed, and is not an executor run log or settlement evidence.
-Exact selected plan/payment identities remain in the existing outcome views; no selection is
-inferred after reload. Work-order guides use the existing per-order controls and retained identities.
-Live AG-UI agent orchestration across all three workflows remains unimplemented. Treasury run
-recordings retain their separate evidence-backed AG-UI format.
+**Infrastructure and walkthroughs**
+- The shared-host hardening is local, not deployed ([architecture review](docs/archive/infrastructure-review.md)), and
+  the coordinated [credential rotation](docs/credential-rotation.md) after the diagnostic exposure is outstanding.
+- FastNear deposit batching awaits a verified raw-transaction hash mapping; deployed indexer freshness is unverified
+  ([follow-up](docs/archive/infrastructure-review.md#follow-up-review-2026-10-16)).
+- Guided walkthroughs and short guides (`/demos`) are tested with offline browser fixtures, not on the deployed hosts,
+  and can't guarantee a swap, prompt approval or settlement. Guidance is deterministic, not an LLM; live AG-UI agent
+  orchestration isn't built.

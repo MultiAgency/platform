@@ -365,7 +365,7 @@ one only as a confirm page link), `payout` (payout requests, their status, held 
 `treasury-execute`, only beside `treasury` (plans prepared and executed without a signature per swap, only under a
 grant binding the plan's strategy). Wallet owners
 only; DAO consent is not available yet. Revocable by the deployment or the operator; a revocation is a permanent tombstone. Offline- and stack-tested;
-mainnet-observed on platform staging (2026-10-28); not in production. See docs/agent-access.md.
+mainnet-observed on platform staging (2026-10-28); not in production. See docs/app-access.md.
 
 
 **Treasury proposal**:
@@ -386,7 +386,7 @@ deployment and Organization, agent, and for a policy edit each field before and 
 releases the bytes to sign only after the owner's key signs the link's readable text. It submits only the owner's
 signature over the held bytes, once, before the intent expires. Offline- and stack-tested with a simulated wallet;
 mainnet-observed on platform staging (agent creation 2026-10-28; policy edits 2026-10-30); not in production. See
-docs/agent-access.md.
+docs/app-access.md.
 
 **Platform host**:
 The platform's own host for apps (`api.dev.multiagency.ai` for staging, later `api.multiagency.ai`), run from the

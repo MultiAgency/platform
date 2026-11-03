@@ -28,6 +28,23 @@ What stays visible or known: each approval is a public DAO proposal, so its timi
 NEAR Intents can see the mapping, and their terms don't guarantee confidentiality. A held payment
 stays approvable for 24 hours, but each vote request expires in about 5 minutes.
 
+## The treasury agent rebalancing itself, 2026-10-12 (UTC)
+
+The strategy (a target allocation, a cost cap at each swap's floor, and a ceiling per hourly run) is
+approved only by a grant whose label carries its digest.
+
+| Time | What happened |
+|---|---|
+| 13:19 | The strategy's ceiling was raised without a new grant: the autopilot planned a swap and sent nothing, asking the owner for a grant with the new label (inbox; no request in the ops log) |
+| 13:28–13:55 | The DAO voted grants for the new strategy, one per change of ceiling and cost cap |
+| 13:57, 14:06 | The swap passed the strategy and grant checks; the Agent API refused it with `spend_budget_exceeded`, recorded as refusals. Nothing moved |
+| 16:17 | After the budget reset, the autopilot executed the swap alone, its plan bound to the strategy digest, bringing the book close to its target |
+| 17:20 | Execution moved to the hosted `dao` service on Railway (deployment `c8934842`); the laptop's dashboard is approve-only |
+| 20:36 | On Railway, Run now executed a rebalance alone, as two quoted legs, settling the book on its target. A run executes only if its whole plan is within the ceiling and each leg meets a minimum; the run before, over the ceiling, was left for the owner |
+
+Along the way, two new pre-send checks held every agent until fixed: refused requests counted as missing
+history, and budgets compared as text, so one amount written two ways differed. Both failed safe: nothing was sent.
+
 ## Invoices, 2026-10-12
 
 The invoice page went live on Railway. A contractor signed in with a NEAR wallet as an agreed payee,
@@ -48,44 +65,22 @@ A member who may propose and vote filed the approval and voted on it in one tran
 + `act_proposal`), so proposal #51 executed at once and the server submitted the signature. The payout
 itself then failed at the provider, with the reason redacted. The wallet was empty when checked
 afterwards, which suggests insufficient funds (the deployment then had no balance check), but that's
-unproven. A failed vote rolls the filing back: reproduced on a local sandbox with mainnet's DAO code, a
-stale id, a missing id and too little gas each left no proposal, kept the id counter and refunded the
-bond.
+unproven.
 
-## A held payout stays in the reported balance, 2026-10-13
-
-The empty payout wallet was credited (15:22:52Z), an invoice payout was held for approval (15:23:23Z),
-and the confidential balance read the same at 15:25:03Z: the provider's reported balance still includes
-payouts held for approval. The balance check subtracts held payouts itself, so it doesn't count them
-twice.
-
-## The treasury agent rebalancing itself, 2026-10-12 (UTC)
-
-The strategy (a target allocation, a cost cap at each swap's floor, and a ceiling per hourly run) is
-approved only by a grant whose label carries its digest.
-
-| Time | What happened |
-|---|---|
-| 13:19 | The strategy's ceiling was raised without a new grant: the autopilot planned a swap and sent nothing, asking the owner for a grant with the new label (inbox; no request in the ops log) |
-| 13:28–13:55 | The DAO voted grants for the new strategy, one per change of ceiling and cost cap |
-| 13:57, 14:06 | The swap passed the strategy and grant checks; the Agent API refused it with `spend_budget_exceeded`, recorded as refusals. Nothing moved |
-| 16:17 | After the budget reset, the autopilot executed the swap alone, its plan bound to the strategy digest, bringing the book close to its target |
-| 17:20 | Execution moved to the hosted `dao` service on Railway (deployment `c8934842`); the laptop's dashboard is approve-only |
-| 20:36 | On Railway, Run now executed a rebalance alone, as two quoted legs, settling the book on its target. A run executes only if its whole plan is within the ceiling and each leg meets a minimum; the run before, over the ceiling, was left for the owner |
-
-Along the way, two new pre-send checks held every agent until fixed: refused requests counted as missing
-history, and budgets compared as text, so one amount written two ways differed. Both failed safe: nothing was sent.
+A failed vote rolls the filing back: reproduced on a local sandbox with mainnet's DAO code, a stale id, a missing id
+and too little gas each left no proposal, kept the id counter and refunded the bond.
 
 ## Isolated test agent: shield and monthly cap, 2026-10-13T03:27Z
 
 Run with the user's explicit authorization, during the unattended-run window, from base `9b9fe64` plus the
 then-staged runner and `update-policy`, on an agent created for these tests by the laptop CLI owner,
 never a production treasury or payout agent. Gas and storage ceilings weren't checked by the runner; the
-remaining funds stay in the test agent. One grant, autopilot off. The test policy: a USDC monthly cap
-smaller than two of the swaps below, wider caps per transaction, hour and day, and a USD budget well above
-the test's spend in every window; the destination list copied byte-for-byte from the treasury agent's
-revision 11. Funded with a little USDC (confidential) and a little wNEAR (public).
-Preflight: the applied policy matched, budget zero in every window, quote worst cost 179 bps.
+remaining funds stay in the test agent.
+
+One grant, autopilot off. The test policy: a USDC monthly cap smaller than two of the swaps below, wider caps per
+transaction, hour and day, and a USD budget well above the test's spend in every window; the destination list copied
+byte-for-byte from the treasury agent's revision 11. Funded with a little USDC (confidential) and a little wNEAR
+(public). Preflight: the applied policy matched, budget zero in every window, quote worst cost 179 bps.
 
 | Step | Result |
 |---|---|
@@ -132,6 +127,26 @@ A read-only capture from `api.demo.agentsonintents.com`; nothing was generated, 
 The sanitized results, capture manifest, raw captures and one-off scripts are kept in the private release
 record.
 
+## A held payout stays in the reported balance, 2026-10-13
+
+The empty payout wallet was credited (15:22:52Z), an invoice payout was held for approval (15:23:23Z),
+and the confidential balance read the same at 15:25:03Z: the provider's reported balance still includes
+payouts held for approval. The balance check subtracts held payouts itself, so it doesn't count them
+twice.
+
+## One-click approvals paid, 2026-10-13
+
+Two invoice payouts, each held for the DAO, approved from the dashboard by a member who files and votes in
+one transaction; both proposals read Approved on chain with one vote.
+
+| Proposal | Held | Approval filed → signed | Paid |
+|---|---|---|---|
+| #53 | 15:23:23Z | 15:26:01Z → 15:26:20Z | 15:26:25Z |
+| #54 | 17:07:54Z | 17:10:54Z → 17:11:17Z | 17:11:25Z |
+
+Each payout settled within about 25 seconds of its approval being filed (the payout agent's own history).
+The payout before them, approved by #51 on 2026-10-12, had failed with an empty wallet.
+
 ## A wallet-owned agent from the dashboard, 2026-10-13T21:26Z
 
 The first agent owned by a person's wallet rather than the DAO: a personal NEAR account, signing in Meteor Wallet
@@ -158,19 +173,6 @@ confidential, so there was nothing to shield, and every leg was under the minimu
 wallet owning, granting and running the agent, and its autopilot moving money on its own under the
 wallet-issued grant. It ran locally; behind the hosted gateway a wallet-owned agent is offline-tested only.
 
-## One-click approvals paid, 2026-10-13
-
-Two invoice payouts, each held for the DAO, approved from the dashboard by a member who files and votes in
-one transaction; both proposals read Approved on chain with one vote.
-
-| Proposal | Held | Approval filed → signed | Paid |
-|---|---|---|---|
-| #53 | 15:23:23Z | 15:26:01Z → 15:26:20Z | 15:26:25Z |
-| #54 | 17:07:54Z | 17:10:54Z → 17:11:17Z | 17:11:25Z |
-
-Each payout settled within about 25 seconds of its approval being filed (the payout agent's own history).
-The payout before them, approved by #51 on 2026-10-12, had failed with an empty wallet.
-
 ## The treasury's resting position, 2026-10-13T23:03Z
 
 A read-only check of the treasury agent: no public NEAR Intents balance on chain (`intents.near`
@@ -183,11 +185,13 @@ which allows public swaps and unshield ([enforcement](enforcement.md)).
 The treasury agent keeps nothing public on its own (its deposits and swaps are confidential), so a public
 balance was made on purpose: a one-time public deposit address for USDC from the API (a direct call with
 `confidential: false`; the dashboard only asks for confidential ones). A small USDC transfer on NEAR to that
-address was credited to the agent's public balance (deposit created 00:33:15Z, settled 00:37:24Z). The
-dashboard's Sweep (Automations: the same `sweep` the autopilot runs each tick) shielded it: SUCCESS, 00:39:13Z
-to 00:39:24Z. At 00:41:38Z the public balance was empty again. Before the USDC, a native NEAR transfer was sent
-to the same address by mistake; it hasn't appeared on the agent and its outcome is unknown. Privacy cost: the
-sending account is linked on chain to that deposit address.
+address was credited to the agent's public balance (deposit created 00:33:15Z, settled 00:37:24Z).
+
+The dashboard's Sweep (Automations: the same `sweep` the autopilot runs each tick) shielded it: SUCCESS, 00:39:13Z to
+00:39:24Z. At 00:41:38Z the public balance was empty again.
+
+Before the USDC, a native NEAR transfer was sent to the same address by mistake; it hasn't appeared on the agent and
+its outcome is unknown. Privacy cost: the sending account is linked on chain to that deposit address.
 
 ## A bounty paid, 2026-10-14 (UTC)
 
@@ -198,6 +202,12 @@ for approval at 00:47:18Z. A member approved it from the dashboard in one transa
 00:50:07Z, Approved, one vote); the approval was signed by 00:50:23Z and the confidential transfer settled at
 00:50:32Z.
 
+## A rebalance charges the treasury's budget, 2026-10-14T00:50Z
+
+A Run now on the treasury agent, on dao `0d5964ea` (from `d9cb581`), executed one small USDC → wNEAR leg (settled
+00:51:48Z). The run's record shows the daily USD budget left before and after, lower by the swap's value; the
+dashboard's Latest run panel shows the same. This is the treasury agent's own budget, not an isolated agent's.
+
 ## An agreement request, declined, 2026-10-14 (UTC)
 
 An account the DAO hadn't agreed to pay signed in on invoices.multiagency.ai and asked to be paid (00:55:43Z).
@@ -206,21 +216,17 @@ agent's latest operation is still the bounty's approval at 00:49:58Z). The reque
 Agreements and was declined there; the store records the decline, not its time. The payee's page then read
 "The DAO declined this request." No policy update was filed.
 
-## A rebalance charges the treasury's budget, 2026-10-14T00:50Z
-
-A Run now on the treasury agent, on dao `0d5964ea` (from `d9cb581`), executed one small USDC → wNEAR leg (settled
-00:51:48Z). The run's record shows the daily USD budget left before and after, lower by the swap's value; the
-dashboard's Latest run panel shows the same. This is the treasury agent's own budget, not an isolated agent's.
-
 ## The payout rehearsal, 2026-10-14T02:02Z
 
 An agreed payee who isn't a DAO member filed an invoice on invoices.multiagency.ai; it was held for approval at
 02:02:37Z. A member approved it from the dashboard, filing and voting in one transaction: proposal #57, on chain
 02:04:12Z, Approved with one vote. The DAO's signature was submitted at 02:05:10Z and the payout settled at
-02:05:14Z, about a minute after the vote. The flow wasn't as expected on the dashboard (dao `4becd066`).
-Reading the code afterwards found why the payment timeline can't follow it to the end there: it lists held
-payments, and a settled payment sent from the invoice host isn't in the approve-only copy's activity, so it drops
-out once paid. The next build keeps a payment in view through to Paid.
+02:05:14Z, about a minute after the vote.
+
+The flow wasn't as expected on the dashboard (dao `4becd066`). Reading the code afterwards found why the payment
+timeline can't follow it to the end there: it lists held payments, and a settled payment sent from the invoice host
+isn't in the approve-only copy's activity, so it drops out once paid. The next build keeps a payment in view through
+to Paid.
 
 ## App access on platform staging, 2026-10-28 (UTC)
 
@@ -246,6 +252,20 @@ Not checked: the payee's receipt in near.com; what the wallet displayed for the 
 API #51 (2026-10-27) reports an uncapped budget window's spend as `null`, which the agent's overview refused
 ([enforcement](enforcement.md#recovery-limitation)).
 
+## Token registration reads on the USDC contract, 2026-10-29T14:44Z
+
+Read-only RPC calls (`storage_balance_of` on the USDC contract, final finality), no funds moved. They back the
+registration check before a USDC withdrawal ([enforcement](enforcement.md)).
+
+| Account | Answer |
+|---|---|
+| Existing accounts known to hold or have held USDC | An object (`total` 0.00125 NEAR, `available` 0) |
+| An existing account never registered on USDC | `null` |
+| An account that doesn't exist on NEAR | `null` |
+
+Not observed: what a confidential withdrawal of USDC to an unregistered account does (whether 1Click registers it, or
+how the failure is reported).
+
 ## Payout withdrawals on platform staging, 2026-10-30 (UTC)
 
 Withdrawals to a NEAR account through the app path, on mainnet: platform staging at api.dev.multiagency.ai (Railway
@@ -267,17 +287,3 @@ and was at first not registered on USDC.
 Not checked: a confidential withdrawal of an asset whose `destination_asset` differs from its `token`; how a failed
 delivery is reported; whether 1Click would have registered an unregistered USDC receiver (the platform refuses before
 sending, so it is never tried).
-
-## Token registration reads on the USDC contract, 2026-10-29T14:44Z
-
-Read-only RPC calls (`storage_balance_of` on the USDC contract, final finality), no funds moved. They back the
-registration check before a USDC withdrawal ([enforcement](enforcement.md)).
-
-| Account | Answer |
-|---|---|
-| Existing accounts known to hold or have held USDC | An object (`total` 0.00125 NEAR, `available` 0) |
-| An existing account never registered on USDC | `null` |
-| An account that doesn't exist on NEAR | `null` |
-
-Not observed: what a confidential withdrawal of USDC to an unregistered account does (whether 1Click registers it, or
-how the failure is reported).

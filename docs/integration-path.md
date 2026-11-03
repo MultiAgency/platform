@@ -41,8 +41,7 @@ the complete examples, and `treasury-app` covers Treasury proposals.
 
 Status: wallet-owned agents only; DAO consent is not built. The `read`, `owner` and `payout` scopes are mainnet-observed
 on platform staging (2026-10-28, 2026-10-30) through the platform's own stand-in app; `treasury` and `treasury-execute`
-are offline- and stack-tested. No production host serves `/apps/v1` yet. Details: [agent access](agent-access.md),
-"App access".
+are offline- and stack-tested. No production host serves `/apps/v1` yet. Details: [app access](app-access.md).
 
 ## A browser product on a configured host: `ownerClient`
 
