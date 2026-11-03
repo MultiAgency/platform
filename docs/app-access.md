@@ -150,7 +150,12 @@ cost limit without a signature per swap, only while the owner's live grant binds
 reachable. Each
 consent, call and revocation is appended to `.app-access/access.jsonl`.
 
-Limits: wallet owners only (DAO consent and DAO setup are not available, and `signer: "dao"` is refused); payout requests
+DAO owners: a DAO's consent is signed by its own vote (`POST /apps/v1/dao-consents`, then `GET /apps/v1/dao-consents/<hash>`
+until the DAO's signature is found; coordination/p5-treasury-dao-consent.md). It carries only `read` and `treasury`,
+and each call re-reads that the agent is still owned by the DAO's derived account. Offline-tested only; no host serves
+it yet, and approving proposals, owner actions and setup by DAO vote aren't built.
+
+Limits: DAO owners as above (no DAO setup, and owner actions through the app take `signer: "wallet"` only); payout requests
 pay confidential USDC through `intents`, or withdraw wNEAR (arriving as native NEAR) or USDC to an agreed NEAR account
 (mainnet-observed on staging 2026-10-30), and a held withdrawal can only be rejected (approving one isn't built yet,
 though its approval's hash is now observed); the owner can't revoke on the platform directly

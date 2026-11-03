@@ -168,7 +168,7 @@ test("the app route needs the deployment's credential and a live owner consent, 
   assert.equal((await call(port, rpc("org_1", "overview"), "POST", staging, {})).status, 403, "no consent yet");
 
   const identity = await call(port, "/apps/v1/agents/payout", "GET", staging);
-  assert.deepEqual(identity.body, { agent: "payout", owner: "owner.near", agentId: "provider-id", created: true, host: HOST, deployment: "staging" });
+  assert.deepEqual(identity.body, { agent: "payout", owner: "owner.near", agentId: "provider-id", created: true, host: HOST, deployment: "staging", signer: "wallet" });
   assert.equal((await call(port, "/apps/v1/agents/payout", "GET")).status, 401);
   assert.equal((await consent({ agentId: "earlier-agent" })).status, 409, "a consent signed for another agent identity isn't attached to this one");
   const stored = await consent();

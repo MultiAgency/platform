@@ -10,7 +10,7 @@ import { nep413Hash, signatureBytes, verifyEd25519 } from "../nep413.js";
 import type { KeyLookup, KeyStateLookup } from "../signin.js";
 import { writeAtomic } from "../synced.js";
 import { AppScope, appConsentSubmission, parseConsentMessage, parseSetupMessage, UNBORN_AGENT } from "../contract/app-consent.js";
-import { appMayAsk, appScopesCover } from "../contract/app-access.js";
+import { appMayAsk, appScopesCover, AppSigner } from "../contract/app-access.js";
 import { mayCall } from "./allowlist.js";
 import type { Access } from "./roles.js";
 
@@ -122,7 +122,9 @@ export class AppCredentials {
 const Consent = z.strictObject({ version: z.literal(1), id: z.string().regex(/^[a-f0-9]{64}$/), deployment, host: z.string().min(1),
   organization: z.string(), owner: z.string(), agent: z.string(), agentId: z.string().min(1), scopes: z.array(AppScope).min(1),
   expiresAt: z.number().int().positive(), createdAt: z.number().int().nonnegative(), message: z.string(), nonce: z.string(),
-  publicKey: z.string(), signature: z.string(), revoked: z.boolean(), revokedAt: z.number().int().nullable() });
+  publicKey: z.string(), signature: z.string(), revoked: z.boolean(), revokedAt: z.number().int().nullable(),
+  /** Absent on records from before DAO consent: the owner's wallet signed. `dao`: the DAO's derived key, by its vote. */
+  signer: AppSigner.optional() });
 export type ConsentRecord = z.infer<typeof Consent>;
 
 /** A verified consent, before the platform binds it to the agent's current identity. */

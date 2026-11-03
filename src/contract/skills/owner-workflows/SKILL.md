@@ -9,7 +9,7 @@ metadata:
   purpose: 'Owner reads, owner-signed actions and money streams with ownerClient, with recovery by result kind and retained identities.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.4.1'
+  library_version: '0.5.0'
 requires:
   - getting-started
 sources:

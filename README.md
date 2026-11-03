@@ -246,7 +246,7 @@ Each line is a gap; the linked page says how the rest is known. The
   [consumer compatibility](docs/shared-frontend-integration.md#consumer-source-contract-preflight).
 - App access (`/apps/v1`) isn't in production. Mainnet-observed on staging: confidential USDC payouts (2026-10-28) and
   withdrawals of wNEAR or USDC to agreed NEAR accounts (2026-10-30) ([mainnet log](docs/mainnet-log.md)). Wallet-owned
-  agents only; a held withdrawal can be rejected, not approved, so under the payout template it is paid only once the
+  agents only on staging; a held withdrawal can be rejected, not approved, so under the payout template it is paid only once the
   owner turns approval off; at most 32 hosted agents per host. A dishonest app can still get a blind NEP-366 signature
   by having the owner sign the confirm link's text on its own page; a held payout's vote text names no payee or amount,
   so the app's display is the only place the owner sees them; an owner who signs the platform's sign-in text on an
@@ -255,6 +255,10 @@ Each line is a gap; the linked page says how the rest is known. The
   doesn't set up Treasury agents yet. A proposal's approval is the platform's check, not the provider's: whoever holds
   the treasury grant can swap within the policy without it. Held swaps aren't used: what their vote commits to is
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
+- DAO-owned agents through apps (coordination/p5-treasury-dao-consent.md): only consent by DAO vote is built
+  (`read` and `treasury`, offline-tested only; no stack run, no host). Approving proposals, the strategy grant, freeze
+  and setup by DAO vote aren't built, and only a DAO whose proposals pass within minutes could sign the provider's owner
+  intents, which expire in minutes. See [app access](docs/app-access.md).
 - Agent connections exist only for a contractor's own reports (offline- and stack-tested, not deployed); a token is a
   bearer for at most 24 hours; owner connections aren't built. See
   [agent access](docs/agent-access.md#agent-connections-contractor-reports).

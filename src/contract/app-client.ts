@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { appAgent, appConsentList, appConsentStored, appRevoked, appSetupStored, type AppOwnerAction, type AppProcedure } from "./app-access.js";
+import { appAgent, appConsentList, appConsentStored, appDaoConsentFiled, appDaoConsentState, appRevoked, appSetupStored, type AppOwnerAction, type AppProcedure } from "./app-access.js";
 import type { appConsentSubmission } from "./app-consent.js";
 import { ownerClient, type OwnerCallOptions, type OwnerFailure, type OwnerOutput, type OwnerProcedure, type OwnerResult } from "./owner-client.js";
 import type { ownerStreams } from "./owner-outputs.js";
@@ -71,6 +71,15 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
       submit: (submission: AppConsentSubmission) => route("/consents", appConsentStored, post(submission)),
       /** Permanent: the owner signs a new consent to restore access. */
       revoke: (id: string) => route(`/consents/${encodeURIComponent(id)}`, appRevoked, { method: "DELETE" }),
+    },
+    /**
+     * A DAO owner's consent, signed by the DAO's own vote. `file` takes the canonical consent text (scopes within
+     * `DAO_CONSENT_SCOPES`) and answers the proposal a member files; `state` reads it until the DAO's signature is
+     * found, then the stored consent. Filing the same text again files a new request: follow the one you have.
+     */
+    daoConsents: {
+      file: (message: string) => route("/dao-consents", appDaoConsentFiled, post({ message })),
+      state: (id: string) => route(`/dao-consents/${encodeURIComponent(id)}`, appDaoConsentState),
     },
     /** One Organization's agent: reads, owner actions and Treasury procedures its live consents cover. */
     agent(organization: string, agent: string) {

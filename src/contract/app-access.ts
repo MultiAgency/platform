@@ -73,13 +73,41 @@ export type AppOwnerAction =
  */
 export const appConfirm = z.looseObject({ url: z.string(), expiresAt: z.string() });
 
+/**
+ * Who signs as an agent's owner: the owner's own wallet, or a Sputnik DAO by a passed proposal (its MPC key on the
+ * `agent-owner` path). Absent on records and answers from before DAO consent: those are `wallet`.
+ */
+export const AppSigner = z.enum(["wallet", "dao"]);
+/**
+ * The scopes a DAO's consent may carry: reads, and Treasury settings and proposals the DAO approves by vote. Not
+ * `owner` (the platform files a DAO's owner actions itself), `payout` or `treasury-execute` (not yet).
+ */
+export const DAO_CONSENT_SCOPES = ["read", "treasury"] as const satisfies readonly AppScope[];
+
 /** `GET /apps/v1/agents/<agent>`: what the owner's consent must name. */
 export const appAgent = z.looseObject({ agent: z.string(), owner: z.string(), agentId: z.string().nullable(), created: z.boolean(),
-  host: z.string(), deployment: z.string() });
+  host: z.string(), deployment: z.string(), signer: AppSigner.optional() });
 /** A stored consent as the platform shows it: never its message, nonce or signature. Times are epoch milliseconds. */
 export const appConsentView = z.looseObject({ id: z.string(), deployment: z.string(), host: z.string(), organization: z.string(),
   owner: z.string(), agent: z.string(), agentId: z.string(), scopes: z.array(AppScope), expiresAt: z.number(), createdAt: z.number(),
-  publicKey: z.string(), revoked: z.boolean(), revokedAt: z.number().nullable() });
+  publicKey: z.string(), revoked: z.boolean(), revokedAt: z.number().nullable(), signer: AppSigner.optional() });
+
+/** A NEAR transaction for a DAO member's wallet to sign, as near-kit builds it (receiver and function-call actions). */
+const memberTransaction = z.looseObject({ receiverId: z.string(), actions: z.array(z.looseObject({ type: z.literal("FunctionCall"), params: z.looseObject({}) })) });
+/**
+ * A DAO's consent waiting for its vote. `hash` is the NEP-413 hash the DAO's key signs; `description` is what the
+ * proposal says. A member files `proposal`, or files and votes with `proposalAndVote` (null when the DAO's next proposal
+ * id couldn't be read). It must pass before `votingUntil` (epoch milliseconds).
+ */
+export const appDaoConsentRequest = z.looseObject({ id: z.string(), dao: z.string(), organization: z.string(), agent: z.string(),
+  agentId: z.string(), scopes: z.array(AppScope), expiresAt: z.number(), votingUntil: z.number(), hash: z.string(), description: z.string() });
+export const appDaoConsentFiled = z.looseObject({ request: appDaoConsentRequest,
+  transactions: z.looseObject({ proposal: memberTransaction.nullable(), proposalAndVote: memberTransaction.nullable() }) });
+/** A DAO consent's state: still waiting for the vote, or stored once the DAO's signature was found on chain. */
+export const appDaoConsentState = z.discriminatedUnion("state", [
+  z.looseObject({ state: z.literal("pending"), request: appDaoConsentRequest }),
+  z.looseObject({ state: z.literal("signed"), consent: appConsentView }),
+]);
 export const appConsentList = z.looseObject({ consents: z.array(appConsentView) });
 export const appConsentStored = z.looseObject({ consent: appConsentView });
 /** `POST /apps/v1/setup`: the hosted agent's name and its setup consent (agent ID `unborn`). */

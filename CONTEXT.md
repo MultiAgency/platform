@@ -363,8 +363,9 @@ which only the owner's own wallet signature completes; the app receives an inten
 one only as a confirm page link), `payout` (payout requests, their status, held payouts and a deposit address to fund the agent),
 `treasury` (Treasury reads, strategy settings, autopilot on and off, sweep and **Treasury proposals**) and
 `treasury-execute`, only beside `treasury` (plans prepared and executed without a signature per swap, only under a
-grant binding the plan's strategy). Wallet owners
-only; DAO consent is not available yet. Revocable by the deployment or the operator; a revocation is a permanent tombstone. Offline- and stack-tested;
+grant binding the plan's strategy). A **DAO consent** is the same text signed by the DAO's own vote (its derived
+key, through a passed `v1.signer` proposal the platform files); it carries only `read` and `treasury`, and its agent's
+ownership by the DAO's derived account is re-read on every call. DAO consent is offline-tested only. Revocable by the deployment or the operator; a revocation is a permanent tombstone. Offline- and stack-tested;
 mainnet-observed on platform staging (2026-10-28); not in production. See docs/app-access.md.
 
 

@@ -6,6 +6,16 @@ version, so a package staged or packed from changed sources never carries a rele
 commit dates the heading, before its candidate runs; staging copies this file as it is. Under 0.x, any
 public-interface change bumps at least the minor version.
 
+## 0.5.0
+
+- **DAO consent** (added; offline-tested only, not on any host yet): a DAO-owned agent's consent is signed by the DAO's
+  own vote. `app.daoConsents.file(message)` files the canonical consent text and answers the proposal a member files
+  (`proposal`, or `proposalAndVote`); `app.daoConsents.state(id)` answers `pending` until the DAO's signature is found on
+  chain, then the stored consent. A DAO's consent carries only `DAO_CONSENT_SCOPES` (`read` and `treasury`). Under it the
+  app reads, saves strategy settings, sweeps, creates and executes proposals and turns autopilot on and off; it can't
+  sign or relay owner actions, approve proposals, or run plans without a proposal. Approving proposals by DAO vote is
+  next. `appAgent` and `appConsentView` gain an optional `signer` (`wallet` or `dao`; absent means `wallet`).
+
 ## 0.4.1 (2026-11-03)
 
 No code, type or wire change.
