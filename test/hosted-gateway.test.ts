@@ -14,6 +14,9 @@ import { generateKey, Near, type PrivateKey } from "near-kit";
 import { setupMessage } from "../src/contract/app-consent.js";
 import { AppCredentials } from "../src/gateway/app-access.js";
 import { checkedDiscovery } from "./fixtures/discovery.js";
+import { holdHostedPorts } from "./fixtures/hosted-ports.js";
+
+await holdHostedPorts();
 
 const localFetch = (url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) => new Promise<Response>((resolve, reject) => {
   const req = request(new URL(url), init, res => {

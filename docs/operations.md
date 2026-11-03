@@ -101,94 +101,21 @@ owner-intent recovery records an outcome. Expiry alone is insufficient. Owner su
 later preparation even when the released payout is still settling. Preserve older settled records
 without outcome evidence and investigate them; do not fabricate a result or delete them to unblock.
 
-## Combined UI, strategy and recovery candidate
+## Releasing to both services
 
-This is the locally prepared candidate based on `5cd6cc9fbb584a3174b6d7586fbdda8633cf4d45`,
-not a deployment record. The base commit alone does not identify its uncommitted changes: retain
-the reviewed file-hash manifest and the final release commit or source-archive checksum in the
-private release record. Recheck changes made after validation before shipping. Local browser
-fixtures and offline tests do not establish hosted behavior or actual screen-reader speech.
-
-### What ships where
-
-| Service | Candidate changes | Persistent state |
+| Service | Executes | Persistent state |
 |---|---|---|
-| `dao` (`Dockerfile.gateway`, packaged) | Dashboard simplification; reviewed policy/payment confirmations; strategy save, authorization and enable controls; payment/owner-action recovery views; private AG-UI recording inspector/export. Treasury executes here; payout remains approve-only. | Existing `/data/state`, including both agents' settings and this host's owner intents |
-| `invoices` (`Dockerfile.payouts`) | Invoice agreements precede amount fields; stable focus during refresh; continuation of unchanged, never-submitted invoices; shared payout/backend changes. Payout executes here. | Existing `/data`, including invoice SQLite, agreements and payout settings |
+| `dao` (`Dockerfile.gateway`, packaged) | Treasury; payout is approve-only here | Existing `/data/state`, including both agents' settings and this host's owner intents |
+| `invoices` (`Dockerfile.payouts`) | Payout | Existing `/data`, including invoice SQLite, agreements and payout settings |
 
 The `dao` image is built only from a package made by `scripts/package-shared-frontends.mjs` (Proto's built
 `web/dist` plus the Treasury and Payables builds), which copies in `Dockerfile.gateway` as the package's root Dockerfile
 and `deploy/railway.gateway.json` as its `railway.json`. The image runs `deploy/shared-frontends.json`.
 
-Both services must use the same reviewed source candidate and frozen lockfile. Rebuilding `dao`
+Both services must use the same reviewed source and frozen lockfile. Rebuilding `dao`
 alone does not update the public invoice page. Preserve `AGREEMENTS_URL` and matching
 `AGREEMENTS_SECRET` configuration so the approve-only dashboard continues reading the executor's
 agreements; do not copy its store to the dashboard as a substitute.
-
-Invoice refreshes display only the latest requested read. Superseded responses cannot restore old
-invoice controls or clear a newer read failure (`test/browser/invoices.cjs`, offline fixtures).
-
-The subsequent [live run view](live-run.md) integrates automatic AG-UI snapshot refresh into recent run timelines in the
-dashboard, using the existing private recording endpoint. It introduces no stream endpoint or
-state migration. The shared FastNear helper now reports read failures explicitly and rejects
-malformed JSON; ship that correction to both services with the same reviewed candidate.
-
-The recording adapter now exports envelope version 3 with AG-UI protocol 1.0 lifecycle validation.
-The dashboard continues to read archived versions 1/2. Exports are derived from existing records;
-this envelope change needs no stored-record conversion and adds no directory. Preserve the run
-progress and evidence stores described below. Verify the reader and exporter together from the
-same candidate; this compatibility is offline-tested, not a deployed-host observation.
-
-### FastNear access for this candidate
-
-Keep `FASTNEAR_API_KEY` configured server-side on both services. `src/chain.ts` already sends it
-as a Bearer header to FastNear RPC, Transactions and Transfers APIs. With a key and no
-`NEAR_RPC_URL` override, RPC uses `https://rpc.mainnet.fastnear.com`. Check the effective override
-privately: empty values now use the default, and custom hosts receive no FastNear authorization
-header. Only exact documented HTTPS hosts receive the key. Use the intended FastNear host; never put the backend key in browser code or copied URLs.
-
-The integration already uses canonical RPC for account, DAO policy and access-key reads;
-Transactions for DAO execution discovery (including relayed transactions) and deposit receipts;
-and Transfers for public `intents.near` books. This matches FastNear's documented separation of
-[RPC and indexed APIs](https://docs.fastnear.com/agents/choosing-surfaces), checked 2026-10-14.
-The [authentication guide](https://docs.fastnear.com/auth) documents one key across these APIs.
-Key presence alone does not prove deployed access or indexer freshness. During owner-run
-verification, distinguish authentication/rate-limit failures from missing records and inspect the
-relevant indexed service's `/status` when investigating lag. Indexed public history does not prove
-confidential settlement, authorize a retry, or replace provider evidence for an unresolved operation.
-
-No additional FastNear UI or API feature is introduced here. Future read-performance work should
-measure existing calls first, then consider batching deposit receipt lookups by transaction hash;
-DAO discovery already batches those lookups. Keep missing evidence explicit and validate any
-change to recovery or authorization separately.
-
-### Compatibility and state
-
-- Dashboard `pay` and `owner/prepare` policy updates now require `expectedPolicy` (revision and
-  mandate digest). Old requests without it fail validation before provider reads. A changed review
-  is refused; reload the page and review again rather than replaying the old request.
-- Treasury grant preparation requires the saved `expectedStrategyDigest` and the schedule off.
-  New `strategy/get`, `strategy/save`, `autopilot/enable` and `autopilot/stop` routes support the
-  workflow. Legacy `autopilot/set` can stop unchanged settings without a digest, but refuses
-  unreviewed changes/enablement and combined change-and-enable requests. A stale settings form
-  may therefore fail even when its button says Turn off: refresh and use the new stop control.
-- `owner/actions`, `paymentHistory` and `autopilot/log` are private member reads. Strategy writes
-  require settings permission; enabling scheduling requires execution permission. Approve-only instances refuse strategy changes
-  and recording export. Owner-action history is local to its instance; payout discovery is bounded
-  to 250 provider records from the past day and reports incomplete scans. Missing reads are not
-  proof that no payout or owner action exists.
-- `POST /api/invoices/:id/continue` uses the authenticated payee's stored terms and identity.
-  It refuses revised or submission-attempted invoices; it is not a retry for unknown outcomes.
-  The `/internal/agreements` contract is unchanged. Old/new mixed builds are not a validated
-  operating configuration; keep activity paused until both services are upgraded.
-- No SQLite, journal, owner-intent or strategy schema changes are introduced relative to this
-  candidate's base. The invoice SQLite and journal-v2 migrations below already exist in that base
-  (and in recorded source `9b2941a`). Do not rerun migration or initialize empty stores merely
-  because this release adds recovery views. If the actual deployed source/state is older or
-  unknown, establish compatibility and apply the relevant stopped-writer procedure first.
-- Strategy controls add a transient single-host control lock beside the existing strategy file;
-  strategy saves persist schedule-off before replacement. This is not distributed fencing.
-  AG-UI exports read existing evidence/journal files and add no durable recording store.
 
 ### Owner-run rollout
 
@@ -202,7 +129,7 @@ change to recovery or authorization separately.
    state listed at the top of this guide, including `.notify/`, legacy `.intake/`, settings, SQLite
    journals and `.sqlite.initialized` markers. Use consistent backups and retain checksums; never
    delete a marker, rewrite legacy uncertainty, or discard an owner intent to clear a blocker.
-3. Deploy the reviewed candidate to `invoices` first, reusing its existing `/data` volume and
+3. Deploy the reviewed release to `invoices` first, reusing its existing `/data` volume and
    configuration, with one replica and no old executor still running. Keep new submissions paused;
    check `/health`. Startup reconciliation may update records, so preserve any new state even if
    the next deployment fails. Before restarting, review retained prepared and submitted owner
@@ -210,7 +137,7 @@ change to recovery or authorization separately.
    Pausing new approvals and schedules does not make startup status-only, and a policy freeze
    does not block every kind of owner action. Record any automatic progression without deleting
    or replacing the retained action.
-4. Deploy the same candidate to `dao`, reusing `/data/state`, one replica, and the existing
+4. Deploy the same release to `dao`, reusing `/data/state`, one replica, and the existing
    treasury-executor/payout-approve-only mapping. Every other copy of either agent stays
    `EXECUTOR=off`. Do not use restore/bootstrap variables to overwrite existing state. Check
    `/health` before reopening use; do not enable schedules as part of a health check.
@@ -479,6 +406,28 @@ invoice service keep their current roles. Offline tests cover reservations, rest
 binding and browser setup; real wallet/Trezu creation must be separately observed after user deployment.
 
 ## FastNear reads
+
+### Access and keys
+
+Keep `FASTNEAR_API_KEY` configured server-side on both services. `src/fastnear.ts` sends it as a Bearer
+header to FastNear RPC, Transactions and Transfers APIs. With a key and no
+`NEAR_RPC_URL` override, RPC uses `https://rpc.mainnet.fastnear.com`. Check the effective override
+privately: empty values now use the default, and custom hosts receive no FastNear authorization
+header. Only exact documented HTTPS hosts receive the key. Use the intended FastNear host; never put the backend key in browser code or copied URLs.
+
+The integration already uses canonical RPC for account, DAO policy and access-key reads;
+Transactions for DAO execution discovery (including relayed transactions) and deposit receipts;
+and Transfers for public `intents.near` books. This matches FastNear's documented separation of
+[RPC and indexed APIs](https://docs.fastnear.com/agents/choosing-surfaces), checked 2026-10-14.
+The [authentication guide](https://docs.fastnear.com/auth) documents one key across these APIs.
+Key presence alone does not prove deployed access or indexer freshness. During owner-run
+verification, distinguish authentication/rate-limit failures from missing records and inspect the
+relevant indexed service's `/status` when investigating lag. Indexed public history does not prove
+confidential settlement, authorize a retry, or replace provider evidence for an unresolved operation.
+
+Future read-performance work should measure existing calls first, then consider batching deposit
+receipt lookups by transaction hash; DAO discovery already batches those lookups. Keep missing evidence explicit and validate any
+change to recovery or authorization separately.
 
 ### Scan bounds and status report (offline-tested, 2026-10-16)
 

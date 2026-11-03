@@ -12,6 +12,9 @@ import { setupMessage } from "../src/contract/app-consent.js";
 import { AppCredentials } from "../src/gateway/app-access.js";
 import { AppConfirms } from "../src/gateway/app-confirm.js";
 import { sessions } from "../src/signin.js";
+import { holdHostedPorts } from "./fixtures/hosted-ports.js";
+
+await holdHostedPorts();
 
 const listen = (server: Server) => new Promise<number>(resolve => server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port)));
 const HOST = "api.test";

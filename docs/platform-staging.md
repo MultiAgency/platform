@@ -103,9 +103,9 @@ hashes, amounts and payees go only in the private release record.
 
 User-run, on mainnet, on an isolated test agent the laptop CLI owner creates for it (as on 2026-10-13, [mainnet
 log](mainnet-log.md#isolated-test-agent-shield-and-monthly-cap-2026-10-13t0327z)), never a production, staging-hosted or
-treasury agent; never scheduled. It settles the one open question of the durable-proposals design (the workspace's
-`coordination/durable-proposals.md`, section 2a): whether a provider-held confidential swap's `request_hash` covers what
-it buys and its floor. Nothing is swapped: the held swap is rejected.
+treasury agent; never scheduled. It settles the one open question of the Treasury proposals design
+([enforcement](enforcement.md#treasury-proposals-offline--and-stack-tested)): whether a provider-held confidential swap's
+`request_hash` covers what it buys and its floor. Nothing is swapped: the held swap is rejected.
 
 Before starting: the isolated agent's policy, signed with `pnpm update-policy --policy <file>`, allows `swap`, is
 `confidential`, has `owner_approval` on, lists USDC and wNEAR in `assets`, and has per-transaction, hourly, daily and
