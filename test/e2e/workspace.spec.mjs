@@ -68,7 +68,8 @@ test('each wallet sees only its own agents despite legacy operator configuration
     expect(ownerView.viewer.access.payout).toEqual({ canSign: true, canPropose: false, canVote: false, canExecute: true, canManage: true });
     expect((await rpc(owner.page, 'portfolio', 'instance')).status).toBe(403);
     expect((await rpc(owner.page, 'portfolio', 'autopilot/stop')).status).toBe(403);
-    const restricted = await login(PAYEE, '/a/portfolio/automations');
+    // The agent's home: its moved screens redirect to the Treasury app, here the hosted one (no --treasury-dist).
+    const restricted = await login(PAYEE, '/a/portfolio/');
     const me = await restricted.page.evaluate(async () => (await fetch('/gw/me')).json());
     expect(Object.keys(me.viewer.access)).toEqual(['portfolio']);
     expect(me.agents.map(a => a.name)).toEqual(['portfolio']);

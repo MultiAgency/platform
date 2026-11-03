@@ -455,8 +455,11 @@ never release artifacts. Back up and restore them together with stopped executor
 need no conversion: this is additive state. A missing settings file, corrupt registry, conflicting
 port or orphan settings file requires recovery of original state; do not delete it to retry creation.
 
-Each reservation uses a distinct loopback port from 9000–9999, excluding configured agent ports.
-Keep this range available. Capacity is 32 reservations, with one per owner and area, or for an app's setup one per app
+Each reservation uses a distinct loopback port from 9000–9999, excluding configured agent ports and,
+for a new reservation, ports another process holds at that moment. Keep this range available: an
+existing reservation keeps its port, and if another process holds it, the agent stays unavailable
+(owner calls are refused, nothing is sent to that process) until the port is free: the agent's server
+can't bind it and exits, and the gateway restarts it with backoff (up to 5 minutes between attempts). Capacity is 32 reservations, with one per owner and area, or for an app's setup one per app
 deployment, Organization, owner and area, at most 16 per deployment. Self-service reservations stay in
 `.hosted/registry.json`, in the format earlier releases read; an app's Organization reservations are in
 `.hosted/apps.json`, which earlier releases ignore. Preserve both with the `own-*.env` files. Rolling back to a release

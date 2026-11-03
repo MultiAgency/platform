@@ -359,8 +359,14 @@ The gateway admits verified wallets without agent access only when `selfService`
 `POST /gw/agents` verifies the requested owner type, wallet ownership or DAO group membership and
 proposal permission before reserving anything. An atomic, locked registry precedes child startup;
 retries reuse it. Corrupt, missing or conflicting state refuses instead of replacing settings.
-The registry caps new reservations at 32 and allocates loopback ports 9000–9999. This is bounded
-single-host provisioning, not a horizontally scalable or abuse-resistant hosting service.
+The registry caps new reservations at 32 and allocates loopback ports 9000–9999, skipping ports
+another process holds when the reservation is made (`boundPorts`). The gateway reaches an agent it runs
+only after that agent's own child reports, over IPC, that it is listening on the reserved port, and
+not after the child closes (`src/gateway/agent-origin.ts`): the forward, the owner and machine
+authority checks, DAO pending requests and invoice forwarding all go through it. A port taken after
+the probe leaves the agent closed or unavailable (503), never answered by another process
+(`test/gateway-listening.test.ts`). This is bounded single-host provisioning, not a horizontally
+scalable or abuse-resistant hosting service.
 
 Children receive unique settings files and immutable owner/area bindings, without inherited owner
 private keys, grants, agent IDs, notification destinations or invoice listeners. `hosted-binding.ts` checks creation and DAO
