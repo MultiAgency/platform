@@ -38,25 +38,28 @@ async function freePort(host = '127.0.0.1') {
  * `daoOwned`: the owner app's agent belongs to the simulated Sputnik DAO, whose council (OWNER) and member (SECOND)
  * can both read it with different permissions (shared-reader scenarios). Test-only: no authorization code changes.
  * `onChainPolicyEdits`: the simulator signs provider-enforced policy edits as NEP-366 (see provider.mjs).
+ * `daoPortfolio`: the Treasury agent (`portfolio`) belongs to the simulated DAO, without an owner app: apps reach it only
+ *   under a DAO's consent, and its owner actions are DAO votes the `daoVote` control passes.
  * `headless`: the gateway runs as the platform does (`deploy/platform*.json`): app access and the confirm page only,
  *   app setup for the areas `appSetup` lists (Payables, as on `platform.json`; Treasury too on `platform-staging.json`);
  *   no sign-in, owner app or contributor intake on its host.
  * `selfService`: owners (on the host) and app deployments (through `/apps/v1/setup`) may set up hosted agents; `hostedAreas` names the
  * areas a `frontendDist` host may set up.
  */
-export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoOwned = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false, appSetup = ['payables'] } = {}) {
+export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoOwned = false, daoPortfolio = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false, appSetup = ['payables'] } = {}) {
   const daoArea = daoOwned ? ownerApp?.product : undefined;
   if (daoOwned && !['payables', 'treasury'].includes(daoArea)) throw new Error('daoOwned requires an owner app');
   if (daoArea === 'payables') owner = DAO;
-  if (daoArea === 'treasury') { workspace = true; portfolioOwner = DAO; }
+  if (daoArea === 'treasury' || daoPortfolio) { workspace = true; portfolioOwner = DAO; }
+  const dao = daoOwned || daoPortfolio;
   mkdirSync(directory, { recursive: true });
   const services = [], proxies = [];
-  const accounts = [...(secondAccount || daoOwned ? [SECOND] : []), ...(daoOwned ? [OWNER, DAO_SIGNER] : []), ...extraAccounts];
+  const accounts = [...(secondAccount || dao ? [SECOND] : []), ...(dao ? [OWNER, DAO_SIGNER] : []), ...extraAccounts];
   // The gateway reads the chain through this simulator: it answers for the DAO whenever one owns an agent.
-  const simulated = await provider(directory, { account: owner === DAO ? DAO_SIGNER : owner, payees, accounts, dao: daoOwned, onChainPolicyEdits, ...(payoutFunding !== undefined && { payoutFunding }) });
+  const simulated = await provider(directory, { account: owner === DAO ? DAO_SIGNER : owner, payees, accounts, dao, onChainPolicyEdits, ...(payoutFunding !== undefined && { payoutFunding }) });
   const portfolioDir = join(directory, 'portfolio');
   let portfolio;
-  if (workspace) { mkdirSync(portfolioDir); portfolio = await provider(portfolioDir, { treasury: true, account: portfolioOwner === DAO ? DAO_SIGNER : portfolioOwner, accounts, dao: daoOwned }); }
+  if (workspace) { mkdirSync(portfolioDir); portfolio = await provider(portfolioDir, { treasury: true, account: portfolioOwner === DAO ? DAO_SIGNER : portfolioOwner, accounts, dao }); }
   let executor, reviewer;
   const executorDir = join(directory, 'executor'), reviewerDir = join(directory, 'reviewer'), gatewayDir = join(directory, 'gateway');
   for (const dir of [executorDir, reviewerDir, gatewayDir]) mkdirSync(dir);
@@ -177,7 +180,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
       const port = await freePort();
       await start('portfolio', portfolioDir, 'src/server.ts', { PORT: String(port), EXECUTOR: 'on',
         AGENT_ID: portfolio.id, AGENT_GRANT_TOKEN: portfolio.token, NEAR_INTENTS_AGENT_API_URL: portfolio.url,
-        DASHBOARD_AREA: 'treasury' }, 'Treasury dashboard on');
+        DASHBOARD_AREA: 'treasury', ...(daoPortfolio && { TREASURY_ACCOUNT: DAO }) }, 'Treasury dashboard on');
       // An obsolete operator list is ignored; only the actual owner can access this wallet's agent.
       agents.push({ name: 'portfolio', owner: portfolioOwner, operators: [OWNER], area: 'treasury', port, executor: true });
     }

@@ -39,7 +39,8 @@ the complete examples, and `treasury-app` covers Treasury proposals.
    gateway, agent servers and simulated provider, and issues the app's credential at startup.
    `test/e2e/stack-app.spec.mjs` is the reference app server.
 
-Status: wallet-owned agents; for DAO-owned agents only consent by DAO vote (`read` and `treasury`, offline-tested only). The `read`, `owner` and `payout` scopes are mainnet-observed
+Status: wallet-owned agents; for DAO-owned agents, consent, proposal votes, the Treasury grant, freeze and unfreeze by
+DAO vote (`read` and `treasury`; offline- and stack-tested). The `read`, `owner` and `payout` scopes are mainnet-observed
 on platform staging (2026-10-28, 2026-10-30) through the platform's own stand-in app; `treasury` and `treasury-execute`
 are offline- and stack-tested. No production host serves `/apps/v1` yet. Details: [app access](app-access.md).
 
@@ -73,7 +74,8 @@ total. It is offline-tested only.
 
 ## Gaps
 
-- DAO-owned agents: consent by DAO vote only (offline-tested); approving proposals, owner actions and setup by DAO vote aren't built.
+- DAO-owned agents: no setup through an app (an existing DAO-owned agent only), no `payout` or `treasury-execute`, and
+  owner intents complete only when the DAO's vote passes within minutes.
 - Host `demo` and agent `area` are fixed enums.
 - Owner procedures outside the Treasury/Payables set (for example `ownerIdentity`, `demoGuide/compose`) have no packaged contract.
 - Independent owner-app releases are proven on the local stack only.

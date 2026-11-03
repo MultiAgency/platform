@@ -8,13 +8,20 @@ public-interface change bumps at least the minor version.
 
 ## 0.5.0
 
-- **DAO consent** (added; offline-tested only, not on any host yet): a DAO-owned agent's consent is signed by the DAO's
+- **DAO consent** (added; offline- and stack-tested, not on any host yet): a DAO-owned agent's consent is signed by the DAO's
   own vote. `app.daoConsents.file(message)` files the canonical consent text and answers the proposal a member files
   (`proposal`, or `proposalAndVote`); `app.daoConsents.state(id)` answers `pending` until the DAO's signature is found on
   chain, then the stored consent. A DAO's consent carries only `DAO_CONSENT_SCOPES` (`read` and `treasury`). Under it the
   app reads, saves strategy settings, sweeps, creates and executes proposals and turns autopilot on and off; it can't
-  sign or relay owner actions, approve proposals, or run plans without a proposal. Approving proposals by DAO vote is
-  next. `appAgent` and `appConsentView` gain an optional `signer` (`wallet` or `dao`; absent means `wallet`).
+  sign or submit owner actions itself, or run plans without a proposal. `appAgent` and `appConsentView` gain an optional
+  `signer` (`wallet` or `dao`; absent means `wallet`).
+- **DAO votes** (added; offline- and stack-tested): `app.daoVotes.file({ organization, agent, proposal, verdict })` files
+  the DAO's vote on one of the app's Treasury proposals from the platform's own `proposalText`; `app.daoVotes.state(id)`
+  answers `pending` until the DAO's signature is found, then relays it to `proposals/approve` or `reject` once and
+  answers `relayed` with the proposal's state. Under a DAO consent with `treasury`, `owner/prepare` with `signer: "dao"`
+  prepares `DAO_APP_ACTIONS` (the `treasury` grant, freeze, unfreeze): the app gets the proposal a member files, never an
+  intent; the agent submits the DAO's signature once the vote passes, and the app follows `owner/status`. Those are
+  provider intents that expire in minutes, so only a DAO whose vote passes within `expiresAt` completes them.
 
 ## 0.4.1 (2026-11-03)
 

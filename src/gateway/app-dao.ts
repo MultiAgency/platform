@@ -23,21 +23,30 @@ const hex64 = z.string().regex(/^[a-f0-9]{64}$/);
 /** Requests per deployment still waiting for a vote; another is refused until one passes or lapses. */
 export const MAX_PENDING_DAO_REQUESTS = 64;
 
-const Request = z.strictObject({
+const common = {
   version: z.literal(1),
   /** The NEP-413 hash (hex) the DAO's key signs: unique, since the platform picked the nonce. */
-  id: hex64, kind: z.literal("consent"), deployment: z.string(), host: z.string(), organization: z.string(),
-  dao: z.string(), agent: z.string(), agentId: z.string(), scopes: z.array(AppScope),
+  id: hex64, deployment: z.string(), host: z.string(), organization: z.string(), dao: z.string(), agent: z.string(), agentId: z.string(),
   expiresAt: z.number().int().positive(), votingUntil: z.number().int().positive(), createdAt: z.number().int().nonnegative(),
   message: z.string(), nonce: z.string(), signer: z.strictObject({ account_id: z.string(), public_key: z.string() }),
   /** The block height read before filing: no proposal can have signed this hash earlier. */
   since: z.number().int().nonnegative(), description: z.string(),
+};
+const ConsentRequest = z.strictObject({ ...common, kind: z.literal("consent"), scopes: z.array(AppScope),
   /** The stored consent's id once the signature was found. */
-  consent: hex64.nullable(),
-});
+  consent: hex64.nullable() });
+/** A vote on a Treasury proposal, under the DAO consent `under`; `relayed` once the signature reached the agent. */
+const VoteRequest = z.strictObject({ ...common, kind: z.literal("proposal"), proposal: z.string(), verdict: z.enum(["approve", "reject"]),
+  under: hex64, relayed: z.strictObject({ at: z.number().int(), state: z.string() }).nullable() });
+const Request = z.discriminatedUnion("kind", [ConsentRequest, VoteRequest]);
 export type DaoRequest = z.infer<typeof Request>;
-export const publicDaoRequest = ({ id, dao, organization, agent, agentId, scopes, expiresAt, votingUntil, description }: DaoRequest) =>
+export type DaoConsentRequest = z.infer<typeof ConsentRequest>;
+export type DaoVoteRequest = z.infer<typeof VoteRequest>;
+const settled = (r: DaoRequest) => r.kind === "consent" ? r.consent !== null : r.relayed !== null;
+export const publicDaoRequest = ({ id, dao, organization, agent, agentId, scopes, expiresAt, votingUntil, description }: DaoConsentRequest) =>
   ({ id, dao, organization, agent, agentId, scopes, expiresAt, votingUntil, hash: id, description });
+export const publicDaoVote = ({ id, dao, organization, agent, agentId, proposal, verdict, votingUntil, description }: DaoVoteRequest) =>
+  ({ id, dao, organization, agent, agentId, proposal, verdict, votingUntil, hash: id, description });
 
 /** The chain reads a DAO vote needs; tests pass their own. */
 export type DaoVotes = {
@@ -69,7 +78,7 @@ export function verifyDaoConsentText(message: string, expected: { host: string; 
 }
 
 /** What the DAO's proposal says: the consent's terms, the vote's deadline, and the hash its key signs. */
-export function daoConsentDescription(request: Pick<DaoRequest, "deployment" | "organization" | "agent" | "agentId" | "scopes" | "expiresAt" | "votingUntil" | "id" | "host">) {
+export function daoConsentDescription(request: Pick<DaoConsentRequest, "deployment" | "organization" | "agent" | "agentId" | "scopes" | "expiresAt" | "votingUntil" | "id" | "host">) {
   return [
     `* Proposal Action: Consent: app deployment ${request.deployment} may act for Organization ${request.organization} on agent ` +
       `${request.agent} (${request.agentId}) with ${[...request.scopes].sort().join(", ")} until ${new Date(request.expiresAt).toISOString()}`,
@@ -79,8 +88,18 @@ export function daoConsentDescription(request: Pick<DaoRequest, "deployment" | "
   ].join(" <br>");
 }
 
+/** What the DAO's proposal says for a Treasury proposal vote: the platform's own text of its terms, verbatim. */
+export function daoVoteDescription(request: Pick<DaoVoteRequest, "message" | "votingUntil" | "id" | "host">) {
+  return [
+    ...request.message.split("\n").map((line, i) => i === 0 ? `* Proposal Action: ${line}` : `* ${line}`),
+    `* Signing window closes: ${new Date(request.votingUntil).toISOString()} (approve before then, or the vote isn't relayed)`,
+    `* Signs: NEP-413 hash ${request.id} for ${request.host} as the agents' owner (v1.signer, path agent-owner)`,
+    "* Notes: Filed by the MultiAgency platform for an app. The platform relays the signature; executing the swap is a separate step.",
+  ].join(" <br>");
+}
+
 /** The consent a found signature completes: the DAO's derived key signed the request's exact text and nonce. */
-export function daoConsent(request: DaoRequest, signature: Buffer): VerifiedConsent {
+export function daoConsent(request: DaoConsentRequest, signature: Buffer): VerifiedConsent {
   return { version: 1, id: createHash("sha256").update(signature.toString("hex")).digest("hex"), deployment: request.deployment,
     host: request.host, organization: request.organization, owner: request.dao, agent: request.agent, agentId: request.agentId,
     scopes: request.scopes, expiresAt: request.expiresAt, message: request.message, nonce: request.nonce,
@@ -100,20 +119,34 @@ export class DaoRequests {
   }
   /** Throws what `file` would refuse with, so a caller can check before reading the chain. */
   admit(deployment: string, now = Date.now()) {
-    if (this.list().filter(r => r.deployment === deployment && r.consent === null && r.votingUntil > now).length >= MAX_PENDING_DAO_REQUESTS)
-      throw new BadRequest("This deployment has too many DAO consents waiting for a vote. Let some pass or lapse first.");
+    if (this.list().filter(r => r.deployment === deployment && !settled(r) && r.votingUntil > now).length >= MAX_PENDING_DAO_REQUESTS)
+      throw new BadRequest("This deployment has too many DAO requests waiting for a vote. Let some pass or lapse first.");
   }
-  file(request: Omit<DaoRequest, "version" | "consent" | "votingUntil" | "description">, now = Date.now()) {
+  private write(record: DaoRequest) {
+    privateDirectory(this.dir);
+    writeAtomic(join(this.dir, `${record.id}.json`), JSON.stringify(Request.parse(record)) + "\n", 0o600);
+    return record;
+  }
+  /** A consent request: its vote must pass before the consent expires, and within Sputnik's default proposal period. */
+  file(request: Omit<DaoConsentRequest, "version" | "kind" | "consent" | "votingUntil" | "description">, now = Date.now()) {
     this.admit(request.deployment, now);
     const votingUntil = Math.min(request.expiresAt, now + MAX_PROPOSAL_MS);
-    const record = Request.parse({ ...request, version: 1, votingUntil, description: daoConsentDescription({ ...request, votingUntil }), consent: null });
-    privateDirectory(this.dir);
-    writeAtomic(join(this.dir, `${record.id}.json`), JSON.stringify(record) + "\n", 0o600);
-    return record;
+    return this.write({ ...request, version: 1, kind: "consent", votingUntil, description: daoConsentDescription({ ...request, votingUntil }), consent: null }) as DaoConsentRequest;
+  }
+  /** A proposal vote: it must pass before the proposal expires (`expiresAt`), and within the proposal period. */
+  fileVote(request: Omit<DaoVoteRequest, "version" | "kind" | "relayed" | "votingUntil" | "description">, now = Date.now()) {
+    this.admit(request.deployment, now);
+    const votingUntil = Math.min(request.expiresAt, now + MAX_PROPOSAL_MS);
+    return this.write({ ...request, version: 1, kind: "proposal", votingUntil, description: daoVoteDescription({ ...request, votingUntil }), relayed: null }) as DaoVoteRequest;
   }
   settle(id: string, consent: string) {
     const record = this.read(id);
-    if (!record) throw new Error(`No DAO request ${id}`);
-    writeAtomic(join(this.dir, `${id}.json`), JSON.stringify({ ...record, consent }) + "\n", 0o600);
+    if (record?.kind !== "consent") throw new Error(`No DAO consent request ${id}`);
+    this.write({ ...record, consent });
+  }
+  relayed(id: string, state: string, now = Date.now()) {
+    const record = this.read(id);
+    if (record?.kind !== "proposal") throw new Error(`No DAO vote request ${id}`);
+    return this.write({ ...record, relayed: { at: now, state } }) as DaoVoteRequest;
   }
 }

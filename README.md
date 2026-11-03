@@ -255,10 +255,10 @@ Each line is a gap; the linked page says how the rest is known. The
   doesn't set up Treasury agents yet. A proposal's approval is the platform's check, not the provider's: whoever holds
   the treasury grant can swap within the policy without it. Held swaps aren't used: what their vote commits to is
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
-- DAO-owned agents through apps (coordination/p5-treasury-dao-consent.md): only consent by DAO vote is built
-  (`read` and `treasury`, offline-tested only; no stack run, no host). Approving proposals, the strategy grant, freeze
-  and setup by DAO vote aren't built, and only a DAO whose proposals pass within minutes could sign the provider's owner
-  intents, which expire in minutes. See [app access](docs/app-access.md).
+- DAO-owned agents through apps: consent, Treasury proposal votes, the grant, freeze and unfreeze by DAO vote are
+  offline- and stack-tested only (simulated DAO votes; no host, not mainnet-observed). DAO setup through an app isn't
+  built, and the provider's owner intents (grant, freeze) expire in minutes, so only a DAO whose vote passes that fast
+  completes them. See [app access](docs/app-access.md).
 - Agent connections exist only for a contractor's own reports (offline- and stack-tested, not deployed); a token is a
   bearer for at most 24 hours; owner connections aren't built. See
   [agent access](docs/agent-access.md#agent-connections-contractor-reports).

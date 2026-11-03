@@ -33,10 +33,14 @@ async function harness(t: import("node:test").TestContext) {
   const policy = { roles: [], default_vote_policy: {}, proposal_bond: "100000000000000000000000", proposal_period: "604800000000000" };
   const state = { owner: signer.account_id as string, providerId: "provider-id" as string | null, dao: true, policyDown: false,
     /** What `findSignature` finds on chain: null until a proposal passes. */
-    signature: null as Buffer | null, findDown: false, stopping: false };
-  const forwarded: { path: string; headers: Record<string, unknown> }[] = [];
-  const upstream = createServer((req, res) => { req.resume(); req.on("end", () => {
-    forwarded.push({ path: req.url!, headers: req.headers }); res.writeHead(200, { "content-type": "application/json" }); res.end('{"json":{"ok":true}}');
+    signature: null as Buffer | null, findDown: false, stopping: false,
+    /** The agent's answers by procedure path (`/rpc/<path>`), as `{ status, json }`; anything else answers ok. */
+    replies: {} as Record<string, { status: number; json: unknown }> };
+  const forwarded: { path: string; headers: Record<string, unknown>; body: any }[] = [];
+  const upstream = createServer((req, res) => { let text = ""; req.on("data", chunk => text += chunk); req.on("end", () => {
+    forwarded.push({ path: req.url!, headers: req.headers, body: text ? JSON.parse(text) : null });
+    const reply = state.replies[req.url!] ?? { status: 200, json: { ok: true } };
+    res.writeHead(reply.status, { "content-type": "application/json" }); res.end(JSON.stringify(reply.status < 300 ? { json: reply.json } : reply.json));
   }); });
   const agent = { name: "treasury", owner: DAO, port: await listen(upstream), area: "treasury" as const, executor: true };
   const daoOwner: DaoOwnerReads = {
@@ -53,8 +57,11 @@ async function harness(t: import("node:test").TestContext) {
   const port = await listen(server);
   t.after(async () => { await close(server); await close(upstream); process.chdir(cwd); rmSync(dir, { recursive: true, force: true }); });
   // The agent's server reports its identity; any chain read (the wallet path's DAO check) answers as a Sputnik DAO.
-  t.mock.method(globalThis, "fetch", async (input: Parameters<typeof fetch>[0]) => {
+  const original = globalThis.fetch;
+  t.mock.method(globalThis, "fetch", async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+    // The gateway's own calls to the agent (proposals) reach the test agent; its identity reads are answered here.
+    if (url.pathname.startsWith("/rpc/") && url.pathname !== "/rpc/ownerIdentity") return original(input, init);
     if (url.pathname.startsWith("/rpc/")) return Response.json({ json: state.providerId === null ? { agentId: null, owner: null }
       : { agentId: state.providerId, owner: { type: "near", account_id: state.owner } } });
     return Response.json({ jsonrpc: "2.0", id: 1, result: { block_hash: "5f8R8jZuPxPXMKk7ghU8ZtMJdAfqgRqfxHP2Ke7F3rC7", block_height: 1, logs: [],
@@ -69,7 +76,16 @@ async function harness(t: import("node:test").TestContext) {
   /** The DAO's MPC key signing a request's hash, as a passed `v1.signer` proposal does. */
   const vote = (hash: string, key = daoKey) => { state.signature = Buffer.from(key.sign(Buffer.from(hash, "hex")).data); };
   const rpc = (procedure: string, org = "org_1") => `/apps/v1/o/${org}/a/treasury/rpc/${procedure}`;
-  return { port, state, forwarded, signer, staging, production, text, file, vote, rpc };
+  /** Files a consent and has the DAO vote it through: the stored consent's id. */
+  const consented = async () => {
+    const { request: pending } = (await file()).body;
+    vote(pending.hash);
+    const signed = await call(port, `/apps/v1/dao-consents/${pending.hash}`, "GET", staging);
+    assert.equal(signed.body.state, "signed");
+    state.signature = null;
+    return signed.body.consent.id as string;
+  };
+  return { port, state, forwarded, signer, staging, production, text, file, vote, rpc, consented };
 }
 
 test("a DAO files its consent for a vote: the platform picks the nonce and answers the proposal a member files", async t => {
@@ -192,4 +208,114 @@ test("consent records from before DAO consent load unchanged, as the owner walle
   const [record] = new AppConsents(dir).list({});
   assert.equal(record?.id, id);
   assert.equal(record?.signer, undefined);
+});
+
+const PROPOSAL = { id: "p-1", requestId: "r-1", agentId: "provider-id", deployment: "staging", organization: "org_1", source: "external",
+  legs: [{ from: "nep141:usdc.test", to: "nep141:wrap.near", amount: "1000000", minAmountOut: "200000000000000000000000" }],
+  quoted: [], policyRevision: 3, policyDigest: "d".repeat(64), strategyDigest: "s".repeat(64), createdAt: new Date().toISOString(),
+  expiresAt: later(2), note: null, sha256: "e".repeat(64), state: "proposed", reason: null, approvedAt: null, planId: null, operations: [] };
+
+test("a DAO votes on an app's proposal from the platform's own text, and the platform relays the signature once", async t => {
+  const { port, state, forwarded, signer, staging, production, vote, consented } = await harness(t);
+  const consent = await consented();
+  state.replies["/rpc/proposals/get"] = { status: 200, json: PROPOSAL };
+  state.replies["/rpc/proposals/approve"] = { status: 200, json: { ...PROPOSAL, state: "approved" } };
+  const ask = (over = {}, token = staging) => call(port, "/apps/v1/dao-votes", "POST", token, { organization: "org_1", agent: "treasury", proposal: "p-1", verdict: "approve", ...over });
+
+  const filed = await ask();
+  assert.equal(filed.status, 201, JSON.stringify(filed.body));
+  const read = forwarded.at(-1)!;
+  assert.deepEqual([read.path, read.headers["x-gateway-actor"], read.headers["x-gateway-consent"], read.headers["x-gateway-host"]],
+    ["/rpc/proposals/get", "app:staging:org_1", consent, HOST], "the proposal is read as this app's, under its DAO consent");
+  const { request: pending } = filed.body;
+  assert.match(pending.description, /Approve Treasury proposal p-1/);
+  assert.match(pending.description, /1\. Swap 1000000 of nep141:usdc\.test for at least 0\.2 wNEAR/);
+  assert.ok(pending.votingUntil <= Date.parse(PROPOSAL.expiresAt), "the vote must pass while the proposal is valid");
+  assert.equal(filed.body.transactions.proposal.receiverId, DAO);
+  assert.equal((await ask({ organization: "org_2" })).status, 403, "another Organization has no DAO consent");
+  assert.equal((await ask({}, production)).status, 403, "another deployment has no DAO consent");
+
+  const stateOf = () => call(port, `/apps/v1/dao-votes/${pending.hash}`, "GET", staging);
+  assert.equal((await stateOf()).body.state, "pending");
+  const before = forwarded.length;
+  vote(pending.hash, generateKey());
+  assert.equal((await stateOf()).body.state, "pending", "another key's signature relays nothing");
+  assert.equal(forwarded.length, before);
+
+  vote(pending.hash);
+  const relayed = await stateOf();
+  assert.equal(relayed.status, 200, JSON.stringify(relayed.body));
+  assert.deepEqual([relayed.body.state, relayed.body.proposalState], ["relayed", "approved"]);
+  const approval = forwarded.at(-1)!;
+  assert.equal(approval.path, "/rpc/proposals/approve");
+  assert.equal(approval.headers["x-gateway-consent"], consent);
+  const { signed } = approval.body.json;
+  assert.equal(signed.publicKey, signer.public_key, "signed by the DAO's derived key");
+  assert.match(signed.message, /^Approve Treasury proposal p-1\n/);
+  assert.equal((await stateOf()).body.state, "relayed");
+  assert.equal(forwarded.length, before + 1, "relayed once");
+  assert.equal((await call(port, `/apps/v1/dao-votes/${pending.hash}`, "GET", production)).status, 404);
+});
+
+test("a DAO vote relays nothing for a proposal that isn't open, a consent that ended, or an agent that refuses it", async t => {
+  const { port, state, forwarded, staging, vote, consented } = await harness(t);
+  const consent = await consented();
+  const ask = () => call(port, "/apps/v1/dao-votes", "POST", staging, { organization: "org_1", agent: "treasury", proposal: "p-1", verdict: "reject" });
+  state.replies["/rpc/proposals/get"] = { status: 200, json: { ...PROPOSAL, state: "approved" } };
+  assert.equal((await ask()).status, 409, "only an open proposal");
+  state.replies["/rpc/proposals/get"] = { status: 400, json: { defined: false, code: "BAD_REQUEST", status: 400, message: "not yours" } };
+  assert.equal((await ask()).status, 409, "only this app's own proposal");
+  state.replies["/rpc/proposals/get"] = { status: 200, json: PROPOSAL };
+
+  const refused = (await ask()).body.request;
+  state.replies["/rpc/proposals/reject"] = { status: 400, json: { defined: true, code: "not_open", status: 400, message: "closed meanwhile" } };
+  vote(refused.hash);
+  assert.equal((await call(port, `/apps/v1/dao-votes/${refused.hash}`, "GET", staging)).status, 409, "the agent's refusal stands");
+  state.replies["/rpc/proposals/reject"] = { status: 200, json: { ...PROPOSAL, state: "rejected" } };
+  assert.equal((await call(port, `/apps/v1/dao-votes/${refused.hash}`, "GET", staging)).body.proposalState, "rejected", "reading again relays the same signature");
+
+  state.signature = null;
+  const ended = (await ask()).body.request;
+  assert.equal((await call(port, `/apps/v1/consents/${consent}`, "DELETE", staging)).status, 200);
+  vote(ended.hash);
+  const before = forwarded.length;
+  assert.equal((await call(port, `/apps/v1/dao-votes/${ended.hash}`, "GET", staging)).status, 409, "the consent it was filed under ended");
+  assert.equal(forwarded.length, before, "nothing relayed");
+
+  // Another live DAO consent doesn't stand in for the one the vote was filed under.
+  state.signature = null;
+  const [first, second] = [await consented(), await consented()];
+  const filed = (await ask()).body.request;
+  const under = JSON.parse(readFileSync(join(".app-access", "dao-requests", `${filed.hash}.json`), "utf8")).under;
+  assert.ok([first, second].includes(under));
+  assert.equal((await call(port, `/apps/v1/consents/${under}`, "DELETE", staging)).status, 200);
+  vote(filed.hash);
+  const stood = forwarded.length;
+  assert.equal((await call(port, `/apps/v1/dao-votes/${filed.hash}`, "GET", staging)).status, 409, "only the consent it was filed under");
+  assert.equal(forwarded.length, stood, "nothing relayed");
+});
+
+test("under its consent a DAO is asked to vote only on a Treasury grant, freeze or unfreeze, and the app gets only the proposal", async t => {
+  const { port, state, forwarded, staging, rpc, consented } = await harness(t);
+  await consented();
+  const prepare = (action: object, signer = "dao") => call(port, rpc("owner/prepare"), "POST", staging, { json: { action, signer } });
+  const daoReply = { correlationId: "c-1", preview: { summary: "Freeze the agent" }, expiresAt: later(0.005), digest: null,
+    dao: { owner: "x", transaction: { receiverId: "v1.signer", actions: [] }, proposal: null, proposalAndVote: null } };
+  state.replies["/rpc/owner/prepare"] = { status: 200, json: daoReply };
+  for (const action of [{ type: "agent_freeze" }, { type: "agent_unfreeze" }, { type: "grant_issue", label: "treasury" }]) {
+    const prepared = await prepare(action);
+    assert.equal(prepared.status, 200, `${action.type}: ${JSON.stringify(prepared.body)}`);
+    assert.equal(prepared.body.json.dao.transaction.receiverId, "v1.signer");
+  }
+  const before = forwarded.length;
+  for (const [action, signer] of [[{ type: "grant_issue", label: "payout" }, "dao"], [{ type: "agent_create", owner: { type: "near", account_id: "x", public_key: "ed25519:x" } }, "dao"],
+    [{ type: "policy_update", changes: {} }, "dao"], [{ type: "agent_freeze" }, "wallet"]] as const)
+    assert.equal((await prepare(action, signer)).status, 403, `${(action as { type: string }).type} as ${signer}`);
+  assert.equal(forwarded.length, before, "nothing refused was forwarded");
+
+  state.replies["/rpc/owner/prepare"] = { status: 200, json: { ...daoReply, dao: undefined, intent: { standard: "nep413", payload: { message: "m", recipient: "r", nonce: "n" } },
+    signer: { type: "near", account_id: "x", public_key: "ed25519:x" } } };
+  assert.equal((await prepare({ type: "agent_freeze" })).status, 403, "an intent the app could sign elsewhere is never released for a DAO");
+  for (const procedure of ["owner/status", "owner/pending"]) assert.equal((await call(port, rpc(procedure), "POST", staging, { json: { correlationId: "c-1" } })).status, 200, procedure);
+  assert.equal((await call(port, rpc("owner/submit"), "POST", staging, { json: { correlationId: "c-1", signedData: {} } })).status, 403, "the agent submits the DAO's signature itself");
 });

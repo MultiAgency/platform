@@ -365,7 +365,9 @@ one only as a confirm page link), `payout` (payout requests, their status, held 
 `treasury-execute`, only beside `treasury` (plans prepared and executed without a signature per swap, only under a
 grant binding the plan's strategy). A **DAO consent** is the same text signed by the DAO's own vote (its derived
 key, through a passed `v1.signer` proposal the platform files); it carries only `read` and `treasury`, and its agent's
-ownership by the DAO's derived account is re-read on every call. DAO consent is offline-tested only. Revocable by the deployment or the operator; a revocation is a permanent tombstone. Offline- and stack-tested;
+ownership by the DAO's derived account is re-read on every call. Under it the platform files the DAO's votes on the
+app's Treasury proposals and on the Treasury grant, freeze and unfreeze; the app never gets a text to sign. Offline-
+and stack-tested only. Revocable by the deployment or the operator; a revocation is a permanent tombstone. Offline- and stack-tested;
 mainnet-observed on platform staging (2026-10-28); not in production. See docs/app-access.md.
 
 

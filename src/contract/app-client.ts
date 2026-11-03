@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { appAgent, appConsentList, appConsentStored, appDaoConsentFiled, appDaoConsentState, appRevoked, appSetupStored, type AppOwnerAction, type AppProcedure } from "./app-access.js";
+import { appAgent, appConsentList, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoVoteFiled, appDaoVoteState, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
 import type { appConsentSubmission } from "./app-consent.js";
 import { ownerClient, type OwnerCallOptions, type OwnerFailure, type OwnerOutput, type OwnerProcedure, type OwnerResult } from "./owner-client.js";
 import type { ownerStreams } from "./owner-outputs.js";
@@ -26,7 +26,8 @@ export type AppRouteResult<T> =
   | { ok: false; kind: "unavailable"; httpStatus?: number };
 
 /** Procedure inputs as an app may send them: `owner/prepare` takes only actions an app may ask an owner to sign. */
-export type AppInputs = { [P in AppProcedure]: P extends "owner/prepare" ? { action: AppOwnerAction; signer: "wallet" } : OwnerInputs[P] };
+export type AppInputs = { [P in AppProcedure]: P extends "owner/prepare"
+  ? { action: AppOwnerAction; signer: "wallet" } | { action: AppDaoAction; signer: "dao" } : OwnerInputs[P] };
 /** The app procedures that answer an event stream. */
 type AppStream = Extract<AppProcedure, (typeof ownerStreams)[number]>;
 type Covered = AppProcedure extends OwnerProcedure ? true : never;
@@ -80,6 +81,15 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
     daoConsents: {
       file: (message: string) => route("/dao-consents", appDaoConsentFiled, post({ message })),
       state: (id: string) => route(`/dao-consents/${encodeURIComponent(id)}`, appDaoConsentState),
+    },
+    /**
+     * A DAO's vote on one of this app's Treasury proposals under its DAO consent: `file` answers the proposal a member
+     * files; `state` reads it until the DAO's signature is found and relayed to the agent. Then execute the proposal as
+     * usual. Filing again files a new request: follow the one you have.
+     */
+    daoVotes: {
+      file: (input: { organization: string; agent: string; proposal: string; verdict: "approve" | "reject" }) => route("/dao-votes", appDaoVoteFiled, post(input)),
+      state: (id: string) => route(`/dao-votes/${encodeURIComponent(id)}`, appDaoVoteState),
     },
     /** One Organization's agent: reads, owner actions and Treasury procedures its live consents cover. */
     agent(organization: string, agent: string) {

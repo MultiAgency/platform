@@ -107,11 +107,28 @@ export async function provider(directory, { treasury = false, account = OWNER, p
       request_hash: createHash('sha256').update(JSON.stringify(data)).digest('hex') };
   };
   let dropNextTransfer = false, dropNextSignature = false, ownerOutcomeUnavailable = false;
+  /** Passed DAO proposals that called `v1.signer`: the transaction and the signature its receipt returns (`daoVote`). */
+  const daoVotes = [];
+  /** The chain's height: each passed vote lands in a later block than anything prepared before it. */
+  const height = () => 1_000 + daoVotes.length;
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://local'), body = await bodyOf(req);
       const entry = { method: req.method, path: url.pathname, query: url.search, body, key: req.headers['idempotency-key'] };
       requests.push(entry); appendFileSync(`${directory}/provider.jsonl`, JSON.stringify(entry) + '\n');
+      // FastNEAR's transaction API, as the DAO-signature search reads it (test/e2e/fastnear-fixture.cjs routes it here).
+      if (url.pathname === '/fastnear/v0/account')
+        return json(res, { account_txs: daoVotes.filter(v => body.account_id === DAO && v.height >= (body.from_tx_block_height ?? 0))
+          .map(v => ({ transaction_hash: v.hash })), resume_token: null });
+      if (url.pathname === '/fastnear/v0/transactions')
+        return json(res, { transactions: daoVotes.filter(v => body.tx_hashes.includes(v.hash)).map(v => ({ receipts: [{ execution_outcome: { outcome: { status: {
+          SuccessValue: Buffer.from(JSON.stringify({ scheme: 'Ed25519', signature: [...v.signature] })).toString('base64') } } } }] })) });
+      if (url.pathname === '/chain' && body.method === 'status')
+        return json(res, { jsonrpc: '2.0', id: body.id, result: { version: { version: 'local', build: 'local' }, chain_id: 'mainnet',
+          genesis_hash: '11111111111111111111111111111111', protocol_version: 1, latest_protocol_version: 1, rpc_addr: 'local', node_public_key: PUBLIC_KEY,
+          node_key: null, validator_account_id: null, validator_public_key: null, validators: [],
+          sync_info: { latest_block_hash: '11111111111111111111111111111111', latest_block_height: height(), latest_state_root: '11111111111111111111111111111111',
+            latest_block_time: new Date().toISOString(), syncing: false } } });
       if (url.pathname === '/chain') {
         const { params, id: requestId } = body;
         if (params.request_type === 'view_access_key' && [account, ...payees, ...accounts].includes(params.account_id) && params.public_key === PUBLIC_KEY)
@@ -330,6 +347,14 @@ export async function provider(directory, { treasury = false, account = OWNER, p
     },
     /** The warning codes every dry swap quote carries from now on, as the provider's dry run reports them (`[]` clears). */
     warnQuotes(codes) { quoteWarnings = [...codes]; },
+    /**
+     * The simulated DAO passes a proposal calling `v1.signer` for `hash` (hex): its MPC key, here the test key, signs it,
+     * and the receipt is found by FastNEAR's transaction API from the next block on.
+     */
+    daoVote(hash) {
+      const signature = Buffer.from(parseKey(TEST_KEY).sign(Buffer.from(hash, 'hex')).data);
+      daoVotes.push({ hash: randomBytes(32).toString('hex'), signature, height: height() + 1 });
+    },
     /** A Treasury agent's confidential balances (for assertions). */
     treasuryBalances: (agent = id) => Object.fromEntries([...agents.get(agent).treasury.confidential].map(([asset, raw]) => [asset, raw.toString()])),
     /** The payout agent's current policy and revision (for assertions). */

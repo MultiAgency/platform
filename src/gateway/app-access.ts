@@ -10,7 +10,7 @@ import { nep413Hash, signatureBytes, verifyEd25519 } from "../nep413.js";
 import type { KeyLookup, KeyStateLookup } from "../signin.js";
 import { writeAtomic } from "../synced.js";
 import { AppScope, appConsentSubmission, parseConsentMessage, parseSetupMessage, UNBORN_AGENT } from "../contract/app-consent.js";
-import { appMayAsk, appScopesCover, AppSigner } from "../contract/app-access.js";
+import { appMayAsk, appMayAskDao, appScopesCover, AppSigner } from "../contract/app-access.js";
 import { mayCall } from "./allowlist.js";
 import type { Access } from "./roles.js";
 
@@ -61,6 +61,13 @@ export function appMayPrepare(input: unknown) {
   try { decoded = rpcInput.deserialize(input as Parameters<RPCSerializer["deserialize"]>[0]); } catch { return null; }
   const parsed = ownerPrepareInput.safeParse(decoded);
   return parsed.success && parsed.data.signer === "wallet" && appMayAsk(parsed.data.action) ? parsed.data.action : null;
+}
+/** The owner action an `owner/prepare` body asks a DAO to vote on (`signer: "dao"`), if an app may ask for it. */
+export function appMayPrepareForDao(input: unknown) {
+  let decoded: unknown;
+  try { decoded = rpcInput.deserialize(input as Parameters<RPCSerializer["deserialize"]>[0]); } catch { return null; }
+  const parsed = ownerPrepareInput.safeParse(decoded);
+  return parsed.success && parsed.data.signer === "dao" && appMayAskDao(parsed.data.action) ? parsed.data.action : null;
 }
 
 export function privateDirectory(root: string) {

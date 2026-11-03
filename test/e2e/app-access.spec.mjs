@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { appClient } from '../../src/contract/app-client.ts';
 import { consentMessage, setupMessage } from '../../src/contract/app-consent.ts';
 import { environment } from './environment.mjs';
-import { BUILDER, OWNER, PUBLIC_KEY, USDC, sign } from './provider.mjs';
+import { BUILDER, DAO, OWNER, PUBLIC_KEY, USDC, sign } from './provider.mjs';
 import { browserContext } from './wallet.mjs';
 
 // An app deployment's server reaching the platform on the real stack: an operator-issued service credential, owner
@@ -324,4 +324,48 @@ test("an app sets up an Organization's own Treasury agent; its plans run only un
     await info.attach('steps', { body: JSON.stringify(steps, null, 2), contentType: 'application/json' });
     await stack.close();
   }
+});
+
+test("a DAO consents to an app by its own vote, a vote grants and approves its proposal, and the approved proposal executes once", async ({}, info) => {
+  test.setTimeout(180_000);
+  const stack = await environment(info.outputPath('environment'), { daoPortfolio: true, headless: true });
+  try {
+    const { host, app } = await connect(stack);
+    /** A member files the DAO's proposal and it passes: the simulated MPC key signs the hash it names. */
+    const passes = transaction => {
+      const call = transaction.actions[0].params, kind = call.args.proposal.kind.FunctionCall.actions[0];
+      stack.simulated.daoVote(JSON.parse(Buffer.from(kind.args, 'base64').toString()).request.payload_v2.Eddsa);
+    };
+    const identity = value(await app.identity('portfolio'));
+    expect(identity).toMatchObject({ owner: DAO, signer: 'dao', created: true });
+
+    const filed = value(await app.daoConsents.file(consentMessage({ host, deployment: 'local', organization: 'org_1', owner: DAO,
+      agent: 'portfolio', agentId: identity.agentId, scopes: ['read', 'treasury'], expiresAt: later(90) })));
+    expect(value(await app.daoConsents.state(filed.request.id)).state, 'nothing is stored before the vote').toBe('pending');
+    passes(filed.transactions.proposal);
+    const consent = value(await app.daoConsents.state(filed.request.id));
+    expect(consent).toMatchObject({ state: 'signed', consent: { signer: 'dao', owner: DAO, scopes: ['read', 'treasury'] } });
+    const agent = app.agent('org_1', 'portfolio');
+
+    // The strategy-bound grant is a DAO vote: the platform prepares it, and the agent submits the DAO's signature itself.
+    const strategy = value(await agent.call('strategy/get'));
+    const grant = value(await agent.call('owner/prepare', { action: { type: 'grant_issue', label: 'treasury', expectedStrategyDigest: strategy.digest }, signer: 'dao' }));
+    expect(grant.intent, 'the app never gets an intent to sign').toBeUndefined();
+    passes(grant.dao.proposal);
+    await expect.poll(async () => value(await agent.call('owner/status', { correlationId: grant.correlationId })).status, { timeout: 45_000 }).toBe('SUCCESS');
+
+    const proposal = value(await agent.call('proposals/create', { requestId: 'dao-1', legs: [{ from: USDC, to: 'nep141:wrap.near', amount: '1000000' }], expiresAt: later(2) }));
+    expect(await agent.call('proposals/approve', { id: proposal.id, signed: { message: 'x', nonce: 'x', publicKey: PUBLIC_KEY, signature: 'x' } }),
+      'only a DAO vote approves').toMatchObject({ ok: false, kind: 'forbidden' });
+    const vote = value(await app.daoVotes.file({ organization: 'org_1', agent: 'portfolio', proposal: proposal.id, verdict: 'approve' }));
+    expect(vote.request.description).toContain(`Approve Treasury proposal ${proposal.id}`);
+    expect(value(await app.daoVotes.state(vote.request.id)).state).toBe('pending');
+    passes(vote.transactions.proposal);
+    expect(value(await app.daoVotes.state(vote.request.id))).toMatchObject({ state: 'relayed', proposalState: 'approved' });
+
+    const done = value(await agent.call('proposals/execute', { id: proposal.id }));
+    expect(done).toMatchObject({ state: 'executed', operations: [expect.objectContaining({ method: 'swap', status: 'SUCCESS' })] });
+    expect(value(await agent.call('proposals/execute', { id: proposal.id })).state, 'asked again, nothing is sent').toBe('executed');
+    expect(stack.portfolio.swaps.length, 'one swap').toBe(1);
+  } finally { await stack.close(); }
 });

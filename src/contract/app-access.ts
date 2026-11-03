@@ -92,6 +92,18 @@ export const appConsentView = z.looseObject({ id: z.string(), deployment: z.stri
   owner: z.string(), agent: z.string(), agentId: z.string(), scopes: z.array(AppScope), expiresAt: z.number(), createdAt: z.number(),
   publicKey: z.string(), revoked: z.boolean(), revokedAt: z.number().nullable(), signer: AppSigner.optional() });
 
+/**
+ * The owner actions an app may ask a DAO to vote on, under its `treasury` consent: the platform prepares each with
+ * `signer: "dao"` and answers the proposal a member files; the agent submits the DAO's signature once the vote passes.
+ * Each is a provider owner intent that expires in minutes, so the vote must pass within `expiresAt`.
+ */
+export const DAO_APP_ACTIONS = ["grant_issue", "agent_freeze", "agent_unfreeze"] as const;
+/** Whether a parsed owner action is one an app may ask a DAO to vote on: a Treasury grant, freeze or unfreeze. */
+export function appMayAskDao(action: { type: string; label?: string }) {
+  return (DAO_APP_ACTIONS as readonly string[]).includes(action.type) && (action.type !== "grant_issue" || action.label === "treasury");
+}
+export type AppDaoAction = Of<"agent_freeze"> | Of<"agent_unfreeze"> | (Of<"grant_issue"> & { label: "treasury" });
+
 /** A NEAR transaction for a DAO member's wallet to sign, as near-kit builds it (receiver and function-call actions). */
 const memberTransaction = z.looseObject({ receiverId: z.string(), actions: z.array(z.looseObject({ type: z.literal("FunctionCall"), params: z.looseObject({}) })) });
 /**
@@ -103,6 +115,19 @@ export const appDaoConsentRequest = z.looseObject({ id: z.string(), dao: z.strin
   agentId: z.string(), scopes: z.array(AppScope), expiresAt: z.number(), votingUntil: z.number(), hash: z.string(), description: z.string() });
 export const appDaoConsentFiled = z.looseObject({ request: appDaoConsentRequest,
   transactions: z.looseObject({ proposal: memberTransaction.nullable(), proposalAndVote: memberTransaction.nullable() }) });
+/**
+ * A DAO's vote on a Treasury proposal, filed by the platform from the proposal's own text (`proposalText`): it must pass
+ * before `votingUntil`. Once the DAO's signature is found the platform relays it to `proposals/approve` or `reject`.
+ */
+export const appDaoVoteRequest = z.looseObject({ id: z.string(), dao: z.string(), organization: z.string(), agent: z.string(),
+  agentId: z.string(), proposal: z.string(), verdict: z.enum(["approve", "reject"]), votingUntil: z.number(), hash: z.string(), description: z.string() });
+export const appDaoVoteFiled = z.looseObject({ request: appDaoVoteRequest,
+  transactions: z.looseObject({ proposal: memberTransaction.nullable(), proposalAndVote: memberTransaction.nullable() }) });
+/** A proposal vote's state: waiting for the vote, or relayed to the agent, with the proposal's state then. */
+export const appDaoVoteState = z.discriminatedUnion("state", [
+  z.looseObject({ state: z.literal("pending"), request: appDaoVoteRequest }),
+  z.looseObject({ state: z.literal("relayed"), request: appDaoVoteRequest, proposalState: z.string() }),
+]);
 /** A DAO consent's state: still waiting for the vote, or stored once the DAO's signature was found on chain. */
 export const appDaoConsentState = z.discriminatedUnion("state", [
   z.looseObject({ state: z.literal("pending"), request: appDaoConsentRequest }),

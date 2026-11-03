@@ -152,8 +152,11 @@ consent, call and revocation is appended to `.app-access/access.jsonl`.
 
 DAO owners: a DAO's consent is signed by its own vote (`POST /apps/v1/dao-consents`, then `GET /apps/v1/dao-consents/<hash>`
 until the DAO's signature is found; coordination/p5-treasury-dao-consent.md). It carries only `read` and `treasury`,
-and each call re-reads that the agent is still owned by the DAO's derived account. Offline-tested only; no host serves
-it yet, and approving proposals, owner actions and setup by DAO vote aren't built.
+and each call re-reads that the agent is still owned by the DAO's derived account. Under it the app asks for the DAO's
+votes: on its Treasury proposals (`POST /apps/v1/dao-votes`, relayed to the agent once the signature is found), and on
+the `treasury` grant, freeze and unfreeze (`owner/prepare` with `signer: "dao"`, which answers the proposal to file;
+the agent submits the signature). Offline- and stack-tested (simulated DAO votes); no host serves it yet, and DAO setup
+through an app isn't built.
 
 Limits: DAO owners as above (no DAO setup, and owner actions through the app take `signer: "wallet"` only); payout requests
 pay confidential USDC through `intents`, or withdraw wNEAR (arriving as native NEAR) or USDC to an agreed NEAR account
