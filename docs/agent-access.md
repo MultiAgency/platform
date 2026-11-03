@@ -1,7 +1,7 @@
 # Shared agent access contract
 
-This is a local candidate in Proto, not a deployed service or mainnet observation. Proto owns the
-credential store, host routing, owner consent and access management. Treasury supplies its planning
+Except where a section says otherwise (app access has run on platform staging), this is offline-tested, not a deployed
+service or mainnet observation. The platform owns the credential store, host routing, owner consent and access management. Treasury supplies its planning
 and execution handlers and its consuming skill. Installing a skill grants no authority.
 
 ## Owner access
@@ -11,7 +11,7 @@ view of configured Treasury agents, independently of provider observations. Wall
 configured owner; DAO members need current onchain management permission to inspect or revoke existing
 records. DAO members still cannot issue or use machine authority. That view
 provides no signing or execution capabilities. It is not a fresh assertion of provider ownership.
-On independently packaged product hosts, `/a/<name>/access` serves Proto's shared frontend;
+On independently packaged product hosts, `/a/<name>/access` serves the platform's shared frontend;
 content-hashed shared assets are available when absent from the product asset directory. Ordinary
 product pages and existing product assets keep their own frontend. Host-local session checks and
 payee routing remain unchanged.
@@ -49,7 +49,7 @@ the one-time field available for manual copy. Hiding or reloading cannot retriev
 ## Machine transport
 
 Use `POST https://<issued-host>/machine/v1/a/<name>/rpc/<procedure>` with
-`Authorization: Bearer <token>`, no cookies or Origin. The body and streamed responses use Proto's
+`Authorization: Bearer <token>`, no cookies or Origin. The body and streamed responses use the platform's
 pinned oRPC serialization (`@orpc/client` 2.0.0-beta.47, bundled in the SDK; beta.44 clients are tested offline only, see
 [SDK changes](sdk-changes.md)). Unknown procedures refuse
 access. Machine credentials are not browser sessions and cannot authenticate dashboard RPC or
@@ -96,7 +96,7 @@ outcomes automatically. Treat 401/403 as refused access and 404/405 as unavailab
 
 The Treasury skill's `prepare FILE` calls `externalPlan` with a strict `{ swaps }` object: one to
 eight ordered swaps between managed USDC, wNEAR and ETH, differing `from`/`to` asset IDs, positive
-atomic-unit `amount` strings (at most 40 digits), and optional `minAmountOut`. Proto quotes each swap;
+atomic-unit `amount` strings (at most 40 digits), and optional `minAmountOut`. The platform quotes each swap;
 a supplied floor can tighten but never lower the provider floor. Invalid inputs, forbidden outputs,
 excessive cost, aggregate overspending, changed policy/strategy/balances, or required storage failure
 refuse the complete preparation. Preparation moves no funds and never drops or replaces chosen swaps.
@@ -362,7 +362,7 @@ established by these consumer tests. Existing mainnet claims and generated evide
 
 ## Release review (not deployed)
 
-1. Review the Proto and Treasury skill/client diffs together, preserving other sessions' edits.
+1. Review the platform and Treasury skill/client diffs together, preserving other sessions' edits.
    Retain the acceptance manifest and its exact source, client and dependency hashes.
 2. Before a user-controlled release, confirm executor assignments and host registries and preserve
    all state listed above, especially current credential revocations and plan execution claims.

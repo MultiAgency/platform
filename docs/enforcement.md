@@ -244,8 +244,8 @@ those codes leaves the operation unresolved. `quote_unavailable`, which the chan
 `PROVEN_5XX` because the deployed provider version isn't established. Since provider API #51/#54 (skills repo,
 2026-10-27), a dry swap quote is no longer refused by the account's rules: it answers 200 with `warnings` carrying the
 code the live swap would get. `quoteLeg` (`src/treasury.ts`) returns those codes, and a leg with any code not on the
-engine's allow-list (empty today, user decision 2026-10-30) is left out of a strategy rebalance, refuses an external
-plan before it is saved, isn't proposed by the steward, and rejects a saved plan at its pre-send re-quote before
+engine's allow-list (empty today) is left out of a strategy rebalance, refuses an external plan before it is saved,
+isn't proposed by the steward, and rejects a saved plan at its pre-send re-quote before
 anything is claimed; an autopilot tick reports the codes and asks the owner once (offline-tested,
 `test/rebalance.test.ts`, `test/external-plan.test.ts`, `test/steward-tools.test.ts`, `test/autopilot.test.ts`; not yet
 observed on mainnet). A clean dry run doesn't guarantee the live answer. A plan's legs are all re-quoted against the
@@ -269,7 +269,7 @@ A missing operation ID on a claimed or legacy operation cannot be repaired by st
 from the payout agent's shared balance when the owner chooses `shared` at preparation; isolated order agents remain the
 default path (owner decision, 2026-10-19). A shared send whose response is lost keeps its effect but leaves no operation
 ID, so the payment stays `UNKNOWN` even after approval and settlement, is never sent again, and blocks the payout
-agent's later sends until reviewed (`test/e2e/shared-payout.spec.mjs`). A send refused by Proto's own checks before
+agent's later sends until reviewed (`test/e2e/shared-payout.spec.mjs`). A send refused by the platform's own checks before
 submission leaves the payment prepared on its identity for a later send (owner decision, 2026-10-18;
 `test/compensation-http.test.ts`). **Open dependency for making shared the default:** observed provider behaviour for
 looking up, or deduplicating, a submission by its idempotency key, so a lost response can be resolved without
@@ -285,7 +285,7 @@ can still approve it by signature and it can settle.
 
 The blocked operation does not clear, even after settlement. `recover()` polls only operations with an ID and reports this
 one as "acceptance is unknown… review required" (`src/recover.ts`). The provider's history entries carry the operation ID
-but not the idempotency key, so the only link to the recorded attempt would be matching terms and time, which Proto does
+but not the idempotency key, so the only link to the recorded attempt would be matching terms and time, which the platform does
 not do. `pnpm reconcile` does not clear it either. The refusal names such operations, says reconcile cannot resolve them
 and points here (`src/lock.ts`, `test/money-safety.test.ts`).
 
@@ -749,8 +749,8 @@ accepted any `treasury` or `treasury:*` grant and judged cost against the strate
 save settings could have raised its own cost limit; the owner's own session is unchanged, and the machine route has the
 same check (below).
 
-**Machine-credential plans need the strategy-bound grant (user's choice, 2026-11-02).** `strategy/save` is in the
-`treasury` scope, and a Treasury machine credential (`tmc_`) executes plans against the strategy saved now. Before this
+**Machine-credential plans need the strategy-bound grant.** `strategy/save` is in the `treasury` scope, and a Treasury
+machine credential (`tmc_`) executes plans against the strategy saved now. Before this
 change, it did so under a plain `treasury` grant, so an app with `treasury` alone could raise `maxCostBps` (at most
 1000 bps) and change targets for plans a machine credential then executed, within the policy's caps and budget. Now the
 gateway forwards machine calls as `machine:<credential id>`, and `executePlan` from an app or a machine credential runs

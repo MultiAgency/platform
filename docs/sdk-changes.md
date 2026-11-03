@@ -5,6 +5,20 @@ wire change all apps must update for together. The first change after a release 
 version, so a package staged or packed from changed sources never carries a released version's number. The release
 candidate dates the heading. Under 0.x, any public-interface change bumps at least the minor version.
 
+## 0.4.1
+
+No code, type or wire change.
+
+- **README and npm description**: both open with what the platform is, a control plane for agentic treasuries built
+  on NEAR Intents; the description names the app-server client.
+- **treasury-app**: where the limits are: the owner's policy, enforced by the provider on every path, in absolute
+  amounts; no consent or credential has a budget of its own, and limits in an app's own process aren't a boundary.
+- **getting-started**: the app row lists the `treasury` and `treasury-execute` scopes and when to ask for each; the
+  machine row says it is reached through `ownerClient`, isn't extended, and is retired once Treasury moves to app
+  access. Digests (`expectedPolicy`, `expectedDigest`) are read from the platform and passed back, never computed.
+- **app-server**: how an app stops quickly: revoke its consent, relay `agent_freeze`, and treat anything `executing`,
+  `processing` or `unknown` as possibly sent.
+
 ## 0.4.0 (2026-11-02)
 
 Additive: 0.3.x apps keep working, and a consent signed without the new scopes stays valid.

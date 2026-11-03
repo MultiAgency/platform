@@ -7,7 +7,7 @@ Consumers must not branch on raw exception prose or automatically replay an acti
 error. Scoped RPC forwarding now has a fifteen-minute inactivity timeout (settlement may wait 180 seconds per leg); active streams may run longer.
 These changes are offline-tested, not part of the deployed r2 artifact.
 
-Proto can serve an independently built product frontend on a configured host while retaining its
+The platform can serve an independently built product frontend on a configured host while retaining its
 same-origin gateway, host-bound sign-in and per-agent authorization. The frozen r2 integration
 was deployed on 2026-10-16 UTC; see the [execution record](archive/proto-release-execution.md) for
 the exact deployment, hosted checks and remaining limits. Offline integration tests remain
@@ -24,14 +24,14 @@ Add `frontendDist` to an existing entry in `dashboard.json`'s `hosts` map, for e
 The value must be an absolute directory containing the built `index.html`. Configuration loading
 fails if that entry is missing or is not a file. Paths come from deployment configuration, never
 from a query parameter or forwarded header. Preserve that host's agent assignments and areas.
-Hosts without the field retain Proto's `web/dist`. Payee intake keeps its existing routing.
+Hosts without the field retain the platform's `web/dist`. Payee intake keeps its existing routing.
 
 The configured build serves the host's page routes, scoped `/a/<instance>/` pages, and static assets.
-`/gw/*` and `/a/<instance>/rpc/*` continue through Proto's gateway. The actual request Host selects
+`/gw/*` and `/a/<instance>/rpc/*` continue through the platform's gateway. The actual request Host selects
 both the build and sign-in audience; `X-Forwarded-Host` cannot select either. Each frontend runs
 under its own product origin, with no cross-origin cookie sharing or CORS relaxation.
 
-The default image builds only Proto's frontend. The shared-frontend release image must separately
+The default image builds only the platform's frontend. The shared-frontend release image must separately
 package the selected product build at the configured path. DNS changes, image assembly and
 rollout are not performed by the integration test. Keep one executor per agent; serving another
 frontend does not require starting the sibling repository's gateway or executor.
@@ -50,11 +50,11 @@ The Treasury repository retains standalone support and adds a shared-gateway ada
 
 Reservation signs nothing and creates no provider agent. Owner signing, grants and money actions
 retain their existing separate flows. The adapter does not migrate `.treasuries/` registrations
-into Proto's `.hosted/` registry or reassign existing executors.
+into the platform's `.hosted/` registry or reassign existing executors.
 
 ## Offline verification
 
-Build the consumer repository independently, then run from Proto:
+Build the consumer repository independently, then run from the platform repository:
 
 ```sh
 node scripts/test-shared-frontend.mjs /absolute/path/to/treasury/web/dist treasury
@@ -64,7 +64,7 @@ node scripts/test-shared-frontend.mjs /absolute/path/to/payables/web/dist payabl
 The runner accepts a built artifact rather than importing sibling server source. It removes
 application credentials, points provider configuration at offline fixtures, and blocks Node
 connections outside loopback. The browser blocks other hosts, popups and WebSockets; its two
-fixture hostnames are forwarded over loopback to the real Proto gateway.
+fixture hostnames are forwarded over loopback to the real platform gateway.
 
 The check exercises a real NEP-413 challenge/signature and session, shared discovery, navigation
 into an agent, scoped reads, missing-agent denial, signed-out denial, another owner's denial,
@@ -106,7 +106,7 @@ Payables repository's reported adapter/browser tests, not by this real-gateway b
 Deployed wallet behavior, positive work-order journeys across both built frontends, image packaging,
 DNS and rollout remain unverified here.
 
-Validation on 2026-10-15 UTC: Proto typecheck and 741 offline tests passed. The independently
+Validation on 2026-10-15 UTC: platform typecheck and 741 offline tests passed. The independently
 built Treasury and Payables artifacts each passed the shared browser check. Run these commands
 sequentially with `pnpm test`: managed-agent fixtures allocate ports from the same 9000–9999 range.
 The Payables check initially failed during fixture development and concurrent runs; the final
@@ -138,10 +138,10 @@ owner-controlled browser verification is returned; no domain move or standalone 
 ## Consumer source contract preflight
 
 Run `node scripts/check-consumer-contract.mjs /absolute/path/to/consumer . payables` (or
-`treasury`) before building or testing a consumer against Proto. `contracts/payables-frontend.json`
+`treasury`) before building or testing a consumer against the platform. `contracts/payables-frontend.json`
 and `contracts/treasury-frontend.json` explicitly declare the required top-level procedure groups.
 The checker first typechecks the actual frontend with its Router type restricted to those groups,
-then compares the declared client contract with Proto, including procedure inputs and outputs.
+then compares the declared client contract with the platform, including procedure inputs and outputs.
 Aliases and client factories retain TypeScript checking; backend-only imports keep their full
 router. Undeclared frontend calls fail rather than disappearing from the comparison.
 
@@ -150,14 +150,14 @@ modules, copies no consumer source and changes neither sibling checkout. A chang
 that the adapter cannot restrict fails closed for review. Like any TypeScript check, explicit
 `any` casts or untyped HTTP calls are outside this guarantee. The small adapter uses TypeScript's
 unstable API and is covered by regression tests; compiler upgrades must pass those tests.
-Proto owns the check; Treasury and Payables own requirements for their consumer declarations.
+The platform owns the check; Treasury and Payables own requirements for their consumer declarations.
 The optional `backend` mode retains the whole-router comparison for separate backend integration;
 it is not a gateway behavior test. Omitted mode infers Treasury/Payables from the directory name,
 otherwise it uses `backend`.
 
 `test-shared-frontend.mjs` runs this check before browser startup when a consumer source tree is
 adjacent to `web/dist`. Its optional fifth argument selects the consumer root; the fourth remains
-the Proto runtime root. Standalone frozen artifacts without adjacent source explicitly report
+the platform runtime root. Standalone frozen artifacts without adjacent source explicitly report
 that source compatibility was not checked and retain the existing browser-only check.
 
 This conservatively compares all procedures within declared groups, including unused members. It does not
@@ -166,7 +166,7 @@ discovery, gateway authorization, payee routing or safe error content. Retain bu
 and HTTP/browser tests for those boundaries. No contract package or source copying is required.
 
 Local source observation on 2026-10-16: Treasury passes. Current Payables fails on `compensation`,
-which its frontend calls and Proto does not implement. `platformPayments` is used by Payables'
+which its frontend calls and the platform does not implement. `platformPayments` is used by Payables'
 gateway, not its frontend, and is excluded from the frontend declaration. The earlier whole-router
 failure for both names did not establish two frontend dependencies.
 
@@ -175,7 +175,7 @@ For this infrastructure phase retain the frozen r2 Payables artifact at
 [the release review](archive/proto-release-review.md). Do not substitute the current Payables build.
 No production configuration or archive bytes were changed. Compensation remains a separate
 Payables-owned feature integration covering its records, contributor endpoints and review flow;
-Proto owns shared authentication, scoped routing, executor lifecycle and durable dispatch. Its
+the platform owns shared authentication, scoped routing, executor lifecycle and durable dispatch. Its
 backend implementation ownership must be agreed before integration, with isolation, interrupted
 preparation, duplicate submission and ambiguous-outcome acceptance tests. No placeholder endpoints
 or fixture responses satisfy this release block.
@@ -201,7 +201,7 @@ infrastructure hardening. The recorded deployed baseline remains r2
 | Owner review | Existing work-order UI separates authorization, funding and held-payout approval. Browser and protocol tests cover those boundaries; no live owner signature or approval was attempted. |
 | Recovery | `work-orders.cjs` reproduced selecting order B while the address retained order A. Reload could therefore return to the previous order. Store/restart tests separately retain the payment identity. |
 
-The selected improvement fixes that demonstrated navigation failure in Proto's existing
+The selected improvement fixes that demonstrated navigation failure in the platform's existing
 `src/invoice-browser.js`: selecting **Review work order** replaces the URL's `workOrder`
 parameter before reading the selected record. It preserves the payee path, other query
 fields and fragment. It neither submits an invoice nor changes payment identity. This is

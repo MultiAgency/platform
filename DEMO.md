@@ -70,8 +70,8 @@ separately. Retrying opens the same reserved instance, including after restart.
 
 This is locally prepared behavior, checked with offline browser fixtures, not a deployed-host observation.
 In this build each agent's balances, policy and grants, agreements, payments, strategy, runs and Activity are in its
-app (Payables or Treasury). Proto keeps sign-in, setup, agent access, the walkthroughs, the Payables rehearsal and
-evidence. A saved Proto link to a moved page opens the same path, query and hash in the agent's app.
+app (Payables or Treasury). The platform keeps sign-in, setup, agent access, the walkthroughs, the Payables rehearsal and
+evidence. A saved link to a moved platform page opens the same path, query and hash in the agent's app.
 
 1. Under **Your agents**, choose the agent’s **Walkthroughs** link, or **Open in Payables** / **Open in Treasury** for
    its app. The agent page links to each short guide and complete walkthrough and shows the area's requirements and

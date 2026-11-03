@@ -1,24 +1,26 @@
-# MultiAgency shared infrastructure
+# MultiAgency platform
 
-This repository provides shared owner onboarding, isolated agent execution, host-bound access,
-and payee intake for MultiAgency prototypes. Regular NEAR wallet owners and authorized Sputnik
-DAO members can reserve their own Treasury or Payables setup; owner policy and grant signatures
-remain separate. The public showcase reads no private records.
-
-This repository is meant to be the one owner of the gateway, executor and money path, with apps building on it only
-through `@multiagency/sdk`. Not yet: Payables and the Treasury prototype still carry their own copies (see Not done yet).
-
-The [shared frontend integration](docs/shared-frontend-integration.md) keeps Proto as the static
-three-idea showcase and serves independently built Treasury and Payables frontends. Invoices is
-Payables' payee-facing entry. The 2026-10-16 UTC [release record](docs/archive/proto-release-execution.md)
-records that release's sign-in, private access and routing checks.
-Agents retain separate balances, authority and executors.
-A new prototype reuses the platform through the [integration path](docs/integration-path.md).
-
+Control plane for agentic treasuries, built on NEAR Intents.
 
 An AI agent manages a treasury on [NEAR Intents](https://near.org/intents) through the
 [NEAR Intents Agent API](https://api.agentsonintents.com/llms.txt), inside a policy its owner signed.
 The owner can be a person's wallet or a Sputnik DAO, such as a [Trezu](https://trezu.org) treasury.
+The provider holds the funds and enforces that policy. This platform adds what the provider can't: owner sign-in and
+consent, checks before each send, at-most-once execution with recovery, and owner and DAO approvals
+([enforcement](docs/enforcement.md) says how each is known). Regular NEAR wallet
+owners and authorized Sputnik DAO members can reserve their own Treasury or Payables setup; owner policy and grant
+signatures remain separate. The public showcase reads no private records.
+
+This repository is meant to be the one owner of the gateway, executor and money path, with apps (Treasury, Payables,
+Invoices, the MultiAgency dashboard) building on it only through `@multiagency/sdk`. Not yet: Payables and the Treasury
+prototype still carry their own copies (see Not done yet).
+
+The [shared frontend integration](docs/shared-frontend-integration.md) keeps the platform's own page as the static
+three-idea showcase and serves independently built Treasury and Payables frontends. Invoices is
+Payables' payee-facing entry. The 2026-10-16 UTC [release record](docs/archive/proto-release-execution.md)
+records that release's sign-in, private access and routing checks.
+Agents retain separate balances, authority and executors.
+A new app builds on the platform through the [integration path](docs/integration-path.md).
 
 > Runs on NEAR mainnet with real funds. Use a low-value account and small amounts.
 
@@ -282,7 +284,7 @@ of maintaining separate requirement statuses.
   and production still answer `unknown` for it (seen on staging 2026-10-30), which there also means nothing reached the
   provider.
 - Payables' frontend (`97ddec7`, re-checked 2026-10-16) passes the source contract preflight now that
-  Proto serves `compensation`; this is a source-type check only. Its build is not yet exercised in the
+  The platform serves `compensation`; this is a source-type check only. Its build is not yet exercised in the
   real-stack E2E suite, and owner-app builds are not checked for compatibility at runtime.
   See [consumer compatibility](docs/shared-frontend-integration.md#consumer-source-contract-preflight).
 

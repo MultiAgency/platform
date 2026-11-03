@@ -9,7 +9,7 @@ metadata:
   purpose: 'Orients an app or agent author: the two clients, the four identities and their server-side limits, recovery kinds, and the supported surface of this package version.'
   type: lifecycle
   library: '@multiagency/sdk'
-  library_version: '0.4.0'
+  library_version: '0.4.1'
 sources:
   - 'MultiAgency/platform:src/contract/index.ts'
   - 'MultiAgency/platform:src/contract/payee-entry.ts'
@@ -35,10 +35,17 @@ by the gateway and the provider, never by the client or by this guidance.
 | Identity | How it is obtained | Reaches | Enforced server-side |
 | --- | --- | --- | --- |
 | Owner session | NEP-413 sign-in in a browser at the agent's host (`/gw/challenge` → wallet signs → `/gw/session`) | `/a/<agent>/rpc/*` through `ownerClient` | Access per agent from the wallet owner, or from the DAO policy for a member (propose, vote; execute and manage derived). A member never acts or spends as the DAO alone: owner actions need the owner's signature (a DAO vote). Calls outside access: 403. |
-| Treasury machine credential | Issued by a wallet owner of a Treasury agent from the owner's session (`tmc_…` bearer) | `/machine/v1/a/<agent>/rpc/*` (Treasury's skill helper, not this package) | Fixed scopes (read, prepare, execute-plan, sweep), expiry, revocation, the owner's fresh access re-checked per call. Treasury only; DAO owners cannot issue it. |
-| App deployment credential | Issued by the platform operator per app deployment (`tap_…` bearer, a server secret), plus an owner-signed consent per Organization and agent | `/apps/v1/*` through `appClient` (server side only) | The consent's scopes (`read`, `owner`, `payout`), Organization and agent; owner actions only those the owner can read or the platform builds; the owner's key and ownership re-checked per call; revocation. Wallet owners only. |
+| Treasury machine credential | Issued by a wallet owner of a Treasury agent from the owner's session (`tmc_…` bearer) | `/machine/v1/a/<agent>/rpc/*` through `ownerClient` with that absolute base and the bearer. Not extended, and retired with notice once Treasury moves to app access: a new app uses `appClient` | Fixed scopes (read, prepare, execute-plan, sweep), expiry, revocation, the owner's fresh access re-checked per call. Treasury only; DAO owners cannot issue it. |
+| App deployment credential | Issued by the platform operator per app deployment (`tap_…` bearer, a server secret), plus an owner-signed consent per Organization and agent | `/apps/v1/*` through `appClient` (server side only) | The consent's scopes (`read`, `owner`, `payout`, `treasury`, `treasury-execute`), Organization and agent; owner actions only those the owner can read or the platform builds; the owner's key and ownership re-checked per call; revocation. Wallet owners only. |
 | Payee session | NEP-413 sign-in on the payee entry (`/api/signin`) | `/api/*` on that entry through `payeeClient()` | Only the signed-in account's own invoices, work orders and reports. An account that has only requested onboarding terms is not yet a payee: an agreement makes it one. |
 | Agent connection | Started by the payee from their signed-in browser session (`tac_…` bearer, shown once) | `GET`/`POST /api/compensation`, `GET /api/compensation/session` through `payeeClient({ base, token })` | Bound to host, entry, account and payout agent; expiry (at most 24h) and revocation; every other route 403 with no effect; never a browser session; each call attributed. |
+
+For Treasury through an app (treasury-app): proposals, under `treasury`, when the owner should sign each trade;
+`treasury-execute` only when the owner wants unattended execution within the policy.
+
+Digests come from the platform. `expectedPolicy` (`{ revision, digest }` from `overview`) and the `expectedDigest` of
+`strategy/save` and `autopilot/enable` (from `strategy/get`) say "what was reviewed is still in force": read one, pass
+it back unchanged, and never compute your own. A policy or strategy that changed since is refused, with nothing sent.
 
 ## Results: decide by `kind`, never by message text
 
@@ -62,7 +69,7 @@ it may retry.
 
 ## What this package version supports
 
-`@multiagency/sdk` 0.4.0, entries:
+`@multiagency/sdk` 0.4.1, entries:
 - `@multiagency/sdk`: `ownerClient` with `OwnerResult`/`OwnerFailure`, `appClient` with `AppRouteResult` and the
   consent and setup texts (`consentMessage`, `setupMessage`), `ownerOutputs` and `OwnerInputs`/`OwnerOutput`
   per procedure, `ownerCapabilities` and `mayCall` (display only), gateway discovery (`gatewayDiscovery`,

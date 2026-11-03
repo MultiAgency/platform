@@ -266,7 +266,7 @@ classification and JSONL format remain readable; changing permissions creates no
 
 ## Frontend responsibilities (offline-tested)
 
-Proto's frontend is the infrastructure showcase: the public entry, sign-in, the agent launcher, agent setup,
+The platform's frontend is the infrastructure showcase: the public entry, sign-in, the agent launcher, agent setup,
 agent-access consent, walkthroughs, the Payables rehearsal and evidence. Each agent's operational screens (balances,
 policy and grants, agreements, payments, strategy, runs and Activity) are in its app, Payables or Treasury, which
 carry the browser suites for them (for example `test/browser/workspace.cjs`, `payments.cjs`, `policy-clarity.cjs`,
@@ -274,7 +274,7 @@ carry the browser suites for them (for example `test/browser/workspace.cjs`, `pa
 
 `main.tsx` lazy-loads the authenticated application after gateway admission. The public entry is sign-in only. The
 signed-in home is the launcher (`features/demo/launcher.tsx`), or `walkthrough-home.tsx` when the host offers
-self-service setup; both list each agent with a link to its app, its Proto walkthroughs and, for Treasury, agent
+self-service setup; both list each agent with a link to its app, its platform walkthroughs and, for Treasury, agent
 access. The app's origin comes from the gateway's `apps` map, so a local stack links to its own hosts; the hosted
 URL is used only when no host is configured (`features/demo/app-origin.ts`).
 
@@ -286,7 +286,7 @@ setup and owner records without signing or submitting. A failed overview refresh
 screen; each page reports the failure itself. `test/browser/setup.cjs` and `test/browser/first-owner.cjs` check these
 paths offline.
 
-Pages that moved to an agent's app keep their Proto paths as redirects (`MOVED` in `app/router.tsx`): the same path,
+Pages that moved to an agent's app keep their platform paths as redirects (`MOVED` in `app/router.tsx`): the same path,
 query and hash in the app, with the area read from the gateway session rather than the agent's reads, so a failing
 setup read never strands a saved link. `test/browser/app-redirects.cjs` reads the map from the router and checks every
 path for both areas, a configured local host and a failing setup read.
@@ -406,7 +406,7 @@ is imported; the original integration and rollout boundaries are in the archived
 
 ### Gateway lifecycle ownership
 
-Proto uses pinned Effect 4.1.0 internally for child supervision. A gateway scope owns scoped
+The platform uses pinned Effect 4.1.0 internally for child supervision. A gateway scope owns scoped
 child lifetimes and restart sleeps; scope closure cancels restarts and runs bounded child cleanup
 in parallel. The public start/stop facade, HTTP/oRPC contracts and independently built consumer
 frontends retain their interfaces. Signaling failures or forced termination are unclean shutdowns.
@@ -453,7 +453,7 @@ same dependencies. Tests supply a replacement layer without configuring live cre
 layer owns no socket pool or persistent runtime; request cancellation still owns each fetch.
 This internal composition changes no consumer API, journal, executor lease or retained state.
 
-`src/fastnear.ts` contains Proto's Effect-based indexed read infrastructure, including an injectable
+`src/fastnear.ts` contains the platform's Effect-based indexed read infrastructure, including an injectable
 HTTP service and typed, sanitized failures. Existing Promise helpers remain re-exported from
 `src/chain.ts`. Each request has a 30-second deadline covering fetch and JSON body consumption.
 A complete indexed-transfer scan, DAO signature search (account pages plus receipt reads), or

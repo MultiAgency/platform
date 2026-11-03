@@ -62,10 +62,10 @@ Install the pinned Chromium with `pnpm exec playwright install chromium`, then r
 `pnpm test:browser`. To repeat selected suites against an existing build, use
 `node test/browser/run.cjs live-demo.cjs` (substitute the desired suite names).
 
-Proto's suites cover its own pages: sign-in and the public entry (`showcase.cjs`, `public-overview.cjs`), setup and
+The platform's suites cover its own pages: sign-in and the public entry (`showcase.cjs`, `public-overview.cjs`), setup and
 onboarding (`setup.cjs`, `first-owner.cjs`, `walkthrough-entry.cjs`), walkthroughs and the rehearsal
 (`live-demo.cjs`, `signing-walkthrough.cjs`, `payables-player.cjs`), the redirect map (`app-redirects.cjs`), agent
-access (`agent-access.cjs`), demo hosts (`demo-hosts.cjs`) and the payee pages Proto serves (`invoices.cjs`, `hosted-payee.cjs`, `work-orders.cjs`).
+access (`agent-access.cjs`), demo hosts (`demo-hosts.cjs`) and the payee pages the platform serves (`invoices.cjs`, `hosted-payee.cjs`, `work-orders.cjs`).
 The agents' operational screens and their suites (payments, funding, policy, strategy, runs, recovery and Activity)
 are in the Payables and Treasury repositories. A new test belongs beside its task, in the repository that serves it.
 

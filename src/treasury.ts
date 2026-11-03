@@ -33,7 +33,7 @@ type Quote = { amountOut: string; minAmountOut: string; costBps: number; worstCo
  * with the live refusal codes (`policy_*`, `spend_*`, `insufficient_balance`): the live swap will be refused with that
  * code, and several of those codes aren't proven refusals here (`ops.ts`), so sending one would leave the agent blocked on
  * an unresolved operation. Those may never be allowed. Informational warnings (`high_fee`, `asset_delivered_as_is`) are
- * refused too until there is evidence for allowing each (user's decision, 2026-10-30).
+ * refused too until there is evidence for allowing each.
  */
 const ALLOWED_WARNINGS = new Set<string>();
 /** The codes on a quote that keep its leg out of any plan and away from the send site. */

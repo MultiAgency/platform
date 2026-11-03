@@ -1,5 +1,8 @@
 # MultiAgency SDK
 
+The MultiAgency platform is a control plane for agentic treasuries, built on NEAR Intents. This SDK is how apps and
+agents use it.
+
 Build a product interface or an external agent that uses the MultiAgency platform's existing agreements, contribution reports, payments and Treasury workflows. The SDK supplies clients, response schemas and recovery outcomes. The platform keeps identity, authorization, authoritative records and guarded execution.
 
 Start with one supported workflow. A product may provide its own screens, navigation, drafts and preferences while calling the same platform. A new server-side domain or authority model needs a platform extension; importing this package does not create one.

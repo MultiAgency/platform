@@ -1,4 +1,4 @@
-# Agentic Treasury — agent guide
+# MultiAgency platform — agent guide
 
 An AI agent moves a DAO's or wallet's funds on NEAR Intents mainnet, only inside a policy the owner
 signed. The product is **credibility**: a reviewer must be able to check every claim we make. Real

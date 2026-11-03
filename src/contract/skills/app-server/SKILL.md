@@ -10,7 +10,7 @@ metadata:
   purpose: 'An app server''s access to agents: credential, consents, relayed owner actions, and payout requests by requestId with recovery by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.4.0'
+  library_version: '0.4.1'
 requires:
   - getting-started
   - owner-workflows
@@ -106,6 +106,15 @@ Result: `owner/status` answers the outcome; read it again until it is final. Ope
 away (the intent expires in minutes). It shows the action's terms to whoever holds it; the bytes to sign go only to
 whoever presents the owner's signature over the link's text, which the page asks the wallet for, and `owner/submit`
 through the app is refused for it.
+
+To stop quickly:
+- Revoke your consent: `app.consents.revoke(consent.id)` needs no wallet signature and refuses your later calls for that
+  agent. It is permanent: to resume, the owner signs a new consent. It doesn't cancel a call already forwarded.
+- Relay `agent_freeze` for the owner: it opens the confirm page, and the owner must sign there before the link expires
+  (minutes). `agent_unfreeze` releases it the same way; `approval_vote` is only for held payouts.
+- Treat anything `executing`, `processing` or `unknown` as possibly sent: neither step undoes it. Whether a freeze or a
+  revoked grant stops a payout the provider already holds is not established
+  ([enforcement](https://github.com/MultiAgency/platform/blob/main/docs/enforcement.md)).
 
 A vote on a held payout names it from `held` (`approvalId`, `correlationId`). The prepared vote's `payment.terms`
 (recipient, asset, amount) are what the platform proved against the provider's evidence: show those to the owner, not

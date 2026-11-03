@@ -92,7 +92,7 @@ export function stage(staging: string, tsconfig: string) {
 
   const dependencies = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).dependencies as Record<string, string>;
   writeFileSync(join(staging, "package.json"), JSON.stringify({ name, version, type: "module", license: "MIT",
-    description: "MultiAgency SDK: payee, compensation and owner-app schemas, typed payee and owner clients, and the shared release asset server.",
+    description: "MultiAgency SDK, for the control plane for agentic treasuries on NEAR Intents: typed owner, app-server and payee clients, their schemas, and the shared release asset server.",
     keywords: ["tanstack-intent"], repository: { type: "git", url: "git+https://github.com/MultiAgency/platform.git" }, publishConfig: { access: "public" },
     // The bin path has no leading "./": npm 11 publish drops such a bin as invalid (pnpm pack keeps it).
     exports: { ".": { types: "./dist/contract/index.d.ts", default: "./dist/contract/index.js" },

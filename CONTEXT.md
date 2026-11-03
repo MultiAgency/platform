@@ -1,4 +1,4 @@
-# Agentic Treasury
+# MultiAgency platform
 
 An AI agent moves an owner's funds on NEAR Intents, only inside a policy the owner signed. This glossary
 names the concepts that the code, tests and reviews share.
@@ -277,17 +277,12 @@ classification are retained when dashboard permissions change.
 **Showcase**: `proto.multiagency.ai` introduces all three catalog ideas through static public copy
 and links to their demos. It is not a Treasury redirect. Its root makes no gateway or agent reads.
 
-**Agency Treasury**: The integrated product at `treasury.multiagency.ai`, combining Treasury,
-confidential payables and work orders for the agency. Initial experiments use the existing agents
-owned by `agentic.sputnik-dao.near`. This product scope does not merge agents, balances or authority.
-Catalog idea 02 still means Agentic Treasury Management.
-
 **Demo host**: An explicit gateway assignment of a host to an entry experience and named agents.
 Each host has its own sign-in audience and session key. Host assignment bounds access; the owner’s
 current membership and permissions still determine what each request may do. Payables covers
 ideas 01 and 03: confidential invoice intake, agreements and owner-approved payouts, plus isolated
 purchase orders, supplier invoices and payment tracking. Invoices is the supplier-facing entry
-into Payables, with a standalone frontend repository and shared Proto backend. Its independent frontend
+into Payables, with a standalone frontend repository and the platform's shared backend. Its independent frontend
 integration remains undeployed. Both wallet owners and DAO owners retain their approval flows.
 The shared-host implementation was deployed on 2026-10-16 UTC; the bounded hosted
 observations and unverified flows are recorded in docs/archive/proto-release-execution.md.
@@ -298,10 +293,11 @@ wallet owner signs directly. Sputnik DAO members sign in with their own accounts
 applicable permissions; the DAO’s proposals and votes authorize its owner actions. The agency DAO
 is an initial experiment, not an admission allowlist.
 
-**Proto product direction**: Proto is both the shared infrastructure and the home for walkthroughs
-and demos across all prototypes. It is evolving toward an integrated agentic treasury MVP. The
-focused Treasury, Payables and supplier experiences use that foundation; their agents, funds and
-authority remain separately scoped. This is product direction, not a claim that the MVP is complete.
+**Apps**: Treasury, Payables, Invoices and the MultiAgency dashboard are separate apps, each in its own repository,
+built on the platform through `@multiagency/sdk`. The platform keeps identity, consent, authoritative records and
+guarded execution, and drops each app's pages as they move. Each app's agents, funds and authority remain separately
+scoped. This is the direction, not the current state: see the README's "Not done yet". Catalog idea 02 still means
+Agentic Treasury Management.
 
 **Scoped supplier entry**: `/i/<instance>/` on the supplier host routes to one registered Payables
 executor. It has its own supplier session key, cookie name and browser draft namespace. Invoice and
@@ -340,7 +336,7 @@ hosted/mainnet observations. Treasury and Invoices chapter narration is authored
 
 
 **Machine credential**:
-A private bearer secret issued through Proto's shared owner access screen, delegating independent read,
+A private bearer secret issued through the platform's shared owner access screen, delegating independent read,
 plan preparation, saved-plan execution or sweep permissions for a bounded duration. It binds the host,
 configured agent, actual provider agent ID and owner, is stored only as a hash, and can be revoked.
 It is not a provider grant and has no separate spending budget. External saved-plan execution is not
@@ -422,8 +418,8 @@ are offline-tested candidates, not deployed or mainnet-observed.
 
 **Standalone Invoices frontend**:
 An independently built supplier experience for invoice submission/status, work-order requests and
-contribution reports. Its source is in the local DAO workspace's `invoices/` repository; Proto retains
+contribution reports. Its source is in `MultiAgency/invoices`; the platform retains
 supplier sessions, scoped routing, compensation and invoice records, owner review authorization and
-guarded execution. A compatible frontend release can change without restarting Proto after the shared
+guarded execution. A compatible frontend release can change without restarting the platform after the shared
 backend integration is installed. This extraction is a locally tested, undeployed candidate; the existing
 hosted Invoices experience remains unchanged. See docs/invoices-extraction.md.

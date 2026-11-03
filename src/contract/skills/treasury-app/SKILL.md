@@ -8,7 +8,7 @@ metadata:
   purpose: 'Treasury proposals through an app: propose by requestId, the owner signs the exact terms, execute once, recover by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.4.0'
+  library_version: '0.4.1'
 requires:
   - getting-started
   - app-server
@@ -34,6 +34,17 @@ Two consent scopes, each named in the text the owner signs:
 - `treasury-execute`, only beside `treasury`: `rebalance`, `externalPlan` and `executePlan`, five-minute plans executed
   within the policy without a signature per swap, and only while the owner's live grant binds the strategy they were
   planned under. `sweep`, `rebalance` and `executePlan` are streams: read them with `app.agent(...).stream(path, input)`.
+
+## Where the limits are
+
+The owner's signed policy is the boundary, and the provider enforces it on every path: proposals, `treasury-execute`
+and the owner's own actions. It sets per-asset caps per transaction, hour, day and month, and a USD budget across
+assets (rolling 24-hour, 7-day and 30-day windows, per the Agent API's docs). These are absolute amounts, not a share of
+the treasury, and they bound spending, not exposure. No consent or credential has a budget of its own, and a
+proposal's approval is the platform's check, not the provider's. Limits your app keeps in its own process (a share per
+order, orders per hour) are your app's rules, not a boundary: whoever holds the agent's treasury grant can act without
+them. To change a limit, the owner signs a policy update. What each limit is known to guarantee:
+[enforcement, "The envelope"](https://github.com/MultiAgency/platform/blob/main/docs/enforcement.md#the-envelope).
 
 ## Propose, once per requestId
 

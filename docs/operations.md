@@ -108,7 +108,7 @@ without outcome evidence and investigate them; do not fabricate a result or dele
 | `dao` (`Dockerfile.gateway`, packaged) | Treasury; payout is approve-only here | Existing `/data/state`, including both agents' settings and this host's owner intents |
 | `invoices` (`Dockerfile.payouts`) | Payout | Existing `/data`, including invoice SQLite, agreements and payout settings |
 
-The `dao` image is built only from a package made by `scripts/package-shared-frontends.mjs` (Proto's built
+The `dao` image is built only from a package made by `scripts/package-shared-frontends.mjs` (the platform's built
 `web/dist` plus the Treasury and Payables builds), which copies in `Dockerfile.gateway` as the package's root Dockerfile
 and `deploy/railway.gateway.json` as its `railway.json`. The image runs `deploy/shared-frontends.json`.
 
