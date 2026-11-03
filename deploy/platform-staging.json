@@ -2,6 +2,7 @@
   "host": "api.dev.multiagency.ai",
   "headless": true,
   "appSetup": [
+    "treasury",
     "payables"
   ],
   "agents": []

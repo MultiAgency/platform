@@ -78,17 +78,22 @@ export async function provider(directory, { treasury = false, account = OWNER, p
       wallet_id: wallet.wallet_id, label: 'invoices', credential: credential.commitment, network: 'mainnet',
       issued_at_ms: Date.now(), expires_at_ms: Date.parse(expires), owner_epoch: 1, nonce: 'local', recipient: 'local' } };
   const grants = [grant];
-  // The configured agent plus any the owner creates (work orders). Each keeps its own policy, grants and funding.
-  const agents = new Map([[id, { id, owner, wallet, policy, revision: 1, grants, funded: BigInt(payoutFunding) }]]);
+  /**
+   * A Treasury agent's balances: confidential (what it swaps) and public (funds that arrived outside a confidential
+   * deposit, `fundPublic`: what a sweep shields). The configured agent starts with 100 USDC; one the owner creates with
+   * a swap policy starts empty.
+   */
+  const treasuryState = (usdc = 0n) => ({ confidential: new Map(TOKENS.map(({ asset_id }) => [asset_id, asset_id === USDC ? usdc : 0n])),
+    public: new Map(TOKENS.map(({ asset_id }) => [asset_id, 0n])) });
+  // The configured agent plus any the owner creates (work orders, hosted agents). Each keeps its own policy, grants and
+  // funding; a Treasury one its own balances.
+  const agents = new Map([[id, { id, owner, wallet, policy, revision: 1, grants, funded: BigInt(payoutFunding), ...(treasury && { treasury: treasuryState(100000000n) }) }]]);
   const requests = [], errors = [], transfers = [], intents = [], swaps = [], shields = [], deposits = [];
   const spent = agent => transfers.filter(p => p.agent === agent.id && p.status === 'SUCCESS').reduce((sum, p) => sum + BigInt(p.body.amount), 0n);
   const liveGrant = (agent, token) => typeof token === 'string' && agent.grants.some(g => !g.revoked_at && Date.parse(g.expires_at) > Date.now() && g.owner_message.credential === grantCommitment(token));
-  const treasuryBalances = new Map(TOKENS.map(({ asset_id }) => [asset_id, asset_id === USDC ? 100000000n : 0n]));
-  // Funds that arrived outside a confidential deposit (`fundPublic`): what a sweep shields.
-  const publicBalances = new Map(TOKENS.map(({ asset_id }) => [asset_id, 0n]));
   if (treasury) { grant.label = 'treasury'; grant.owner_message.label = 'treasury'; }
   let unavailable = false, outageRefusals = 0;
-  let dropSwapAt = 0, observationGate;
+  let dropSwapAt = 0, observationGate, quoteWarnings = [];
 
   const status = payment => ({ correlation_id: payment.correlation, agent_id: payment.agent, type: payment.type ?? 'transfer', status: payment.status,
     created_at: payment.at, updated_at: payment.at, failure_code: payment.failure ?? null, details: { approval_id: payment.approval } });
@@ -155,7 +160,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
               : { limit_usd: limit, spent_usd: '0', remaining_usd: limit, resets_at: null }]; })), timelock: { delay_ms: 0, scheduled_count: 0 } } });
         if (agent && route === '/policy/history') return json(res, { data: [], next_cursor: null });
         if (agent && route === '/balances') return json(res, { near_account_id: agent.wallet.near_account_id, source: url.searchParams.get('source'),
-          balances: treasury && agent.id === id ? [...(url.searchParams.get('source') === 'public' ? publicBalances : treasuryBalances)].map(([asset_id, balance]) => ({ asset_id, balance_raw: balance.toString() }))
+          balances: agent.treasury ? [...agent.treasury[url.searchParams.get('source') === 'public' ? 'public' : 'confidential']].map(([asset_id, balance]) => ({ asset_id, balance_raw: balance.toString() }))
             : [{ asset_id: USDC, balance_raw: url.searchParams.get('source') === 'public' ? '0' : (agent.funded - spent(agent)).toString() }] });
         if (url.pathname === '/v1/tokens') return json(res, { data: TOKENS.map(token => ({ ...token, price_updated_at: new Date().toISOString(), price_expires_at: expires })) });
         // Provider records (ledger audit trail): none recorded by this simulator.
@@ -166,9 +171,9 @@ export async function provider(directory, { treasury = false, account = OWNER, p
           const payment = transfers.find(p => p.correlation === correlation);
           if (payment) return json(res, status(payment));
           const swap = swaps.find(s => s.correlation_id === correlation);
-          if (swap) return json(res, { correlation_id: correlation, agent_id: id, type: 'swap', status: 'SUCCESS' });
+          if (swap) return json(res, { correlation_id: correlation, agent_id: swap.agent, type: 'swap', status: 'SUCCESS' });
           const shield = shields.find(s => s.correlation_id === correlation);
-          if (shield) return json(res, { correlation_id: correlation, agent_id: id, type: 'shield', status: 'SUCCESS' });
+          if (shield) return json(res, { correlation_id: correlation, agent_id: shield.agent, type: 'shield', status: 'SUCCESS' });
           const intent = intents.find(i => i.correlation_id === correlation);
           if (intent && ownerOutcomeUnavailable) return json(res, { error: 'Local scenario withholds owner outcome' }, 503);
           if (intent) return json(res, { correlation_id: correlation, agent_id: intent.created ?? intent.agent?.id ?? id, type: intent.type, status: intent.submitted ? 'SUCCESS' : 'PENDING_SIGNATURE',
@@ -177,29 +182,31 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         const payment = agent && transfers.find(p => p.agent === agent.id && route === `/approvals/${p.approval}`);
         if (payment) return json(res, approval(payment));
       }
-      if (treasury && req.method === 'POST' && url.pathname === `/v1/agents/${id}/swap`) {
-        if (!liveGrant(agents.get(id), req.headers['x-grant-token'])) throw new Error('Missing swap grant');
+      if (agent?.treasury && req.method === 'POST' && route === '/swap') {
+        if (!liveGrant(agent, req.headers['x-grant-token'])) throw new Error('Missing swap grant');
+        const treasuryBalances = agent.treasury.confidential;
         const from = TOKENS.find(t => t.asset_id === body.origin_asset), to = TOKENS.find(t => t.asset_id === body.destination_asset);
         if (!from || !to || from === to || body.confidential !== true || !/^[1-9]\d*$/.test(body.amount)) throw new Error('Unexpected offline swap terms');
         const amountOut = convert(from, to, BigInt(body.amount));
         if (amountOut === 0n) throw new Error('Swap too small to quote');
-        if (body.dry) return json(res, { quote: { amount_out: amountOut.toString(), min_amount_out: (amountOut * 999n / 1000n).toString() }, warnings: [] });
+        if (body.dry) return json(res, { quote: { amount_out: amountOut.toString(), min_amount_out: (amountOut * 999n / 1000n).toString() }, warnings: quoteWarnings.map(code => ({ code, detail: 'simulated' })) });
         if (!entry.key || swaps.some(s => s.key === entry.key)) throw new Error('Missing or repeated swap identity');
         if (BigInt(body.amount) > treasuryBalances.get(from.asset_id) || BigInt(body.min_amount_out) > amountOut) throw new Error('Infeasible swap');
         treasuryBalances.set(from.asset_id, treasuryBalances.get(from.asset_id) - BigInt(body.amount));
         treasuryBalances.set(to.asset_id, treasuryBalances.get(to.asset_id) + amountOut);
-        const swap = { correlation_id: randomUUID(), key: entry.key, body }; swaps.push(swap);
+        const swap = { correlation_id: randomUUID(), agent: agent.id, key: entry.key, body }; swaps.push(swap);
         if (swaps.length === dropSwapAt) { dropSwapAt = 0; return res.destroy(); }
         return json(res, { correlation_id: swap.correlation_id });
       }
       // A public balance moved into the confidential one: what a sweep (or a swap's shortfall) sends.
-      if (treasury && req.method === 'POST' && url.pathname === `/v1/agents/${id}/shield`) {
-        if (!liveGrant(agents.get(id), req.headers['x-grant-token'])) throw new Error('Missing shield grant');
+      if (agent?.treasury && req.method === 'POST' && route === '/shield') {
+        if (!liveGrant(agent, req.headers['x-grant-token'])) throw new Error('Missing shield grant');
+        const { confidential: treasuryBalances, public: publicBalances } = agent.treasury;
         if (!entry.key || shields.some(s => s.key === entry.key)) throw new Error('Missing or repeated shield identity');
         if (!publicBalances.has(body.asset) || !/^[1-9]\d*$/.test(body.amount) || BigInt(body.amount) > publicBalances.get(body.asset)) throw new Error('Infeasible shield');
         publicBalances.set(body.asset, publicBalances.get(body.asset) - BigInt(body.amount));
         treasuryBalances.set(body.asset, treasuryBalances.get(body.asset) + BigInt(body.amount));
-        const shield = { correlation_id: randomUUID(), key: entry.key, body }; shields.push(shield);
+        const shield = { correlation_id: randomUUID(), agent: agent.id, key: entry.key, body }; shields.push(shield);
         return json(res, { correlation_id: shield.correlation_id });
       }
       if (agent && req.method === 'POST' && route === '/deposit') {
@@ -228,12 +235,14 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         return json(res, { correlation_id: payment.correlation });
       }
       if (req.method === 'POST' && url.pathname === '/v1/generate-intent') {
-        if (treasury && body.type === 'grant_issue') {
-          if (body.agent_id !== id || !body.label.startsWith('treasury:') || !body.credential) throw new Error('Unexpected strategy grant');
-          const generated = { correlation_id: randomUUID(), type: 'grant_issue', signer: owner, expires_at: expires,
+        // A Treasury agent's grant: plain `treasury`, or bound to a saved strategy (`treasury:<suffix>`).
+        const strategyTarget = body.type === 'grant_issue' && agents.get(body.agent_id);
+        if (strategyTarget?.treasury) {
+          if (!/^treasury(:[0-9a-f]{32})?$/.test(body.label) || !body.credential || !body.expires_at) throw new Error('Unexpected Treasury grant');
+          const generated = { correlation_id: randomUUID(), type: 'grant_issue', signer: strategyTarget.owner, expires_at: expires,
             intent: { standard: 'nep413', payload: { message: JSON.stringify(body), nonce: randomBytes(32).toString('base64'), recipient: 'local-provider' } },
-            preview: { summary: 'Authorize the saved local strategy' } };
-          intents.push({ ...generated, grantRequest: body }); return json(res, generated);
+            preview: { summary: body.label === 'treasury' ? 'Authorize the local Treasury agent' : 'Authorize the saved local strategy' } };
+          intents.push({ ...generated, agent: strategyTarget, grantRequest: body }); return json(res, generated);
         }
         const nep413 = () => ({ standard: 'nep413', payload: { message: JSON.stringify(body), nonce: randomBytes(32).toString('base64'), recipient: 'local-provider' } });
         if (body.type === 'agent_create') {
@@ -283,10 +292,11 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         else if (intent.createRequest) {
           const created = randomBytes(32).toString('hex'), n = agents.size;
           agents.set(created, { id: created, owner: intent.createRequest.owner, policy: intent.createRequest.policy, grants: [], funded: 0n,
-            wallet: { wallet_id: `local-wallet-${n}`, near_account_id: `work-${n}.local-wallet.near` } });
+            wallet: { wallet_id: `local-wallet-${n}`, near_account_id: `work-${n}.local-wallet.near` },
+            ...(intent.createRequest.policy.actions.includes('swap') && { treasury: treasuryState() }) });
           intent.created = created;
         } else if (intent.grantRequest) {
-          const request = intent.grantRequest, target = intent.agent ?? agents.get(id);
+          const request = intent.grantRequest, target = intent.agent;
           target.grants.push({ ...grant, grant_id: randomUUID(), agent_id: target.id, wallet_id: target.wallet.wallet_id, label: request.label, expires_at: request.expires_at,
             owner_message: { ...grant.owner_message, agent_id: target.id, wallet_id: target.wallet.wallet_id, owner: target.owner, label: request.label, credential: request.credential, expires_at_ms: Date.parse(request.expires_at) } });
         } else if (JSON.parse(intent.intent.payload.message).verdict === 'reject') {
@@ -303,16 +313,25 @@ export async function provider(directory, { treasury = false, account = OWNER, p
   return { id, token: credential.token, url: `http://127.0.0.1:${port}`, requests, errors, transfers, intents, grants, swaps, shields, deposits,
     /** Agents the owner created through signed `agent_create`, in creation order. */
     created: () => [...agents.keys()].filter(agent => agent !== id),
-    /** Simulated inbound deposit to an agent's confidential balance. Not a provider observation of a real transfer. */
-    fund(agent, amount) { const target = agents.get(agent); if (!target || target.id === id) throw new Error('Fund only a created agent'); target.funded += BigInt(amount); },
+    /** Simulated inbound USDC deposit to a created agent's confidential balance. Not a provider observation of a real transfer. */
+    fund(agent, amount) {
+      const target = agents.get(agent); if (!target || target.id === id) throw new Error('Fund only a created agent');
+      if (target.treasury) target.treasury.confidential.set(USDC, target.treasury.confidential.get(USDC) + BigInt(amount));
+      else target.funded += BigInt(amount);
+    },
     /** Simulated inbound deposit to the payout agent's own confidential balance (its one-time setup funding). */
     fundPayout(amount) { agents.get(id).funded += BigInt(amount); },
     /** Simulated funds arriving on a Treasury agent's public balance, outside a confidential deposit: a sweep shields them. */
-    fundPublic(asset, amount) {
-      if (!treasury) throw new Error('Only a Treasury agent has a simulated public balance');
-      if (!publicBalances.has(asset) || !/^[1-9]\d*$/.test(String(amount))) throw new Error('Give a listed asset and a positive raw amount');
-      publicBalances.set(asset, publicBalances.get(asset) + BigInt(amount));
+    fundPublic(asset, amount, agent = id) {
+      const balances = agents.get(agent)?.treasury?.public;
+      if (!balances) throw new Error('Only a Treasury agent has a simulated public balance');
+      if (!balances.has(asset) || !/^[1-9]\d*$/.test(String(amount))) throw new Error('Give a listed asset and a positive raw amount');
+      balances.set(asset, balances.get(asset) + BigInt(amount));
     },
+    /** The warning codes every dry swap quote carries from now on, as the provider's dry run reports them (`[]` clears). */
+    warnQuotes(codes) { quoteWarnings = [...codes]; },
+    /** A Treasury agent's confidential balances (for assertions). */
+    treasuryBalances: (agent = id) => Object.fromEntries([...agents.get(agent).treasury.confidential].map(([asset, raw]) => [asset, raw.toString()])),
     /** The payout agent's current policy and revision (for assertions). */
     payoutPolicy: (agentId = id) => ({ policy: agents.get(agentId).policy, revision: agents.get(agentId).revision }),
     setUnavailable(value) { unavailable = value; },

@@ -13,6 +13,7 @@
     "app-credential": "tsx src/app-credential.ts",
     "update-policy": "tsx --env-file-if-exists=.env src/update-policy.ts",
     "inspect": "tsx --env-file-if-exists=.env src/inspect.ts",
+    "inspect-held-swap": "tsx --env-file-if-exists=.env src/inspect-held-swap.ts",
     "reconcile": "tsx --env-file-if-exists=.env src/reconcile.ts",
     "books": "tsx --env-file-if-exists=.env src/books.ts",
     "archive": "tsx --env-file-if-exists=.env src/archive.ts",

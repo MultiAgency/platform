@@ -140,15 +140,16 @@ test("a headless config refuses every sign-in or owner-app feature, and each dep
       assert.throws(() => load(extra), new RegExp(field), field);
     assert.throws(() => load({ appSetup: [] }), /Configure agents or enable setup/, "a host with nothing to serve doesn't start");
   } finally { rmSync(dir, { recursive: true, force: true }); }
-  // The prototype's configs keep both setup paths as before; the platform's are headless and set up Payables agents only.
+  // The prototype's configs keep both setup paths as before; the platform's are headless: staging sets up Treasury and
+  // Payables agents (user, 2026-11-02), production Payables only until a staging run of the Treasury path is recorded.
   // (shared-demos and shared-frontends name frontend directories that exist only in the deployed image: read as written.)
   for (const name of ["dashboard.json", "multiagency.json", "shared-demos.json", "shared-frontends.json"]) {
     const config = ["dashboard.json", "multiagency.json"].includes(name) ? loadConfig(join("deploy", name)) : JSON.parse(readFileSync(join("deploy", name), "utf8"));
     assert.deepEqual([config.headless ?? false, config.selfService, config.appSetup], [false, true, ["treasury", "payables"]], name);
   }
-  for (const [name, host] of [["platform-staging.json", "api.dev.multiagency.ai"], ["platform.json", "api.multiagency.ai"]] as const) {
+  for (const [name, host, areas] of [["platform-staging.json", "api.dev.multiagency.ai", ["treasury", "payables"]], ["platform.json", "api.multiagency.ai", ["payables"]]] as const) {
     const config = loadConfig(join("deploy", name));
-    assert.deepEqual([config.host, config.headless, config.selfService, config.appSetup, config.agents], [host, true, false, ["payables"], []], name);
+    assert.deepEqual([config.host, config.headless, config.selfService, config.appSetup, config.agents], [host, true, false, areas, []], name);
   }
 });
 

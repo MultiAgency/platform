@@ -39,11 +39,12 @@ async function freePort(host = '127.0.0.1') {
  * can both read it with different permissions (shared-reader scenarios). Test-only: no authorization code changes.
  * `onChainPolicyEdits`: the simulator signs provider-enforced policy edits as NEP-366 (see provider.mjs).
  * `headless`: the gateway runs as the platform does (`deploy/platform*.json`): app access and the confirm page only,
- *   app setup for Payables agents; no sign-in, owner app or contributor intake on its host.
+ *   app setup for the areas `appSetup` lists (Payables, as on `platform.json`; Treasury too on `platform-staging.json`);
+ *   no sign-in, owner app or contributor intake on its host.
  * `selfService`: owners (on the host) and app deployments (through `/apps/v1/setup`) may set up hosted agents; `hostedAreas` names the
  * areas a `frontendDist` host may set up.
  */
-export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoOwned = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false } = {}) {
+export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoOwned = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false, appSetup = ['payables'] } = {}) {
   const daoArea = daoOwned ? ownerApp?.product : undefined;
   if (daoOwned && !['payables', 'treasury'].includes(daoArea)) throw new Error('daoOwned requires an owner app');
   if (daoArea === 'payables') owner = DAO;
@@ -184,7 +185,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
     if (independentFrontend) {
       mkdirSync(frontend); writeFileSync(join(frontend, 'index.html'), '<h1>Independent Treasury frontend</h1>');
     }
-    writeFileSync(join(gatewayDir, 'dashboard.json'), JSON.stringify(headless ? { host: new URL(dashboard).host, headless: true, appSetup: ['payables'], agents } : { host: new URL(dashboard).host, invoices,
+    writeFileSync(join(gatewayDir, 'dashboard.json'), JSON.stringify(headless ? { host: new URL(dashboard).host, headless: true, appSetup, agents } : { host: new URL(dashboard).host, invoices,
       ...(independentFrontend && { hosts: { [new URL(dashboard).host]: {
         demo: 'treasury', agents: agents.map(a => a.name), frontendDist: frontend } } }),
       // A new prototype's own build on this host, using the existing showcase assignment.

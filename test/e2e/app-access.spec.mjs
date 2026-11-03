@@ -272,3 +272,56 @@ test('an app requests a payout once under its requestId, follows it by requestId
     await stack.close();
   }
 });
+
+test("an app sets up an Organization's own Treasury agent; its plans run only under the owner's grant for the saved strategy, and a warned quote is refused", async ({}, info) => {
+  test.setTimeout(180_000);
+  // The headless host with Treasury in `appSetup`, as on platform-staging.json.
+  const stack = await environment(info.outputPath('environment'), { headless: true, secondAccount: true, appSetup: ['treasury', 'payables'] });
+  const steps = [];
+  try {
+    const { app, ownerStep, consent, hostedAgent } = await connect(stack);
+    const WNEAR = 'nep141:wrap.near';
+    const name = await hostedAgent('org_1', 'treasury');
+    const created = value(await app.identity(name)).agentId;
+    expect(stack.simulated.payoutPolicy(created).policy.actions, 'created with the Treasury policy').toEqual(['swap']);
+    await consent('org_1', name, ['owner', 'read', 'treasury', 'treasury-execute']);
+    const agent = app.agent('org_1', name);
+    stack.simulated.fund(created, 10_000_000n);
+    steps.push("setup: the Organization's own Treasury agent, created by the owner (simulated signature), consented with treasury and treasury-execute, funded (simulated)");
+
+    const swaps = () => stack.simulated.swaps.filter(s => s.agent === created);
+    const plan = () => agent.call('externalPlan', { swaps: [{ from: USDC, to: WNEAR, amount: '1000000' }] });
+    const run = async planId => { const stream = agent.stream('executePlan', { planId }), seen = [];
+      for (let next = await stream.next(); ; next = await stream.next()) { if (next.done) return seen; seen.push(next.value); } };
+
+    // The owner's grant for the saved strategy, signed through the app; then one plan executes once.
+    const saved = value(await agent.call('strategy/get'));
+    await ownerStep(agent, { type: 'grant_issue', label: 'treasury', expectedStrategyDigest: saved.digest });
+    expect(stack.simulated.created().length).toBe(1);
+    expect((await run(value(await plan()).id)).map(e => [e.type, e.status])).toEqual([['action', 'SUCCESS']]);
+    expect(swaps(), 'one swap, by the created agent').toHaveLength(1);
+    expect(stack.simulated.treasuryBalances(created)[USDC]).toBe('9000000');
+    steps.push("the owner's grant for the saved strategy (simulated signature); the app's plan swapped once on the created agent");
+
+    // A dry quote warned high_fee: the plan is refused before it is saved, and nothing is sent.
+    stack.simulated.warnQuotes(['high_fee']);
+    expect(await plan()).toMatchObject({ ok: false, kind: 'refused', error: expect.stringMatching(/dry run warned \(high_fee\)/) });
+    stack.simulated.warnQuotes([]);
+    expect(swaps()).toHaveLength(1);
+    steps.push('a quote the provider warned (high_fee, simulated) refused the plan; nothing sent');
+
+    // Autopilot turns on only for the strategy the owner's grant binds, and stops.
+    expect(value(await agent.call('autopilot/enable', { expectedDigest: saved.digest })).on).toBe(true);
+    expect(value(await agent.call('autopilot/stop')).on).toBe(false);
+
+    // The app saves another strategy: no plan of its runs, and autopilot can't turn on, until the owner signs for it.
+    const next = value(await agent.call('strategy/save', { strategy: { ...saved.strategy, maxCostBps: saved.strategy.maxCostBps + 1 }, expectedDigest: saved.digest }));
+    expect(await run(value(await plan()).id)).toEqual([{ type: 'rejected', problems: [expect.stringMatching(/grant doesn't bind the saved strategy/)] }]);
+    expect(await agent.call('autopilot/enable', { expectedDigest: next.digest }), 'no grant binds the new strategy').toMatchObject({ ok: false });
+    expect(swaps(), 'nothing sent under the unbound grant').toHaveLength(1);
+    steps.push('autopilot on and off under the bound grant; after the app saved another strategy, its plan and autopilot were refused');
+  } finally {
+    await info.attach('steps', { body: JSON.stringify(steps, null, 2), contentType: 'application/json' });
+    await stack.close();
+  }
+});

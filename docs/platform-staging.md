@@ -8,8 +8,11 @@ has no test network) with its own state and test agents, never the live demo hos
 Staging is meant to run the `platform` package (`scripts/package-platform.mjs`, built by every release candidate beside
 `dao`): the gateway as a headless host (`headless` in its config), which serves `/health`, app access (`/apps/v1`) and
 the confirm page with its own assets, and answers 404 to everything else, before reading any session: no sign-in,
-owner app, owner RPC, machine credentials or demo hosts. App setup is limited to the areas `appSetup` lists (Payables
-only). It has run it since 2026-10-31T01:03Z (release candidate `b9221b45`, commit `01add07`, Railway deployment
+owner app, owner RPC, machine credentials or demo hosts. App setup is limited to the areas `appSetup` lists: Payables
+only on the deployed staging host. From 2026-11-02 `deploy/platform-staging.json` lists Treasury too (user's choice; not
+deployed): an app sets up an Organization's own Treasury agent, as stack-tested in `test/e2e/app-access.spec.mjs`
+(simulated provider and signatures); `deploy/platform.json` stays Payables only until a staging run of that path is
+recorded. It has run it since 2026-10-31T01:03Z (release candidate `b9221b45`, commit `01add07`, Railway deployment
 `4900d1c4`, image `1b74b1fa`); before, it ran the `dao` package, which also served the prototype's owner app and
 sign-in there. Read-only checks on 2026-10-31T01:06Z: `/health` 200; `/apps/v1/agents/x` 401 without a credential and
 403 with a browser `Origin`; `/`, `/gw/challenge`, `/gw/me`, `/a/x/access`, `/machine/v1/…`, an unmatched `/confirm/…`,
@@ -118,12 +121,15 @@ cents of USDC deposited confidential; its own state directory, executor on, auto
    `executePlan` with its id, from the owner's own session on that local executor. The swap goes through `dispatch`,
    the journal and `authorize` like any other. Expect the plan's event to read `PENDING_APPROVAL` and the plan to stop
    there; the journal holds the operation as held (it doesn't block sends).
-3. Read, with the provider API on the agent's directory: `getStatus` of its correlation id (`details`, `approval_id`,
-   `dispatch_committed_at` if any, `expires_at`), `getApproval` (`request_type`, `request_data`, `request_hash`,
-   `expires_at`) and `getBalances` (`balance` and `available` for USDC). Recompute sha256 of the canonical JSON of each
-   candidate shape: `{ amount, flow: "swap", kind: "confidential", min_amount_out, token, token_out }` from
-   `request_data`, the same with `chain` or `to` where present, and `{ amount_in, kind: "swap", min_out, token_in,
-   token_out }`. Record which equals `request_hash`, or that none does.
+3. In the agent's directory, run `pnpm inspect-held-swap <correlation id>` (read-only: it never sends, signs or votes;
+   `src/inspect-held-swap.ts`, offline-tested in `test/held-swap.test.ts`). It reads `getStatus` (`details`, with
+   `approval_id` and `dispatch_committed_at` if any), `getApproval` (`request_type`, `request_data`, `request_hash`,
+   `expires_at`) and the confidential `balance_raw` and `available_raw` of the swap's assets, then recomputes sha256 of
+   the canonical JSON of each candidate shape: `request_data` as given, with `kind` set to `request_type`, `{ amount,
+   flow: "swap", kind: "confidential", min_amount_out, token, token_out }`, the same with `chain` and `to` where
+   present, and `{ amount_in, kind: "swap", min_out, token_in, token_out }`. It prints which equals `request_hash`
+   (`matched`, or null) and the outcome: `A` only if the matching shape names the input asset, amount, output asset
+   and floor; otherwise `B`. It exits 1 without reading the approval if the operation isn't this agent's and held.
 4. Reject it: prepare an `approval_vote` with verdict `reject` for that approval and sign it as the owner (approving
    any held swap is refused before signing). Read the status until it ends: expect `FAILED`, reason rejected, and the
    balances unchanged.
