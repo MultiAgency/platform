@@ -108,8 +108,11 @@ whoever presents the owner's signature over the link's text, which the page asks
 through the app is refused for it.
 
 To stop quickly:
-- Revoke your consent: `app.consents.revoke(consent.id)` needs no wallet signature and refuses your later calls for that
-  agent. It is permanent: to resume, the owner signs a new consent. It doesn't cancel a call already forwarded.
+- If you turned autopilot on (treasury-app), call `autopilot/stop` first. Revoking your consent doesn't stop it: the
+  schedule runs under the owner's grant, and once you revoke you can't reach the agent to stop it.
+- Revoke your consent: `app.consents.revoke(consent.id)` needs no wallet signature and refuses your later calls under
+  that consent (another live consent of yours for the agent stays live). It is permanent: to resume, the owner signs a
+  new consent. It doesn't cancel a call already forwarded.
 - Relay `agent_freeze` for the owner: it opens the confirm page, and the owner must sign there before the link expires
   (minutes). `agent_unfreeze` releases it the same way; `approval_vote` is only for held payouts.
 - Treat anything `executing`, `processing` or `unknown` as possibly sent: neither step undoes it. Whether a freeze or a

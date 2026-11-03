@@ -16,8 +16,8 @@ No code, type or wire change.
 - **getting-started**: the app row lists the `treasury` and `treasury-execute` scopes and when to ask for each; the
   machine row says it is reached through `ownerClient`, isn't extended, and is retired once Treasury moves to app
   access. Digests (`expectedPolicy`, `expectedDigest`) are read from the platform and passed back, never computed.
-- **app-server**: how an app stops quickly: revoke its consent, relay `agent_freeze`, and treat anything `executing`,
-  `processing` or `unknown` as possibly sent.
+- **app-server**: how an app stops quickly: stop any autopilot it turned on first (revoking doesn't), revoke its
+  consent, relay `agent_freeze`, and treat anything `executing`, `processing` or `unknown` as possibly sent.
 
 ## 0.4.0 (2026-11-02)
 
