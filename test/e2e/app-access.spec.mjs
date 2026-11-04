@@ -326,7 +326,7 @@ test("an app sets up an Organization's own Treasury agent; its plans run only un
   }
 });
 
-test("a DAO consents to an app by its own vote; its grant vote lets autopilot run; a vote approves its proposal, which executes once", async ({}, info) => {
+test("a DAO consents to an app by its own vote; its grant vote lets autopilot run; a vote approves its proposal; the DAO stops it all with no app", async ({}, info) => {
   test.setTimeout(180_000);
   const stack = await environment(info.outputPath('environment'), { daoPortfolio: true, headless: true });
   try {
@@ -376,6 +376,17 @@ test("a DAO consents to an app by its own vote; its grant vote lets autopilot ru
     expect(done).toMatchObject({ state: 'executed', operations: [expect.objectContaining({ method: 'swap', status: 'SUCCESS' })] });
     expect(value(await agent.call('proposals/execute', { id: proposal.id })).state, 'asked again, nothing is sent').toBe('executed');
     expect(stack.portfolio.swaps.length, 'one swap').toBe(1);
+
+    // The DAO stops the agent by its own vote, with no app: every consent ends and autopilot turns off.
+    expect(value(await agent.call('autopilot/enable', { expectedDigest: strategy.digest })).on).toBe(true);
+    const stopPage = `${stack.dashboard}/confirm/dao/stop/portfolio`;
+    const filedStop = await (await localFetch(stopPage)).text();
+    const stopHash = filedStop.match(/Hash <code>([a-f0-9]{64})<\/code>/)[1];
+    expect(value(await agent.call('overview')), 'nothing changes before the vote').toBeTruthy();
+    stack.simulated.daoVote(stopHash);
+    expect(await (await localFetch(stopPage)).text()).toContain("This DAO's agent was stopped");
+    expect(await agent.call('overview'), 'the app no longer reaches it').toMatchObject({ ok: false, kind: 'forbidden' });
+    expect(stack.portfolioState().settings, 'autopilot is off').toMatch(/^AUTOPILOT=$/m);
   } finally { await stack.close(); }
 });
 

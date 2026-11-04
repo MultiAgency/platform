@@ -164,8 +164,10 @@ the `treasury` grant, freeze and unfreeze (`owner/prepare` with `signer: "dao"`,
 the agent submits the signature). A DAO sets up a hosted Treasury agent by vote too (`POST /apps/v1/dao-setups`,
 then `agent_create` with `signer: "dao"` under its setup consent, a second vote within the intent's minutes). A
 host that doesn't set up Treasury agents refuses it before filing anything, so no vote is spent on it.
-A DAO can't revoke its own consent through the platform (the deployment or the operator can), and a consent lasts up
-to 366 days. Offline- and stack-tested (simulated DAO votes); no host serves it yet. See
+**A DAO's own stop, with no app:** anyone opens `/confirm/dao/stop/<agent>`. The page files a stop the DAO votes on, or
+shows the one already open, with the exact text, its hash, and the proposal to file (Trezu's custom function call, or the
+whole transaction). Once the vote has passed, opening the page again revokes every consent naming the agent ID, from
+every app, and turns the agent's autopilot off. It only removes authority. Offline- and stack-tested (simulated DAO votes); no host serves it yet. See
 [enforcement](enforcement.md#dao-owners-through-apps-offline--and-stack-tested).
 
 Limits: DAO owners as above (Treasury only; no `payout` or `owner`); payout requests

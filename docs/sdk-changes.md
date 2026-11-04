@@ -33,6 +33,10 @@ public-interface change bumps at least the minor version.
 - **Skills**: app-server gains "A DAO owner" (consent, setup and owner actions by DAO vote, members gated with
   `accessOf` and `mayCall`); treasury-app gains "A DAO-owned treasury" (proposal votes; the grant vote authorizes
   unattended swaps).
+- **DAO stop** (added; no SDK change): a DAO stops its agent by its own vote, with no app. Anyone opens
+  `https://<host>/confirm/dao/stop/<agent>`, which files the stop or shows the one open. Once the vote has passed,
+  opening it again revokes every consent naming the agent ID, from every app, and turns its autopilot off. An app's
+  calls then answer `forbidden`.
 - **Voter check page** (added; no SDK change): each DAO request's proposal description links to
   `https://<host>/confirm/dao/<hash>`, a public page showing the exact text the DAO's key signs and its NEP-413 hash
   recomputed. Show members that link.

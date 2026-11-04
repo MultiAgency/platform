@@ -9,6 +9,7 @@ import { consentMessage, setupMessage } from "../src/contract/app-consent.js";
 import { AppConsents, AppCredentials, sweepConsentKeys } from "../src/gateway/app-access.js";
 import { APP_ROOT, appRoutes, confirms, type HostedSetup } from "../src/gateway/app-routes.js";
 import { confirmRoutes } from "../src/gateway/app-confirm.js";
+import { daoStopRoutes } from "../src/gateway/dao-stop.js";
 import type { AgentEntry } from "../src/gateway/config.js";
 import type { DaoVotes } from "../src/gateway/app-dao.js";
 import type { DaoOwnerReads } from "../src/gateway/machine-authority.js";
@@ -39,7 +40,7 @@ async function harness(t: import("node:test").TestContext) {
     /** The agent's answers by procedure path (`/rpc/<path>`), as `{ status, json }`; anything else answers ok. */
     replies: {} as Record<string, { status: number; json: unknown }>,
     /** The areas this host sets up hosted agents for (its config's `appSetup`). */
-    setupAreas: ["treasury", "payables"] as string[] };
+    setupAreas: ["treasury", "payables"] as string[], autopilotDown: false };
   const forwarded: { path: string; headers: Record<string, unknown>; body: any }[] = [];
   const upstream = createServer((req, res) => { let text = ""; req.on("data", chunk => text += chunk); req.on("end", () => {
     forwarded.push({ path: req.url!, headers: req.headers, body: text ? JSON.parse(text) : null });
@@ -50,6 +51,7 @@ async function harness(t: import("node:test").TestContext) {
   /** The host's agents: a DAO's setup adds its reserved one, served by the same test agent. */
   const agents: AgentEntry[] = [agent];
   const setups: Parameters<HostedSetup>[0][] = [];
+  const stops: { agent: string; dao: string }[] = [];
   const setup: HostedSetup = async input => {
     if (!state.setupAreas.includes(input.area)) throw new Error("This area is not available on this host");
     setups.push(input);
@@ -67,6 +69,8 @@ async function harness(t: import("node:test").TestContext) {
   };
   const server = createServer(async (req, res) => { try {
     if (await confirmRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, confirms, APP_ROOT, agents, dir, () => state.stopping)) return;
+    if (await daoStopRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, APP_ROOT, agents, () => state.stopping, { daoOwner, daoVotes,
+      stopAutopilot: async (stopped, dao) => { stops.push({ agent: stopped.name, dao }); if (state.autopilotDown) throw new Error("agent down"); } })) return;
     if (!await appRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, agents, () => state.stopping, { daoOwner, daoVotes, setup, setupAreas: state.setupAreas })) { res.writeHead(404); res.end("{}"); }
   } catch (e) { sendFailure(res, e); } });
   const port = await listen(server);
@@ -100,7 +104,7 @@ async function harness(t: import("node:test").TestContext) {
     state.signature = null;
     return signed.body.consent.id as string;
   };
-  return { port, state, forwarded, signer, staging, production, text, file, vote, rpc, consented, setups, credentials, daoVotes };
+  return { port, state, forwarded, signer, staging, production, text, file, vote, rpc, consented, setups, credentials, daoVotes, stops };
 }
 
 test("a DAO files its consent for a vote: the platform picks the nonce and answers the proposal a member files", async t => {
@@ -544,4 +548,63 @@ test("a request whose signature was found completes on a later read even after i
   const relayed = await call(port, `/apps/v1/dao-votes/${ballot.hash}`, "GET", staging);
   assert.equal(relayed.status, 200, JSON.stringify(relayed.body));
   assert.deepEqual(forwarded.at(-1)!.body.json.signed, first, "the same signature, never a new one");
+});
+
+test("a DAO stops its agent by its own vote, with no app: every consent for it ends and its autopilot turns off", async t => {
+  const { port, state, staging, rpc, vote, consented, stops } = await harness(t);
+  const consent = await consented();
+  const hashOf = (html: string) => html.match(/Hash <code>([a-f0-9]{64})<\/code>/)![1]!;
+  const opened = await page(port, "/confirm/dao/stop/treasury");
+  assert.equal(opened.status, 200);
+  assert.match(String(opened.headers["content-security-policy"]), /default-src 'none'/);
+  assert.ok(opened.text.includes("Stop MultiAgency agent treasury (provider-id) on platform.test"));
+  const hash = hashOf(opened.text);
+  assert.equal(hashOf((await page(port, "/confirm/dao/stop/treasury")).text), hash, "one open stop per agent");
+  assert.ok((await page(port, `/confirm/dao/${hash}`)).text.includes("it matches"), "the check page covers it too");
+  assert.equal((await call(port, rpc("overview"), "POST", staging, {})).status, 200, "nothing changes before the vote");
+  assert.equal((await page(port, "/confirm/dao/stop/treasury", "POST")).status, 405);
+
+  vote(hash, generateKey());
+  assert.ok((await page(port, "/confirm/dao/stop/treasury")).text.includes("waiting for the DAO&#39;s vote"), "another key's signature stops nothing");
+  assert.equal(stops.length, 0);
+
+  state.autopilotDown = true;
+  vote(hash);
+  const partial = await page(port, "/confirm/dao/stop/treasury");
+  assert.ok(partial.text.includes("not confirmed off"), partial.text);
+  assert.equal((await call(port, rpc("overview"), "POST", staging, {})).status, 403, "the consent ended at once");
+  assert.equal(new AppConsents(".app-access").list({}).find(c => c.id === consent)?.revoked, true);
+  state.autopilotDown = false;
+  state.signature = null;
+  const done = await page(port, "/confirm/dao/stop/treasury");
+  assert.ok(done.text.includes("This DAO's agent was stopped") && done.text.includes("<td>off</td>"), done.text);
+  assert.deepEqual(stops, [{ agent: "treasury", dao: DAO }, { agent: "treasury", dao: DAO }], "autopilot off asked again until it answered");
+  const record = JSON.parse(readFileSync(join(".app-access", "dao-requests", `${hash}.json`), "utf8"));
+  assert.equal(record.done.revoked.length, 1, "each consent revoked once");
+
+  const reopened = await page(port, "/confirm/dao/stop/treasury");
+  assert.notEqual(hashOf(reopened.text), hash, "after a stop, opening again files a new request");
+  assert.ok(reopened.text.includes("An earlier stop was applied"));
+  assert.equal(stops.length, 2, "and changes nothing by itself");
+});
+
+test("a stop is only for a created DAO-owned agent, and for the agent ID the DAO voted on", async t => {
+  const { port, state, vote, consented, stops } = await harness(t);
+  state.policyDown = true;
+  assert.equal((await page(port, "/confirm/dao/stop/treasury")).status, 503, "an unanswered ownership read files nothing");
+  state.policyDown = false;
+  state.dao = false;
+  assert.equal((await page(port, "/confirm/dao/stop/treasury")).status, 404, "an owner that isn't a DAO");
+  state.dao = true;
+  assert.equal((await page(port, "/confirm/dao/stop/nobody")).status, 404);
+  state.signature = null;
+  const consent = await consented();
+  const hash = (await page(port, "/confirm/dao/stop/treasury")).text.match(/Hash <code>([a-f0-9]{64})<\/code>/)![1]!;
+  // The agent was replaced before the vote passed: the consents naming the old ID end; the new agent is left alone.
+  state.providerId = "replacement";
+  vote(hash);
+  const applied = await page(port, "/confirm/dao/stop/treasury");
+  assert.ok(applied.text.includes("This DAO's agent was stopped"), applied.text);
+  assert.equal(new AppConsents(".app-access").list({}).find(c => c.id === consent)?.revoked, true);
+  assert.equal(stops.length, 0, "the replacement's autopilot isn't the one the DAO voted to stop");
 });

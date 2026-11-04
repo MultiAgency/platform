@@ -44,12 +44,19 @@ const VoteRequest = z.strictObject({ ...common, kind: z.literal("proposal"), pro
 /** A DAO's setup of a hosted agent; `consent` and `agent` once the signature was found and the agent reserved. */
 const SetupRequest = z.strictObject({ ...common, kind: z.literal("setup"), area: z.enum(DAO_SETUP_AREAS),
   consent: hex64.nullable(), reserved: z.string().nullable() });
-const Request = z.discriminatedUnion("kind", [ConsentRequest, VoteRequest, SetupRequest]);
+/**
+ * A DAO's stop of its agent, filed by anyone and done only by the DAO's vote: every consent naming the agent ID is
+ * revoked and its autopilot turned off. No app or deployment is involved (`deployment` and `organization` are empty).
+ */
+const StopRequest = z.strictObject({ ...common, kind: z.literal("stop"),
+  done: z.strictObject({ at: z.number().int(), revoked: z.array(hex64), autopilotOff: z.boolean() }).nullable() });
+const Request = z.discriminatedUnion("kind", [ConsentRequest, VoteRequest, SetupRequest, StopRequest]);
 export type DaoRequest = z.infer<typeof Request>;
 export type DaoConsentRequest = z.infer<typeof ConsentRequest>;
 export type DaoVoteRequest = z.infer<typeof VoteRequest>;
 export type DaoSetupRequest = z.infer<typeof SetupRequest>;
-const settled = (r: DaoRequest) => r.kind === "proposal" ? r.relayed !== null : r.consent !== null;
+export type DaoStopRequest = z.infer<typeof StopRequest>;
+const settled = (r: DaoRequest) => r.kind === "proposal" ? r.relayed !== null : r.kind === "stop" ? r.done?.autopilotOff === true : r.consent !== null;
 export const publicDaoRequest = ({ id, dao, organization, agent, agentId, scopes, expiresAt, votingUntil, description }: DaoConsentRequest) =>
   ({ id, dao, organization, agent, agentId, scopes, expiresAt, votingUntil, hash: id, description });
 export const publicDaoSetup = ({ id, dao, organization, area, expiresAt, votingUntil, description }: DaoSetupRequest) =>
@@ -126,8 +133,8 @@ export function daoSetupConsent(request: DaoSetupRequest, signature: Buffer, age
 /** The platform's public page for a DAO request: what its key signs, for members to check before voting. */
 export const checkUrl = ({ host, id }: { host: string; id: string }) => `https://${host}/confirm/dao/${id}`;
 
-const escape = (text: string) => text.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-const KINDS = { consent: "Consent for an app", setup: "Setup of a hosted agent", proposal: "Vote on a Treasury proposal" } as const;
+export const escape = (text: string) => text.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+const KINDS = { consent: "Consent for an app", setup: "Setup of a hosted agent", proposal: "Vote on a Treasury proposal", stop: "Stop of the agent" } as const;
 
 /**
  * The voter check view (coordination/p5-treasury-dao-consent.md, slice 4): the exact text a DAO request's key signs,
@@ -137,23 +144,30 @@ const KINDS = { consent: "Consent for an app", setup: "Setup of a hosted agent",
 export function daoRequestPage(record: DaoRequest, now = Date.now()) {
   const recomputed = nep413Hash(record.message, Buffer.from(record.nonce, "base64"), record.host).toString("hex") === record.id;
   const state = record.kind === "proposal" ? (record.relayed ? `relayed to the agent (the proposal was ${record.relayed.state})` : null)
+    : record.kind === "stop" ? (record.done ? `stopped: ${record.done.revoked.length} consent(s) revoked, autopilot ${record.done.autopilotOff ? "off" : "not yet confirmed off"}` : null)
     : record.consent ? (record.kind === "setup" ? `the agent ${record.reserved} was reserved` : "the consent was stored") : null;
   const status = state ?? (now >= record.votingUntil ? "the vote window closed; nothing was stored" : `waiting for the vote until ${new Date(record.votingUntil).toISOString()}`);
-  const row = (label: string, value: string) => `<tr><th>${escape(label)}</th><td>${escape(value)}</td></tr>`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DAO vote check</title><style>body{font:15px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#111;background:#fff}
-pre,code{font:13px/1.45 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all}pre{background:#f4f4f5;padding:.75rem;border-radius:6px}
-th{text-align:left;padding-right:1rem;vertical-align:top}.ok{color:#166534}.bad{color:#b91c1c;font-weight:600}
-@media (prefers-color-scheme:dark){body{color:#eee;background:#111}pre{background:#222}.ok{color:#4ade80}.bad{color:#f87171}}</style></head><body>
-<h1>What this DAO vote signs</h1>
-<table>${row("Request", KINDS[record.kind])}${row("DAO", record.dao)}${row("App deployment", record.deployment)}${row("Organization", record.organization)}${record.agent ? row("Agent", `${record.agent} (${record.agentId})`) : ""}${row("State", status)}</table>
+  return page("DAO vote check", `<h1>What this DAO vote signs</h1>
+<table>${row("Request", KINDS[record.kind])}${row("DAO", record.dao)}${record.deployment ? row("App deployment", record.deployment) : ""}${record.organization ? row("Organization", record.organization) : ""}${record.agent ? row("Agent", `${record.agent} (${record.agentId})`) : ""}${row("State", status)}</table>
 <h2>The exact text</h2><p>Signed with NEP-413 for recipient <code>${escape(record.host)}</code>, nonce <code>${escape(record.nonce)}</code>.</p>
 <pre>${escape(record.message)}</pre>
 <h2>The hash</h2><p><code>${escape(record.id)}</code></p>
 <p class="${recomputed ? "ok" : "bad"}">${recomputed ? "Recomputed here from the text, nonce and host: it matches." : "Recomputed here from the text, nonce and host: it does not match. Don't vote for it."}</p>
-<p>Before voting, check that the proposal's <code>v1.signer</code> call signs exactly this hash (<code>payload_v2.Eddsa</code>). A proposal that signs any other hash isn't this request, whatever its description says.</p>
-</body></html>`;
+<p>Before voting, check that the proposal's <code>v1.signer</code> call signs exactly this hash (<code>payload_v2.Eddsa</code>). A proposal that signs any other hash isn't this request, whatever its description says.</p>`);
 }
+
+export const row = (label: string, value: string) => `<tr><th>${escape(label)}</th><td>${escape(value)}</td></tr>`;
+/** A plain page: no script, the caller's markup with every value already escaped. */
+export const page = (title: string, body: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escape(title)}</title><style>body{font:15px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#111;background:#fff}
+pre,code{font:13px/1.45 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all}pre{background:#f4f4f5;padding:.75rem;border-radius:6px}
+th{text-align:left;padding-right:1rem;vertical-align:top}.ok{color:#166534}.bad{color:#b91c1c;font-weight:600}
+@media (prefers-color-scheme:dark){body{color:#eee;background:#111}pre{background:#222}.ok{color:#4ade80}.bad{color:#f87171}}</style></head><body>
+${body}
+</body></html>`;
+/** The headers every public DAO page is served with: no script, no framing, never cached. */
+export const PAGE_HEADERS = { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff",
+  "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" } as const;
 
 /** What the DAO's proposal says: the consent's terms, the vote's deadline, and the hash its key signs. */
 export function daoConsentDescription(request: Pick<DaoConsentRequest, "deployment" | "organization" | "agent" | "agentId" | "scopes" | "expiresAt" | "votingUntil" | "id" | "host">) {
@@ -175,6 +189,24 @@ export function daoVoteDescription(request: Pick<DaoVoteRequest, "message" | "vo
     `* Signs: NEP-413 hash ${request.id} for ${request.host} as the agents' owner (v1.signer, path agent-owner)`,
     `* Check before voting: ${checkUrl(request)} (the exact text, and its hash recomputed)`,
     "* Notes: Filed by the MultiAgency platform for an app. The platform relays the signature; executing the swap is a separate step.",
+  ].join(" <br>");
+}
+
+/** The text a DAO's stop signs: which agent, on which host, and exactly what the platform then does. */
+export const daoStopText = ({ host, dao, agent, agentId }: { host: string; dao: string; agent: string; agentId: string }) => [
+  `Stop MultiAgency agent ${agent} (${agentId}) on ${host}`,
+  `Owner: ${dao}`,
+  "End every app consent for this agent, and turn its autopilot off.",
+].join("\n");
+
+/** What a stop's proposal says. */
+export function daoStopDescription(request: Pick<DaoStopRequest, "agent" | "agentId" | "votingUntil" | "id" | "host">) {
+  return [
+    `* Proposal Action: Stop agent ${request.agent} (${request.agentId}): end every app consent for it and turn its autopilot off`,
+    `* Signing window closes: ${new Date(request.votingUntil).toISOString()} (approve before then, or nothing stops)`,
+    `* Signs: NEP-413 hash ${request.id} for ${request.host} as the agents' owner (v1.signer, path agent-owner)`,
+    `* Check before voting: ${checkUrl(request)} (the exact text, and its hash recomputed)`,
+    `* Notes: Filed by the MultiAgency platform with no app involved. Once it passes, open https://${request.host}/confirm/dao/stop/${request.agent} to apply it.`,
   ].join(" <br>");
 }
 
@@ -241,6 +273,21 @@ export class DaoRequests {
     const record = this.read(id);
     if (!record) throw new Error(`No DAO request ${id}`);
     return this.write({ ...record, signature: signature.toString("base64") });
+  }
+  /** A stop request: one at a time per agent and host, open until its vote window closes. */
+  fileStop(request: Omit<DaoStopRequest, "version" | "kind" | "done" | "deployment" | "organization" | "votingUntil" | "description">, now = Date.now()) {
+    const votingUntil = Math.min(request.expiresAt, now + MAX_PROPOSAL_MS);
+    return this.write({ ...request, version: 1, kind: "stop", deployment: "", organization: "", votingUntil,
+      description: daoStopDescription({ ...request, votingUntil }), done: null }) as DaoStopRequest;
+  }
+  /** Stop requests for an agent on a host, newest first. */
+  stops(agent: string, host: string) {
+    return this.list().filter((r): r is DaoStopRequest => r.kind === "stop" && r.agent === agent && r.host === host).sort((a, b) => b.createdAt - a.createdAt);
+  }
+  stopped(id: string, done: NonNullable<DaoStopRequest["done"]>) {
+    const record = this.read(id);
+    if (record?.kind !== "stop") throw new Error(`No DAO stop request ${id}`);
+    return this.write({ ...record, done }) as DaoStopRequest;
   }
   relayed(id: string, state: string, now = Date.now()) {
     const record = this.read(id);

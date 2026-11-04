@@ -257,8 +257,8 @@ Each line is a gap; the linked page says how the rest is known. The
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
 - DAO-owned agents through apps: setup, creation, consent, Treasury proposal votes, the grant, freeze and unfreeze by
   DAO vote are offline- and stack-tested only (simulated DAO votes; no host, not mainnet-observed). The provider's owner
-  intents (creation, grant, freeze) expire in minutes, so only a DAO whose vote passes that fast completes them. A DAO
-  can't revoke its own consent through the platform. See [app access](docs/app-access.md).
+  intents (creation, grant, freeze) expire in minutes, so only a DAO whose vote passes that fast completes them. A DAO's own
+  stop (no app) takes effect only when someone opens its page after the vote. See [app access](docs/app-access.md).
 - Agent connections exist only for a contractor's own reports (offline- and stack-tested, not deployed); a token is a
   bearer for at most 24 hours; owner connections aren't built. See
   [agent access](docs/agent-access.md#agent-connections-contractor-reports).

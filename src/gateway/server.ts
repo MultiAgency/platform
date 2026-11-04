@@ -6,6 +6,7 @@ import { resolveMachineManagement } from "./machine-authority.js";
 import { machineRoutes } from "./machine-routes.js";
 import { APP_ROOT, appRoutes, confirms } from "./app-routes.js";
 import { confirmAssets, confirmRoutes } from "./app-confirm.js";
+import { daoStopRoutes } from "./dao-stop.js";
 import { payeeBase, supplierCookie, supplierEnvironment, payeeRoute } from "./hosted-supplier.js";
 import { demoHost, demoCrossSite, demoSession, invoiceRoute, assignedToHost } from "./demo-hosts.js";
 import { forwardRpc } from "./rpc-proxy.js";
@@ -166,6 +167,7 @@ const server = createServer(async (req, res) => {
       && req.headers.host?.toLowerCase() !== signingHost.toLowerCase()) return json(res, 421, { error: "Use the configured host for agent access" });
     if (await machineRoutes(req, res, pathname, signingHost, selected, () => auth.account(req), () => stopping)) return;
     if (await confirmRoutes(req, res, pathname, signingHost, confirms, APP_ROOT, selected, DIST, () => stopping)) return;
+    if (await daoStopRoutes(req, res, pathname, signingHost, APP_ROOT, selected, () => stopping)) return;
     if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, config.appSetup.length ? { setup: async ({ owner, kind, area, deployment, organization }) => {
       if (!config.appSetup.includes(area) || (site && !site.hostedAreas?.includes(area))) throw new Error("This area is not available on this host");
       return await reserveHosted({ owner, kind, area }, { deployment, organization });

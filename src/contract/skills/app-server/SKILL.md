@@ -186,7 +186,9 @@ same shape covers the rest:
 Scopes: `read`, `treasury`, and `treasury-execute` if the DAO votes it in. Not `owner` or `payout`. Consent and
 proposal votes may take the DAO's voting period (at most 7 days). Creation, the grant, freeze and unfreeze are provider
 intents that expire in minutes, so they complete only for a DAO whose vote passes that fast: show `expiresAt`. A DAO
-can't revoke your consent through the platform; your deployment or the operator can.
+can also stop its agent without you: a stop it votes on (`https://<host>/confirm/dao/stop/<agent>`) revokes every app's
+consent for the agent and turns its autopilot off. Your calls then answer `forbidden`: read `identity` and ask the DAO
+to consent again.
 
 The platform authorizes your app, not a member. Gate each member with the platform's own reading of the DAO's roles:
 

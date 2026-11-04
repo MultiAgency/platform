@@ -791,8 +791,11 @@ Limits:
 - The approval is the platform's check, as for a wallet owner's proposals.
 - Only a DAO whose vote passes within the provider intent's minutes completes creation, the grant, freeze or unfreeze.
 - The platform authorizes the app, not a member. The app gates its own members with the SDK's `accessOf` and `mayCall`.
-- A DAO can't revoke its consent through the platform: only the app deployment and the operator can. A consent lasts up
-  to 366 days. A DAO-signed revocation isn't built.
+- **The DAO's own stop** (`/confirm/dao/stop/<agent>`, no app involved) revokes every consent naming the agent ID and
+  turns its autopilot off, once the DAO's vote over the exact text is found. It can't revoke the provider grant, which
+  would need a provider intent valid for minutes, and it doesn't interrupt a tick already running (its swaps still pass
+  the guarded send path). A slow DAO's stop waits its voting period, and it only takes effect when someone opens the
+  page after the vote.
 - The derived key can't be removed, so the wallet's key-removal revocation has no DAO counterpart, and the operator's
   `check-keys` sweep leaves DAO consents alone.
 - The app holds the transactions a member files, so it could file its own `add_proposal` with this description but
