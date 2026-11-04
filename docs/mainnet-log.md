@@ -270,7 +270,7 @@ No funds moved.
 | The DAO consents to the app by vote | Proposal #61 (filed 22:30:05) signs exactly the request's hash. The consent was stored at 22:31:22 with `signer: dao`, scopes `read` and `treasury`, and the DAO's derived key |
 | The strategy-bound grant by a fast vote | The proposal (#62) named the strategy suffix and terms and said it authorizes swaps without a vote each time. `SUCCESS` at 22:35:24, about 2.5 minutes before the intent expired |
 | An app turns autopilot on under the DAO's grant | `autopilot/enable` with the strategy's digest answered `on: true` (22:43:27) |
-| The DAO stops its agent with no app | The stop page filed the stop. Its check page matched. Proposal #63 was filed and voted through `near-cli-rs`; `v1.signer` logged the request for `agent-owner` over the stop's hash. Opening the page after the vote applied it at 22:51:32: 2 consents revoked, autopilot off |
+| The DAO stops its agent with no app | The stop page filed the stop. Its check page matched. Proposal #63 was filed and voted through `near-cli-rs`; `v1.signer` logged the request for `agent-owner` over the stop's hash. Opening the page after the vote applied it at 22:51:32: 2 consents revoked, autopilot off. The app's calls then answered 403 "No live owner consent covers this Organization and agent" |
 
 **Found:**
 - **No app route funds the agent.** A DAO's consent (`read`, `treasury`) can't reach `deposit` (it's in the `payout`
