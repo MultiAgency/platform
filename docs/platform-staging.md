@@ -173,3 +173,77 @@ staging run in progress.
 Stop rules as above. Record each outcome in `docs/mainnet-log.md`; amounts, fees and payees go only in the private
 release record. What step 9 shows decides whether approving a held withdrawal can be bound and enabled
 ([enforcement](enforcement.md)).
+
+## A DAO-owned Treasury agent on staging (prepared, not run)
+
+User-run, on mainnet, through staging, never scheduled. It would be the first evidence of DAO owners through apps,
+which so far is offline- and stack-tested against simulated votes only (`test/app-dao.test.ts`,
+`test/e2e/app-access.spec.mjs`). What it would observe:
+- whether a real Sputnik vote passes inside the provider intent's minutes
+- whether FastNEAR's transaction API shows the `v1.signer` signature
+- what Trezu shows voters
+- what the provider answers for a DAO-owned hosted agent
+
+**Before starting**
+- **Staging runs 0.5.0's `platform` package.** Candidate `0263df8e`, commit `6ba0831`, deployed with
+  `deploy/platform-staging.json`, whose `appSetup` lists `treasury`. The deployed staging host runs `b9221b45` (Payables
+  only) until then. Deploy as in steps 3–4 above, and record the Railway deployment id.
+- **A staging credential** for the platform's own test deployment `staging` (step 5 above).
+- **The stand-in,** `scripts/staging-app.ts`, section "4. DAO owner" (2026-11-04):
+  - It files DAO setup, consent and proposal votes, and prepares creation, the grant, freeze and unfreeze with
+    `signer: "dao"`.
+  - It shows each request's description and check link.
+  - "Member signs the filed proposal" has the connected wallet sign and send exactly the transaction the platform
+    answered: `proposalAndVote` when "member may vote" is ticked, `proposal` otherwise.
+  - "Read request state" reads it. Section 5 calls any procedure, for the Treasury steps.
+  - Its page script is syntax-checked and its server typechecks. It hasn't been run against the stack or staging yet.
+- **The DAO** is `agentic.sputnik-dao.near`, whose policy passes a proposal with one member's vote. Its derived owner
+  account (`v1.signer`, path `agent-owner`) already owns its agents on Treasury's own gateway. This run creates a new,
+  separate hosted agent on staging.
+- **Nothing else is waiting for that DAO's vote:** no owner action on Treasury's gateway is waiting either. One
+  executor allows one waiting delegate per owner (`withDelegateLock`), but that doesn't span two executors. The
+  provider blocks only a second open policy intent. Two executors with one owner are untested.
+- **A member's wallet** that may propose and vote, and a small amount of USDC to fund the new agent. No other staging
+  run in progress.
+
+**Steps.** Record each step's UTC time and outcome.
+1. **Set up.** File the DAO's setup (Treasury, at most 7 days). Open the check link from the description and confirm
+   "it matches". The member files and votes. Read the setup's `state` until `reserved`. Record:
+   - how long the vote took
+   - how soon `findSignature` saw it
+   - what Trezu showed
+2. **Create.** `owner/prepare` with `{ type: "agent_create", role: "treasury" }` and `signer: "dao"`. The member files
+   and votes within the intent's `expiresAt` (about 10 minutes). Read `owner/status` until `SUCCESS`, and `identity`
+   until `created`. Record:
+   - the standard
+   - whether the vote passed in time
+   - whether the DAO's derived account needed funding first (`signingRequest` refuses an unfunded account for a
+     NEP-366 intent)
+3. **Consent.** File the DAO's consent naming the new agent ID, with `read` and `treasury`. Vote, then read `state`
+   until `signed`. Read `overview` under it.
+4. **Grant.** Save a strategy (`strategy/save`), then `owner/prepare` with `{ type: "grant_issue", label: "treasury",
+   expectedStrategyDigest }` and `signer: "dao"`. Check that the description names the strategy and its terms. Vote
+   within the intent's minutes. Read `owner/status` until `SUCCESS`.
+5. **Fund.** Take a deposit address and send a small amount of USDC. Read `treasury/get` until it's credited.
+6. **Proposal.** Create a proposal for one small swap, then file the DAO's vote with `approve`. Check the description's
+   swap and the check page. Vote, read `state` until `relayed`, then `proposals/execute`. Expect `executed`, with one
+   swap whose floor is at least the signed one.
+7. **Stop.** Turn autopilot on (`autopilot/enable` with the strategy's digest). Open
+   `https://api.dev.multiagency.ai/confirm/dao/stop/agentic.sputnik-dao.near/<agent>`. The member files the shown
+   proposal (Trezu's custom function call, or the whole transaction) and votes. Open the page again. Expect "stopped"
+   with the consent revoked and autopilot off. Then expect the stand-in's calls under the consent to answer
+   `forbidden`.
+8. **Optionally, freeze and unfreeze** by DAO vote, each within minutes.
+
+**Stop rules**
+- A swap reading `unknown`, or `executing` that doesn't settle, is never retried. Stop and report.
+- An owner intent that expires before its vote passes isn't prepared again until the late vote's proposal is
+  rejected or expired, because a late signature could still be found. Record it.
+- A refusal is recorded with its code.
+- Afterwards the hosted agent remains, with any funds under its policy. The consent is already revoked by the stop.
+
+**Record**
+- **In `docs/mainnet-log.md`:** each step with the UTC date, the deployment id and the DAO proposal numbers.
+- **In the private release record only:** op ids, transaction hashes, amounts and payees.
+- **Then update the docs:** the inventory and the docs' "offline- and stack-tested" for the DAO path change only for
+  what this run observed.

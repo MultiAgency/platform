@@ -33,6 +33,17 @@ const ops: Record<string, (input: Record<string, any>) => Promise<unknown>> = {
       scopes, expiresAt: later(30 * 86_400_000) }) };
   },
   consent: async ({ submission }) => app.consents.submit(submission),
+  // A DAO owner: every signature is the DAO's vote. The platform builds each text; these only file and read.
+  daoSetup: async ({ organization, dao }) => app.daoSetups.file(setupMessage({ host, deployment, organization: org(organization), owner: dao, area: "treasury",
+    expiresAt: later(3 * 86_400_000) })),
+  daoConsent: async ({ organization, agent, scopes }) => {
+    const identity = await app.identity(agent);
+    if (!identity.ok || identity.value.signer !== "dao" || !identity.value.agentId) return { error: "Not a created DAO-owned agent, or identity unreadable", identity };
+    return app.daoConsents.file(consentMessage({ host, deployment, organization: org(organization), owner: identity.value.owner, agent,
+      agentId: identity.value.agentId, scopes, expiresAt: later(30 * 86_400_000) }));
+  },
+  daoVote: async ({ organization, agent, proposal, verdict }) => app.daoVotes.file({ organization: org(organization), agent, proposal, verdict }),
+  daoState: async ({ kind, id }) => kind === "setup" ? app.daoSetups.state(id) : kind === "consent" ? app.daoConsents.state(id) : app.daoVotes.state(id),
   consents: async ({ organization }) => app.consents.list(org(organization)),
   /** A call to one agent's procedure through the app's consent; `expectedPolicy: "current"` is filled from overview. */
   call: async ({ organization, agent, path, input }) => {
@@ -109,6 +120,19 @@ table{border-collapse:collapse;width:100%;font-size:.85rem}td,th{border-bottom:1
 <div class="row"><button data-run="approvalOn">Owner approval on</button><button data-run="approvalOff">Owner approval off (auto-pay)</button>
 <button data-run="freeze">Freeze</button><button data-run="unfreeze">Unfreeze</button></div>
 <div class="row"><label>Correlation ID <input id="correlation" class="w"></label><button data-run="status">Owner status</button></div></section>
+<section><h2>4. DAO owner</h2>
+<p class="muted">Every signature is the DAO's vote: the platform builds the text, a member's wallet files (and may vote on) the proposal it answers. Connect the member's wallet.</p>
+<div class="row"><label>DAO <input id="dao" class="w" value="agentic.sputnik-dao.near"></label><label><input type="checkbox" id="memberVotes" checked> member may vote (file and vote in one transaction)</label></div>
+<div class="row"><button data-run="daoSetup">File DAO setup</button><button data-run="daoCreate">DAO: create the agent</button>
+<label><input type="checkbox" class="dscope" value="read" checked> read</label><label><input type="checkbox" class="dscope" value="treasury" checked> treasury</label>
+<label><input type="checkbox" class="dscope" value="treasury-execute"> treasury-execute</label><button data-run="daoConsent">File DAO consent</button></div>
+<div class="row"><button data-run="daoGrant">DAO: grant for the saved strategy</button><button data-run="daoFreeze">DAO: freeze</button><button data-run="daoUnfreeze">DAO: unfreeze</button></div>
+<div class="row"><label>Proposal ID <input id="proposalId" class="w"></label><button data-run="daoApprove">File DAO approve</button><button data-run="daoReject">File DAO reject</button></div>
+<div class="row"><button data-run="memberFiles">Member signs the filed proposal</button><button data-run="daoState">Read request state</button><button data-run="stopPage">Open the DAO stop page</button></div>
+<div id="daoRequest" class="muted">No DAO request filed in this tab.</div></section>
+<section><h2>5. Call a procedure</h2>
+<div class="row"><label>Path <input id="path" size="22" placeholder="strategy/save"></label><label>Input (JSON) <input id="input" class="w" placeholder='{}'></label><button data-run="callPath">Call</button></div>
+<p class="muted">For the Treasury steps: strategy/get, strategy/save, treasury/get, deposit, proposals/create, proposals/get, proposals/execute, autopilot/enable, autopilot/stop.</p></section>
 <section><h2>3. Payouts</h2>
 <div class="row"><label>Asset <select id="asset"><option value="USDC">USDC</option><option value="wNEAR">wNEAR</option></select></label>
 <label>Delivery <select id="delivery"><option value="intents">confidential transfer</option><option value="near">withdraw to chain near</option></select></label></div>
@@ -285,6 +309,37 @@ async function refresh() {
   view.replaceChildren.apply(view, parts.length ? parts : [el("p", { class: "no", text: "Nothing readable: check the agent, the Organization and the consent (see History)." })]);
 }
 
+/**
+ * The DAO request just filed (or the owner action just prepared for the DAO's vote): its description, check link and
+ * the member's transactions. Kept for this tab, so the member signs once and its state is read by the same id.
+ */
+var daoRequest = store("daoRequest");
+function showDao() {
+  var box = $("daoRequest"); if (!daoRequest) { box.textContent = "No DAO request filed in this tab."; return; }
+  var link = (daoRequest.description || "").match(new RegExp("https://[^ ]+/confirm/dao/[a-f0-9]{64}"));
+  box.replaceChildren(el("p", { text: daoRequest.kind + (daoRequest.id ? " " + daoRequest.id.slice(0, 16) + "…" : "") + (daoRequest.expiresAt ? " · vote before " + daoRequest.expiresAt : "") }),
+    link ? el("p", {}, [el("a", { href: link[0], target: "_blank", rel: "noopener", text: "Check what the DAO signs" })]) : null,
+    el("pre", { text: daoRequest.description || "" }));
+}
+function filed(kind, answer) {
+  if (!answer || !answer.ok) return;
+  var request = answer.value.request;
+  daoRequest = { kind: kind, id: request.id, description: request.description, transactions: answer.value.transactions };
+  store("daoRequest", daoRequest); showDao();
+}
+/** An owner action prepared for the DAO's vote: the agent finds and submits the signature itself; follow owner status. */
+async function daoOwner(action) {
+  var prepared = await call("owner/prepare", { action: action, signer: "dao" });
+  if (!prepared.ok) return;
+  if (prepared.value.intent || !prepared.value.dao) return record("refused here", action.type, action, { error: "Not a DAO vote: no proposal came back. Not filed.", prepared: prepared.value });
+  $("correlation").value = prepared.value.correlationId;
+  daoRequest = { kind: "owner action " + action.type, id: null, expiresAt: prepared.value.expiresAt, description: prepared.value.preview && prepared.value.preview.summary,
+    transactions: { proposal: prepared.value.dao.proposal, proposalAndVote: prepared.value.dao.proposalAndVote } };
+  store("daoRequest", daoRequest); showDao();
+}
+function dscopes() { return Array.prototype.filter.call(document.querySelectorAll(".dscope"), function (s) { return s.checked; }).map(function (s) { return s.value; }); }
+showDao();
+
 var runs = {
   loadAgents: async function () {
     var c = context(), listed = await api("consents", { organization: c.org });
@@ -341,6 +396,39 @@ var runs = {
   payStatus: function () { return call("payouts/status", { requestId: $("requestId").value }); },
   voteApprove: function () { return vote("approve"); },
   voteReject: function () { return vote("reject"); },
+  daoSetup: async function () { var c = context(); filed("setup", await api("daoSetup", { organization: c.org, dao: $("dao").value.trim() }, "dao setup")); },
+  daoCreate: function () { return daoOwner({ type: "agent_create", role: "treasury" }); },
+  daoConsent: async function () { var c = needAgent(); filed("consent", await api("daoConsent", { organization: c.org, agent: c.agent, scopes: dscopes() }, "dao consent")); },
+  daoGrant: async function () {
+    var strategy = await call("strategy/get");
+    if (!strategy.ok) return;
+    return daoOwner({ type: "grant_issue", label: "treasury", expectedStrategyDigest: strategy.value.digest });
+  },
+  daoFreeze: function () { return daoOwner({ type: "agent_freeze" }); },
+  daoUnfreeze: function () { return daoOwner({ type: "agent_unfreeze" }); },
+  daoApprove: async function () { var c = needAgent(); filed("proposal", await api("daoVote", { organization: c.org, agent: c.agent, proposal: $("proposalId").value.trim(), verdict: "approve" }, "dao approve")); },
+  daoReject: async function () { var c = needAgent(); filed("proposal", await api("daoVote", { organization: c.org, agent: c.agent, proposal: $("proposalId").value.trim(), verdict: "reject" }, "dao reject")); },
+  // The member's wallet signs exactly the transaction the platform answered; a member who can't vote files only.
+  memberFiles: async function () {
+    needWallet(); if (!daoRequest) throw new Error("File a DAO request first");
+    var t = daoRequest.transactions, transaction = $("memberVotes").checked && t.proposalAndVote ? t.proposalAndVote : t.proposal;
+    if (!transaction) throw new Error("No transaction to sign: the DAO's policy couldn't be read when it was filed");
+    var sent = await (await wallet()).signAndSendTransaction({ receiverId: transaction.receiverId, actions: transaction.actions });
+    record("member signed", daoRequest.kind, { receiverId: transaction.receiverId, actions: transaction.actions.length }, { ok: true, value: sent && (sent.transaction ? sent.transaction.hash : sent) });
+  },
+  daoState: async function () {
+    if (!daoRequest) throw new Error("File a DAO request first");
+    if (!daoRequest.id) return call("owner/status", { correlationId: $("correlation").value });
+    var kind = daoRequest.kind === "proposal" ? "vote" : daoRequest.kind;
+    var answer = await api("daoState", { kind: kind, id: daoRequest.id }, "dao " + kind + " state");
+    if (answer.ok && answer.value.state === "reserved") { $("agent").value = answer.value.agent; store("agent", answer.value.agent); remember("agents", "agents", answer.value.agent); }
+  },
+  stopPage: function () { var c = needAgent(); window.open("https://" + config.host + "/confirm/dao/stop/" + encodeURIComponent($("dao").value.trim()) + "/" + encodeURIComponent(c.agent), "_blank"); },
+  callPath: async function () {
+    var text = $("input").value.trim(), input;
+    try { input = text ? JSON.parse(text) : undefined; } catch (e) { throw new Error("The input isn't JSON"); }
+    return call($("path").value.trim(), input);
+  },
   copyLog: async function () { await navigator.clipboard.writeText(JSON.stringify(history, null, 2)); },
   clearLog: function () { history = []; store("history", history); renderLog(); },
 };
