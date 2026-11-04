@@ -10,6 +10,7 @@ import { appendSynced, writeAtomic } from "../synced.js";
 import type { AgentEntry } from "./config.js";
 import { forwardRpc } from "./rpc-proxy.js";
 import { privateDirectory, readRecord } from "./app-access.js";
+import { DaoRequests, daoRequestPage } from "./app-dao.js";
 
 /**
  * Confirm pages: a NEP-366 owner action an app prepared is held here, not handed to the app, and the owner signs it on
@@ -107,6 +108,16 @@ function opensLink(record: ConfirmRecord, body: unknown) {
  */
 export async function confirmRoutes(req: IncomingMessage, res: ServerResponse, pathname: string, host: string, confirms: AppConfirms, root: string,
   selected: AgentEntry[], dist: string, stopping: () => boolean): Promise<boolean> {
+  // A DAO request's public check page: what its key signs, for members before they vote. It belongs to the host it names.
+  const daoCheck = pathname.match(/^\/confirm\/dao\/([a-f0-9]{64})$/);
+  if (daoCheck) {
+    if (!["GET", "HEAD"].includes(req.method ?? "")) { json(res, 405, { error: "Use GET" }); return true; }
+    const found = new DaoRequests(root).read(daoCheck[1]!);
+    if (!found || found.host !== host.toLowerCase()) { json(res, 404, { error: "No such DAO request on this host" }); return true; }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" });
+    res.end(req.method === "HEAD" ? undefined : daoRequestPage(found)); return true;
+  }
   const page = pathname.match(/^\/confirm\/([A-Za-z0-9_-]{22})$/);
   if (page) {
     if (!["GET", "HEAD"].includes(req.method ?? "")) { json(res, 405, { error: "Use GET" }); return true; }

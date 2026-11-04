@@ -796,9 +796,13 @@ Limits:
 - The derived key can't be removed, so the wallet's key-removal revocation has no DAO counterpart, and the operator's
   `check-keys` sweep leaves DAO consents alone.
 - The app holds the transactions a member files, so it could file its own `add_proposal` with this description but
-  another hash in the `v1.signer` call. The platform ignores any hash but its own, but the members' check is to compare
-  the description's "Signs: … hash" line with the call's `payload_v2`. `proposalAndVote` binds the vote to the filed
-  kind (`act_proposal` passes it).
+  another hash in the `v1.signer` call. The platform ignores any hash but its own. The members' check is the platform's
+  page that each description links to (`/confirm/dao/<hash>`, the exact text and its hash recomputed): they compare that
+  hash with the call's `payload_v2`. Nothing enforces that a member opens it. `proposalAndVote` binds the vote to the
+  filed kind (`act_proposal` passes it).
+- The check page covers the platform's own texts (setup, consent, proposal votes). For a provider owner intent
+  (creation, grant, freeze), the agent builds the description from the provider's preview, as on the owner session, and
+  no page recomputes its hash.
 - Not deployed or mainnet-observed.
 
 ## Shared machine access candidate

@@ -8,6 +8,7 @@ import { MAX_PROPOSAL_MS } from "../contract/treasury-proposals.js";
 import { nextProposalId } from "../chain.js";
 import { findSignature, latestBlock } from "../dao-owner.js";
 import { BadRequest } from "../http.js";
+import { nep413Hash } from "../nep413.js";
 import { writeAtomic } from "../synced.js";
 import { MAX_CONSENT_DAYS, privateDirectory, readRecord, type VerifiedConsent } from "./app-access.js";
 
@@ -107,6 +108,7 @@ export function daoSetupDescription(request: Pick<DaoSetupRequest, "deployment" 
       `Organization ${request.organization}, and ask the DAO to create it, until ${new Date(request.expiresAt).toISOString()}`,
     `* Signing window closes: ${new Date(request.votingUntil).toISOString()} (approve before then, or nothing is set up)`,
     `* Signs: NEP-413 hash ${request.id} for ${request.host} as the agents' owner (v1.signer, path agent-owner)`,
+    `* Check before voting: ${checkUrl(request)} (the exact text, and its hash recomputed)`,
     "* Notes: Filed by the MultiAgency platform for an app. Creating the agent is a separate vote, which must pass within minutes.",
   ].join(" <br>");
 }
@@ -119,6 +121,38 @@ export function daoSetupConsent(request: DaoSetupRequest, signature: Buffer, age
     signature: signature.toString("base64"), signer: "dao" };
 }
 
+/** The platform's public page for a DAO request: what its key signs, for members to check before voting. */
+export const checkUrl = ({ host, id }: { host: string; id: string }) => `https://${host}/confirm/dao/${id}`;
+
+const escape = (text: string) => text.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+const KINDS = { consent: "Consent for an app", setup: "Setup of a hosted agent", proposal: "Vote on a Treasury proposal" } as const;
+
+/**
+ * The voter check view (coordination/p5-treasury-dao-consent.md, slice 4): the exact text a DAO request's key signs,
+ * its nonce and host, and whether its NEP-413 hash, recomputed here now, is the hash the request names. Plain HTML,
+ * every value escaped, no script. A member compares the hash with the `v1.signer` call's `payload_v2` in the proposal.
+ */
+export function daoRequestPage(record: DaoRequest, now = Date.now()) {
+  const recomputed = nep413Hash(record.message, Buffer.from(record.nonce, "base64"), record.host).toString("hex") === record.id;
+  const state = record.kind === "proposal" ? (record.relayed ? `relayed to the agent (the proposal was ${record.relayed.state})` : null)
+    : record.consent ? (record.kind === "setup" ? `the agent ${record.reserved} was reserved` : "the consent was stored") : null;
+  const status = state ?? (now >= record.votingUntil ? "the vote window closed; nothing was stored" : `waiting for the vote until ${new Date(record.votingUntil).toISOString()}`);
+  const row = (label: string, value: string) => `<tr><th>${escape(label)}</th><td>${escape(value)}</td></tr>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DAO vote check</title><style>body{font:15px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#111;background:#fff}
+pre,code{font:13px/1.45 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all}pre{background:#f4f4f5;padding:.75rem;border-radius:6px}
+th{text-align:left;padding-right:1rem;vertical-align:top}.ok{color:#166534}.bad{color:#b91c1c;font-weight:600}
+@media (prefers-color-scheme:dark){body{color:#eee;background:#111}pre{background:#222}.ok{color:#4ade80}.bad{color:#f87171}}</style></head><body>
+<h1>What this DAO vote signs</h1>
+<table>${row("Request", KINDS[record.kind])}${row("DAO", record.dao)}${row("App deployment", record.deployment)}${row("Organization", record.organization)}${record.agent ? row("Agent", `${record.agent} (${record.agentId})`) : ""}${row("State", status)}</table>
+<h2>The exact text</h2><p>Signed with NEP-413 for recipient <code>${escape(record.host)}</code>, nonce <code>${escape(record.nonce)}</code>.</p>
+<pre>${escape(record.message)}</pre>
+<h2>The hash</h2><p><code>${escape(record.id)}</code></p>
+<p class="${recomputed ? "ok" : "bad"}">${recomputed ? "Recomputed here from the text, nonce and host: it matches." : "Recomputed here from the text, nonce and host: it does not match. Don't vote for it."}</p>
+<p>Before voting, check that the proposal's <code>v1.signer</code> call signs exactly this hash (<code>payload_v2.Eddsa</code>). A proposal that signs any other hash isn't this request, whatever its description says.</p>
+</body></html>`;
+}
+
 /** What the DAO's proposal says: the consent's terms, the vote's deadline, and the hash its key signs. */
 export function daoConsentDescription(request: Pick<DaoConsentRequest, "deployment" | "organization" | "agent" | "agentId" | "scopes" | "expiresAt" | "votingUntil" | "id" | "host">) {
   return [
@@ -126,6 +160,7 @@ export function daoConsentDescription(request: Pick<DaoConsentRequest, "deployme
       `${request.agent} (${request.agentId}) with ${[...request.scopes].sort().join(", ")} until ${new Date(request.expiresAt).toISOString()}`,
     `* Signing window closes: ${new Date(request.votingUntil).toISOString()} (approve before then, or the consent isn't stored)`,
     `* Signs: NEP-413 hash ${request.id} for ${request.host} as the agents' owner (v1.signer, path agent-owner)`,
+    `* Check before voting: ${checkUrl(request)} (the exact text, and its hash recomputed)`,
     "* Notes: Filed by the MultiAgency platform for an app. The signature gives the app only these scopes; it can't sign for the DAO.",
   ].join(" <br>");
 }
@@ -136,6 +171,7 @@ export function daoVoteDescription(request: Pick<DaoVoteRequest, "message" | "vo
     ...request.message.split("\n").map((line, i) => i === 0 ? `* Proposal Action: ${line}` : `* ${line}`),
     `* Signing window closes: ${new Date(request.votingUntil).toISOString()} (approve before then, or the vote isn't relayed)`,
     `* Signs: NEP-413 hash ${request.id} for ${request.host} as the agents' owner (v1.signer, path agent-owner)`,
+    `* Check before voting: ${checkUrl(request)} (the exact text, and its hash recomputed)`,
     "* Notes: Filed by the MultiAgency platform for an app. The platform relays the signature; executing the swap is a separate step.",
   ].join(" <br>");
 }

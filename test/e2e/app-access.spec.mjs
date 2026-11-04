@@ -342,6 +342,12 @@ test("a DAO consents to an app by its own vote; its grant vote lets autopilot ru
     const filed = value(await app.daoConsents.file(consentMessage({ host, deployment: 'local', organization: 'org_1', owner: DAO,
       agent: 'portfolio', agentId: identity.agentId, scopes: ['read', 'treasury'], expiresAt: later(90) })));
     expect(value(await app.daoConsents.state(filed.request.id)).state, 'nothing is stored before the vote').toBe('pending');
+    // Members check what they vote on at the platform's own page, which the proposal links to.
+    const check = `${stack.dashboard}/confirm/dao/${filed.request.hash}`;
+    expect(filed.request.description).toContain(`https://${host}/confirm/dao/${filed.request.hash}`);
+    const shown = await localFetch(check);
+    expect(shown.status).toBe(200);
+    expect(await shown.text()).toContain('Recomputed here from the text, nonce and host: it matches.');
     passes(filed.transactions.proposal);
     const consent = value(await app.daoConsents.state(filed.request.id));
     expect(consent).toMatchObject({ state: 'signed', consent: { signer: 'dao', owner: DAO, scopes: ['read', 'treasury'] } });

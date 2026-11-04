@@ -7,7 +7,8 @@ import { test } from "node:test";
 import { generateKey } from "near-kit";
 import { consentMessage, setupMessage } from "../src/contract/app-consent.js";
 import { AppConsents, AppCredentials, sweepConsentKeys } from "../src/gateway/app-access.js";
-import { appRoutes, type HostedSetup } from "../src/gateway/app-routes.js";
+import { APP_ROOT, appRoutes, confirms, type HostedSetup } from "../src/gateway/app-routes.js";
+import { confirmRoutes } from "../src/gateway/app-confirm.js";
 import type { AgentEntry } from "../src/gateway/config.js";
 import type { DaoVotes } from "../src/gateway/app-dao.js";
 import type { DaoOwnerReads } from "../src/gateway/machine-authority.js";
@@ -62,6 +63,7 @@ async function harness(t: import("node:test").TestContext) {
     findSignature: async () => { if (state.findDown) throw new Error("indexer down"); return state.signature; },
   };
   const server = createServer(async (req, res) => { try {
+    if (await confirmRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, confirms, APP_ROOT, agents, dir, () => state.stopping)) return;
     if (!await appRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, agents, () => state.stopping, { daoOwner, daoVotes, setup })) { res.writeHead(404); res.end("{}"); }
   } catch (e) { sendFailure(res, e); } });
   const port = await listen(server);
@@ -458,4 +460,45 @@ test("a DAO that votes treasury-execute into its consent lets the app run plans;
   const base = { type: "grant_issue", summary: "Authorize the saved strategy", expiresAt: later(0.003), hash: "a".repeat(64) };
   assert.match(proposalDescription({ ...base, unattended: true }), /Authorizes: swaps within the saved strategy and the DAO's signed policy without a vote each time/);
   assert.doesNotMatch(proposalDescription(base), /Authorizes:/, "only a Treasury grant says it");
+});
+
+/** A plain GET of a public page: status, headers and body text. */
+const page = (port: number, path: string, method = "GET") => new Promise<{ status: number; headers: Record<string, unknown>; text: string }>((resolve, reject) => {
+  const req = request({ host: "127.0.0.1", port, path, method }, res => {
+    let text = ""; res.on("data", chunk => text += chunk); res.on("end", () => resolve({ status: res.statusCode!, headers: res.headers, text }));
+  }); req.on("error", reject); req.end();
+});
+
+test("each DAO request has a public check page: the exact text, and its hash recomputed, linked from the proposal", async t => {
+  const { port, staging, file, vote } = await harness(t);
+  const { request: pending, transactions } = (await file()).body;
+  const link = `https://${HOST}/confirm/dao/${pending.hash}`;
+  assert.ok(pending.description.includes(link), "the proposal's description links to it");
+  assert.ok(transactions.proposal.actions[0].params.args.proposal.description.includes(link));
+
+  const shown = await page(port, `/confirm/dao/${pending.hash}`);
+  assert.equal(shown.status, 200);
+  assert.match(String(shown.headers["content-type"]), /^text\/html/);
+  assert.match(String(shown.headers["content-security-policy"]), /default-src 'none'/, "no script runs on it");
+  assert.ok(shown.text.includes("it matches"));
+  assert.ok(shown.text.includes(pending.hash));
+  assert.ok(shown.text.includes("&quot;type&quot;:&quot;multiagency.app-consent&quot;"), "the exact text, escaped");
+  assert.ok(!shown.text.includes("<script"), "no script");
+  assert.ok(shown.text.includes("waiting for the vote"));
+  assert.equal((await page(port, `/confirm/dao/${pending.hash}`, "HEAD")).status, 200);
+  assert.equal((await page(port, `/confirm/dao/${pending.hash}`, "POST")).status, 405);
+  assert.equal((await page(port, `/confirm/dao/${"0".repeat(64)}`)).status, 404);
+
+  vote(pending.hash);
+  await call(port, `/apps/v1/dao-consents/${pending.hash}`, "GET", staging);
+  assert.ok((await page(port, `/confirm/dao/${pending.hash}`)).text.includes("the consent was stored"));
+
+  // A record whose text no longer hashes to its id says so; one for another host isn't served here.
+  const path = join(".app-access", "dao-requests", `${pending.hash}.json`), record = JSON.parse(readFileSync(path, "utf8"));
+  writeFileSync(path, JSON.stringify({ ...record, message: record.message.replace("org_1", "org_<b>") }));
+  const tampered = await page(port, `/confirm/dao/${pending.hash}`);
+  assert.ok(tampered.text.includes("does not match. Don't vote for it."));
+  assert.ok(tampered.text.includes("org_&lt;b&gt;") && !tampered.text.includes("org_<b>"), "every value is escaped");
+  writeFileSync(path, JSON.stringify({ ...record, host: "other.test" }));
+  assert.equal((await page(port, `/confirm/dao/${pending.hash}`)).status, 404);
 });

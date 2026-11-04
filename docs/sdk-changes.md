@@ -29,6 +29,9 @@ public-interface change bumps at least the minor version.
   `app.daoSetups.state(id)` answers `pending`, then `reserved` with the hosted agent and its setup consent. Under it the
   app asks only for `agent_create` with `signer: "dao"` and no owner (the DAO's derived account), a second vote that
   must pass within the intent's minutes; then it files the DAO's consent naming the new agent's ID.
+- **Voter check page** (added; no SDK change): each DAO request's proposal description links to
+  `https://<host>/confirm/dao/<hash>`, a public page showing the exact text the DAO's key signs and its NEP-413 hash
+  recomputed. Show members that link.
 - **DAO roles** (added): `accessOf`, `groupOf`, `permits`, and the `DaoPolicy`, `DaoRole` and `Owner` types, the platform's
   own reading of Sputnik roles (moved from the gateway, unchanged). An app reads the DAO's `get_policy` and gates each
   member's calls with `mayCall(accessOf(account, owner), path)`: Group members only, `strategy/save` only for a member
