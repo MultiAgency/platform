@@ -145,7 +145,8 @@ credential issued again under the same deployment name acts on every consent tha
 The platform doesn't see the app's users: the app's own sign-in and roles decide which of its users act for which
 Organization, so a fault there acts within every consent the deployment holds (for `payout`, within the owner-signed
 policy). With `treasury`, an app reaches Treasury reads, strategy settings (which act on an app's or a machine credential's plans only once the owner's grant binds them,
-[enforcement](enforcement.md#treasury-proposals-offline--and-stack-tested)), autopilot on and off, sweep and proposals:
+[enforcement](enforcement.md#treasury-proposals-offline--and-stack-tested)), autopilot on and off, sweep, `deposit`
+(from 0.5.1: a one-time address crediting the agent, so the app can fund it) and proposals:
 its swaps run only after the owner signs each proposal's exact terms (`proposalText`), a check the platform makes, not
 the provider. With `treasury-execute` as well, it can prepare and execute plans within the policy and the strategy's
 cost limit without a signature per swap, only while the owner's live grant binds the plan's strategy
@@ -177,8 +178,8 @@ Offline- and stack-tested (simulated DAO votes). Mainnet-observed on platform st
 `agentic.sputnik-dao.near` ([mainnet log](mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc)): setup, creation, consent, the strategy-bound grant, autopilot on, and
 the DAO's own stop. Not observed: funding (see below), a DAO-approved proposal, freeze and unfreeze. Not in production.
 
-**Funding a DAO-owned agent through an app isn't possible yet** (found on that run). A DAO's consent can't reach
-`deposit`, which is in the `payout` scope, or `treasury/fund`, and no app read returns the agent's wallet account. See
+**Funding through an app:** found on that run, a DAO's consent couldn't reach `deposit`, which was in the `payout`
+scope only. From 0.5.1 the `treasury` scope reaches it too (offline-tested; not yet run on staging). See
 [enforcement](enforcement.md#dao-owners-through-apps-offline--and-stack-tested).
 
 Rolling back: records written from 0.5.0 on carry fields that earlier builds refuse to read, and one refused record

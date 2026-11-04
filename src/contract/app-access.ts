@@ -22,11 +22,12 @@ export const APP_PAYOUT = ["payouts/request", "payouts/status", "held", "deposit
 /**
  * Treasury with `treasury` consent (docs/enforcement.md, "Treasury proposals"): reads; strategy settings, which an
  * app's plans, a machine credential's plans and the autopilot use only under a grant binding their digest; autopilot on
- * (under such a grant) and off; sweeping public balances into the confidential one; and proposals, whose swaps execute
- * only after the owner signs their exact terms.
+ * (under such a grant) and off; sweeping public balances into the confidential one; `deposit`, a one-time address that
+ * credits only the agent's own confidential balance, so the app can fund it; and proposals, whose swaps execute only
+ * after the owner signs their exact terms.
  */
 export const APP_TREASURY = ["strategy/get", "autopilot/get", "autopilot/evidence", "autopilot/log", "treasury/get", "strategy/save",
-  "autopilot/enable", "autopilot/stop", "sweep", "proposals/create", "proposals/get", "proposals/list", "proposals/approve",
+  "autopilot/enable", "autopilot/stop", "sweep", "deposit", "proposals/create", "proposals/get", "proposals/list", "proposals/approve",
   "proposals/reject", "proposals/withdraw", "proposals/execute"] as const;
 /**
  * With `treasury-execute` as well: plans prepared and executed within the owner's policy and the strategy's cost limit,

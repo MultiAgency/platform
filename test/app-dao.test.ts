@@ -1042,3 +1042,14 @@ test("a stop nobody opened since its window closed is kept, not pruned, so a vot
   assert.ok(applied.text.includes("This DAO's agent was stopped"), applied.text);
   assert.equal(new AppConsents(".app-access").list({}).find(c => c.id === consent)?.revoked, true);
 });
+
+test("a treasury consent, a DAO's included, reaches deposit: the app funds the agent it reaches", async t => {
+  const { port, forwarded, staging, rpc, consented } = await harness(t);
+  await consented();
+  const answered = await call(port, rpc("deposit"), "POST", staging, { json: { asset: "nep141:usdc.test" } });
+  assert.equal(answered.status, 200, JSON.stringify(answered.body));
+  assert.equal(forwarded.at(-1)!.path, "/rpc/deposit");
+  const { appScopesCover } = await import("../src/contract/app-access.js");
+  assert.ok(appScopesCover(["treasury"], "deposit"), "a wallet owner's treasury consent too");
+  assert.ok(!appScopesCover(["read"], "deposit"), "read alone takes no deposit address");
+});

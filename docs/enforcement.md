@@ -827,8 +827,9 @@ Limits:
 - The check page covers the platform's own texts (setup, consent, proposal votes). For a provider owner intent
   (creation, grant, freeze), the agent builds the description from the provider's preview, as on the owner session, and
   no page recomputes its hash.
-- **An app can't fund a DAO-owned agent** (found on platform staging, 2026-11-04). A DAO's consent doesn't reach
-  `deposit` (in `payout`) or `treasury/fund`, and no app read returns the agent's wallet account.
+- **Funding:** found on platform staging (2026-11-04), a DAO's consent couldn't reach `deposit`, which was in `payout`
+  only. From 0.5.1 the `treasury` scope reaches it; that's offline-tested, not observed. `deposit` answers an address
+  that only credits the agent's own balance.
 - Mainnet-observed on platform staging, 2026-11-04 ([mainnet log](mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc)):
   setup, creation, consent, the strategy-bound grant, autopilot on and the DAO's own stop. Not observed: a DAO-approved
   proposal and its execution, freeze, unfreeze. Not in production.

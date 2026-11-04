@@ -361,7 +361,8 @@ re-checks ownership and the signing key on every call: once the chain reports th
 `check-keys` sweep), the consent is revoked for good. Scopes today: `read` (a fixed list of reads; no workflow records), `owner` (prepare, submit and follow owner actions,
 which only the owner's own wallet signature completes; the app receives an intent only when it is NEP-413, and a NEP-366
 one only as a confirm page link), `payout` (payout requests, their status, held payouts and a deposit address to fund the agent),
-`treasury` (Treasury reads, strategy settings, autopilot on and off, sweep and **Treasury proposals**) and
+`treasury` (Treasury reads, strategy settings, autopilot on and off, sweep, a deposit address to fund the agent, and
+**Treasury proposals**) and
 `treasury-execute`, only beside `treasury` (plans prepared and executed without a signature per swap, only under a
 grant binding the plan's strategy). A **DAO consent** is the same text signed by the DAO's own vote (its derived
 key, through a passed `v1.signer` proposal the platform files); it carries only `read`, `treasury` and, as the DAO's

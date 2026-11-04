@@ -10,7 +10,7 @@ metadata:
   purpose: 'An app server''s access to agents: credential, consents, relayed owner actions, and payout requests by requestId with recovery by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.5.0'
+  library_version: '0.5.1'
 requires:
   - getting-started
   - owner-workflows
@@ -213,7 +213,7 @@ may change the DAO's policy. Pass `memberVotes` from `access.canVote`.
 
 ## Request a payout once, and follow it
 
-To fund the agent first, `agentCalls.call("deposit")` (payout scope) answers a one-time address (with `memo`,
+To fund the agent first, `agentCalls.call("deposit")` (payout or treasury scope) answers a one-time address (with `memo`,
 `minAmount` and `expiresAt` when given) that credits USDC to the agent's confidential balance; send exactly there.
 
 Write the `requestId` (1–64 of `[A-Za-z0-9_-]`) and the exact terms to your database before calling. The platform sends

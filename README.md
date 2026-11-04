@@ -257,8 +257,8 @@ Each line is a gap; the linked page says how the rest is known. The
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
 - DAO-owned agents through apps: setup, creation, consent, the grant and the DAO's own stop are mainnet-observed on
   platform staging (2026-11-04, [mainnet log](docs/mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc)); Treasury proposal votes are stack-tested only, and freeze
-  and unfreeze by DAO vote are offline-tested only. An app can't fund a DAO-owned agent yet: a DAO's consent doesn't
-  reach `deposit` or `treasury/fund`. The provider's owner intents (creation, grant, freeze) expire in minutes, so only a DAO whose vote
+  and unfreeze by DAO vote are offline-tested only. Funding through an app (`deposit` under `treasury`, from 0.5.1) is
+  offline-tested only. The provider's owner intents (creation, grant, freeze) expire in minutes, so only a DAO whose vote
   passes that fast completes them. A DAO's own stop (no app) ends what was given before it is applied; that happens only
   when someone opens its page after the vote, and the provider grant stands, so a consent the DAO gives later can turn
   autopilot on again. See [app access](docs/app-access.md).

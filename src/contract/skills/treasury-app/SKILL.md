@@ -8,7 +8,7 @@ metadata:
   purpose: 'Treasury proposals through an app: propose by requestId, the owner signs the exact terms, execute once, recover by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.5.0'
+  library_version: '0.5.1'
 requires:
   - getting-started
   - app-server
@@ -30,7 +30,7 @@ repository's local stack.
 Two consent scopes, each named in the text the owner signs:
 - `treasury`: Treasury reads (`strategy/get`, `autopilot/get`, `autopilot/evidence`, `autopilot/log`, `treasury/get`),
   strategy settings (`strategy/save`, which act only once the owner signs a grant binding them), `autopilot/enable` and
-  `autopilot/stop`, `sweep`, and every `proposals/*` procedure.
+  `autopilot/stop`, `sweep`, `deposit` (a one-time address that credits the agent, to fund it), and every `proposals/*` procedure.
 - `treasury-execute`, only beside `treasury`: `rebalance`, `externalPlan` and `executePlan`, five-minute plans executed
   within the policy without a signature per swap, and only while the owner's live grant binds the strategy they were
   planned under. `sweep`, `rebalance` and `executePlan` are streams: read them with `app.agent(...).stream(path, input)`.

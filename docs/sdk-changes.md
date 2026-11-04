@@ -6,6 +6,15 @@ version, so a package staged or packed from changed sources never carries a rele
 commit dates the heading, before its candidate runs; staging copies this file as it is. Under 0.x, any
 public-interface change bumps at least the minor version.
 
+## 0.5.1 (2026-11-04)
+
+- **The `treasury` scope reaches `deposit`** (behaviour): under a `treasury` consent, a DAO's included, `deposit`
+  answers a one-time address that credits only the agent's own confidential balance, so an app can fund the Treasury
+  agent it reaches. A DAO's consent can't carry `payout`, so before this an app had no way to fund a DAO-owned agent
+  (found on platform staging, 2026-11-04). `APP_TREASURY` gains `deposit`. The changelog's rule would make this a minor
+  version, since an exported constant changed; the user chose a patch, because no procedure, type or wire format is
+  new and only a scope's coverage widens.
+
 ## 0.5.0 (2026-11-04)
 
 - **DAO consent** (added; offline- and stack-tested, not on any host yet): a DAO-owned agent's consent is signed by the DAO's
