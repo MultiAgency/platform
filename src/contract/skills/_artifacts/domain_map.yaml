@@ -1,7 +1,7 @@
 # domain_map.yaml
 # Library: @multiagency/sdk
 # Version: 0.5.0
-# Date: 2026-10-18
+# Date: 2026-11-04
 # Status: draft
 library:
   name: '@multiagency/sdk'
@@ -54,7 +54,7 @@ skills:
           // sign "Sign in to <platform host>" in the app
         correct_pattern: |
           // the app asks only for consentMessage or setupMessage texts
-        source: 'docs/agent-access.md'
+        source: 'docs/app-access.md'
         priority: 'CRITICAL'
         status: 'active'
       - mistake: 'A new requestId after unknown'

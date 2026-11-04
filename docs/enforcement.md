@@ -791,11 +791,32 @@ Limits:
 - The approval is the platform's check, as for a wallet owner's proposals.
 - Only a DAO whose vote passes within the provider intent's minutes completes creation, the grant, freeze or unfreeze.
 - The platform authorizes the app, not a member. The app gates its own members with the SDK's `accessOf` and `mayCall`.
-- **The DAO's own stop** (`/confirm/dao/stop/<agent>`, no app involved) revokes every consent naming the agent ID and
-  turns its autopilot off, once the DAO's vote over the exact text is found. It can't revoke the provider grant, which
-  would need a provider intent valid for minutes, and it doesn't interrupt a tick already running (its swaps still pass
-  the guarded send path). A slow DAO's stop waits its voting period, and it only takes effect when someone opens the
-  page after the vote.
+- **The DAO's own stop** (`/confirm/dao/stop/<dao>/<agent>`, no app involved) ends everything given before it first
+  applies, once the DAO's vote over the exact text is found and the page is opened: every app consent for the agent ID
+  is revoked, every consent request filed by then is never stored, whatever its vote, and the agent's autopilot is
+  turned off. Filing a stop early gains an app nothing: the cutoff is when the stop applies. A passed stop is honoured
+  whenever its page is next opened, even after its window, and is kept until then. The exception is a stop whose page is
+  opened after its window while its vote hasn't passed yet, or before the indexer shows it: that stop lapses and a new
+  one is filed, and a later signature over the old hash is ignored. The page's open limit is per address, so no one
+  can keep it closed to members. What it doesn't do:
+  - It can't revoke the provider grant, which would need a provider intent valid for minutes. A consent the DAO gives
+    after the stop applied stays live, and under it an app can turn autopilot on again at once.
+  - It doesn't interrupt a tick already running, or an app's call already forwarded (an `executePlan`, say): their
+    swaps still pass the guarded send path.
+  - Owner actions already waiting for the DAO's vote (a grant, a freeze) still take effect if that vote passes.
+  - A slow DAO's stop waits its voting period, and nothing changes until someone opens the page after the vote:
+    autopilot and the consents it will end stay live until then.
+- A DAO's Treasury grant proposal says what it authorizes without a vote each time (autopilot, and plans of apps the DAO
+  consented to with `treasury-execute`) and names the strategy it binds: its digest suffix and its terms (targets, cost
+  cap, the autopilot's per-run ceiling). It is a provider owner intent, so no platform page recomputes its hash: members
+  compare it with the `v1.signer` call's `payload_v2`, as the description says.
+- **What a DAO's votes make public.** Sputnik proposals are public and permanent, and so is every check page their
+  descriptions link to:
+  - the consent and setup terms: app deployment, Organization, agent and scopes
+  - each proposal vote's swaps, with their amounts and floors
+  - the strategy a Treasury grant binds: targets, cost cap, minimum leg and the autopilot's per-run ceiling
+  - each stop
+  An Organization that wants its strategy or swaps private uses a wallet owner, whose signatures stay off chain.
 - The derived key can't be removed, so the wallet's key-removal revocation has no DAO counterpart, and the operator's
   `check-keys` sweep leaves DAO consents alone.
 - The app holds the transactions a member files, so it could file its own `add_proposal` with this description but

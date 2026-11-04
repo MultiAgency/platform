@@ -33,14 +33,14 @@ export const permits = (permissions: string[], kind: string, action: string) =>
  * An agent's configured owner: a DAO with its policy, or an account (`policy: null`) that holds its own keys. `signer` is
  * the account that signs as the agent's owner: the account itself, or for a DAO the account its MPC key controls.
  */
-export type Owner = { account: string; policy: DaoPolicy | null; signer: string };
+export type ConfiguredOwner = { account: string; policy: DaoPolicy | null; signer: string };
 
 /**
  * What `account` may do with an agent of `owner`, or null when it may do nothing. A wallet owner is its own only member
  * and signs directly. A DAO's members are the accounts its Group roles name (Everyone's public rights admit no one);
  * their capabilities come from their roles' and Everyone's permissions, and never include signing for the DAO.
  */
-export function accessOf(account: string, owner: Owner): Access | null {
+export function accessOf(account: string, owner: ConfiguredOwner): Access | null {
   if (!owner.policy) {
     if (account !== owner.account) return null;
     // No proposals: the owner's own wallet signs.

@@ -3,7 +3,7 @@ import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import { z } from "zod";
 import { daoPolicy } from "../chain.js";
-import { accessOf, type Owner } from "../contract/dao-roles.js";
+import { accessOf, type ConfiguredOwner as Owner } from "../contract/dao-roles.js";
 import { daoOwner } from "../dao-owner.js";
 import type { Router } from "../router.js";
 import { agentOrigin } from "./agent-origin.js";

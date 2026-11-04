@@ -368,10 +368,12 @@ key, through a passed `v1.signer` proposal the platform files); it carries only 
 opt-in, `treasury-execute`; the DAO's grant vote is what authorizes unattended swaps; and its agent's
 ownership by the DAO's derived account is re-read on every call. Under it the platform files the DAO's votes on the
 app's Treasury proposals and on the Treasury grant, freeze and unfreeze, and a DAO sets up and creates its hosted
-Treasury agent by vote; the app never gets a text to sign. A **DAO stop** is the DAO's own vote, filed from a public page
-with no app, that revokes every consent for its agent and turns its autopilot off. Offline-
-and stack-tested only. Revocable by the deployment or the operator; a revocation is a permanent tombstone. Offline- and stack-tested;
-mainnet-observed on platform staging (2026-10-28); not in production. See docs/app-access.md.
+Treasury agent by vote; the app never gets a text to sign. A **DAO stop** is the DAO's own vote, filed from a public
+page with no app, that ends every consent for its agent given before the stop is applied (and every consent request
+filed by then) and turns its autopilot off; consents the DAO gives after it applied stay live. The DAO parts are
+offline- and stack-tested only. Revocable by the deployment or the operator, and a DAO's consent by its own stop; a
+revocation is a permanent tombstone. A wallet's consent is offline- and stack-tested and mainnet-observed on platform
+staging (2026-10-28); not in production. See docs/app-access.md.
 
 
 **Treasury proposal**:

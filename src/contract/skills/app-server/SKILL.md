@@ -185,10 +185,12 @@ same shape covers the rest:
 
 Scopes: `read`, `treasury`, and `treasury-execute` if the DAO votes it in. Not `owner` or `payout`. Consent and
 proposal votes may take the DAO's voting period (at most 7 days). Creation, the grant, freeze and unfreeze are provider
-intents that expire in minutes, so they complete only for a DAO whose vote passes that fast: show `expiresAt`. A DAO
-can also stop its agent without you: a stop it votes on (`https://<host>/confirm/dao/stop/<agent>`) revokes every app's
-consent for the agent and turns its autopilot off. Your calls then answer `forbidden`: read `identity` and ask the DAO
-to consent again.
+intents that expire in minutes, so they complete only for a DAO whose vote passes that fast: show `expiresAt`. A
+signature found once completes on a later read until what the DAO signed expires, never after (410). A DAO can also stop
+its agent without you: a stop it votes on (`https://<host>/confirm/dao/stop/<dao>/<agent>`) revokes every app's consent
+for the agent given before the stop applies, ends consent requests filed by then (their `state` answers 409, whatever
+their vote), and turns its autopilot off. Your calls then answer `forbidden`: read `identity` and file a new consent for
+the DAO's vote. Requests are removed 30 days after they finish, so keep what you need from `state`.
 
 The platform authorizes your app, not a member. Gate each member with the platform's own reading of the DAO's roles:
 
@@ -202,6 +204,9 @@ export function memberMay(account: string, dao: string, policy: DaoPolicy, path:
   return access !== null && mayCall(access, path);
 }
 ```
+
+A DAO's votes are public and permanent: consent terms, each proposal's swaps and amounts, and the strategy a grant
+binds (targets, cost cap, per-run ceiling) appear in its proposals. Tell the DAO before it votes.
 
 Only accounts in the DAO's Group roles are members; Everyone's rights admit no one. `strategy/save` needs a member who
 may change the DAO's policy. Pass `memberVotes` from `access.canVote`.

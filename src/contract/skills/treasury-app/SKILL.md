@@ -137,14 +137,15 @@ export async function daoApprove(app: ReturnType<typeof appClient>, organization
 
 Result: `pending`, then `relayed` with `proposalState` (`approved`). Nothing relays the vote until your server reads
 `state` after it passed: keep reading until it's final. Then `execute(...)` as above. A vote must pass
-before the proposal's `expiresAt`. A swap's signed floor may be out of reach by then: execution is refused
-`not_executable` and the proposal stays approved.
+before the proposal's `expiresAt` and while the DAO consent it is filed under is live. A swap's signed floor may be out
+of reach by then: execution is refused `not_executable` and the proposal stays approved.
 
 Unattended swaps are the DAO's grant vote: the `treasury` grant, prepared with `owner/prepare` and `signer: "dao"`,
-binds the saved strategy. Its proposal says it authorizes swaps without a vote each time. Under it, autopilot runs once
-your app turns it on (`autopilot/enable`), and with `treasury-execute` (only if the DAO voted it into its consent)
-your plans run. Saving another strategy needs a new
-grant vote, and invalidates open proposals.
+binds the saved strategy. Its proposal says it authorizes swaps without a vote each time and names that strategy (its
+digest suffix, targets, cost cap and the autopilot's per-run ceiling); show members the same terms from `strategy/get`
+before they vote. Under it, autopilot runs once your app turns it on (`autopilot/enable`), and with `treasury-execute`
+(only if the DAO voted it into its consent) your plans run. Saving another strategy needs a new grant vote, and
+invalidates open proposals.
 
 ## Common mistakes
 

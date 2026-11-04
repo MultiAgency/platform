@@ -19,7 +19,9 @@ plus each instance's settings file. `.ops/` also holds each executor's `<agent>.
 holds agent connections and their access log (see [agent access](agent-access.md)); `.machine-auth/` holds Treasury
 machine credentials; `.app-access/` holds app service credentials (hashed), owner consents, revocation tombstones (`revoked/`,
 never delete: losing one lets that consent be stored again), held confirm-page actions (`confirm/`, one record per link,
-named by its token's hash, and a `.claim` file once a submission was made; an older build ignores them) and the access log; run `pnpm app-credential check-keys`
+named by its token's hash, and a `.claim` file once a submission was made; an older build ignores them), DAO requests
+(`dao-requests/`, one record per request a DAO votes on: consent, setup, proposal vote or stop; additive, no migration;
+an earlier build can't read some of them and 0.4.1 never looks, see app access, "Rolling back") and the access log; run `pnpm app-credential check-keys`
 on a schedule so a removed owner key ends its consents even when no call observes it. Consents belong to the deployment
 name: a credential issued under an existing deployment name acts on all of its consents, so use a new name for an
 app that shouldn't inherit them; `.hosted/` the hosted agent registry; `.proposals/` holds Treasury proposals (each proposal, the

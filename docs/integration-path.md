@@ -39,10 +39,11 @@ the complete examples, and `treasury-app` covers Treasury proposals.
    gateway, agent servers and simulated provider, and issues the app's credential at startup.
    `test/e2e/stack-app.spec.mjs` is the reference app server.
 
-Status: wallet-owned agents; for DAO-owned agents, consent, proposal votes, the Treasury grant, freeze and unfreeze by
-DAO vote (`read`, `treasury`, opt-in `treasury-execute`; offline- and stack-tested). The `read`, `owner` and `payout` scopes are mainnet-observed
-on platform staging (2026-10-28, 2026-10-30) through the platform's own stand-in app; `treasury` and `treasury-execute`
-are offline- and stack-tested. No production host serves `/apps/v1` yet. Details: [app access](app-access.md).
+Status: wallet-owned agents; for DAO-owned agents, consent, proposal votes and the Treasury grant by DAO vote (`read`,
+`treasury`, opt-in `treasury-execute`; offline- and stack-tested), and freeze and unfreeze by DAO vote (offline-tested).
+The `read`, `owner` and `payout` scopes are mainnet-observed on platform staging (2026-10-28, 2026-10-30) through the
+platform's own stand-in app; `treasury` and `treasury-execute` are offline- and stack-tested. No production host serves
+`/apps/v1` yet. Details: [app access](app-access.md).
 
 ## A browser product on a configured host: `ownerClient`
 

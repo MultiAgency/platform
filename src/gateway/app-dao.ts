@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { DAO_CONSENT_SCOPES, DAO_SETUP_AREAS } from "../contract/app-access.js";
@@ -23,6 +23,10 @@ const DAY = 86_400_000;
 const hex64 = z.string().regex(/^[a-f0-9]{64}$/);
 /** Requests per deployment still waiting for a vote; another is refused until one passes or lapses. */
 export const MAX_PENDING_DAO_REQUESTS = 64;
+/** Requests a deployment may file in a day, whatever their windows: bounds the records a credential can make. */
+export const MAX_DAO_REQUESTS_PER_DAY = 256;
+/** How long a finished request (completed, stopped, lapsed or expired) is kept before it is removed. */
+export const DAO_REQUEST_RETENTION_MS = 30 * DAY;
 
 const common = {
   version: z.literal(1),
@@ -37,7 +41,9 @@ const common = {
 };
 const ConsentRequest = z.strictObject({ ...common, kind: z.literal("consent"), scopes: z.array(AppScope),
   /** The stored consent's id once the signature was found. */
-  consent: hex64.nullable() });
+  consent: hex64.nullable(),
+  /** The DAO stop applied after this request was filed, which ended it: it is never stored, whatever its vote. */
+  stoppedBy: hex64.nullable().optional() });
 /** A vote on a Treasury proposal, under the DAO consent `under`; `relayed` once the signature reached the agent. */
 const VoteRequest = z.strictObject({ ...common, kind: z.literal("proposal"), proposal: z.string(), verdict: z.enum(["approve", "reject"]),
   under: hex64, relayed: z.strictObject({ at: z.number().int(), state: z.string() }).nullable() });
@@ -45,18 +51,26 @@ const VoteRequest = z.strictObject({ ...common, kind: z.literal("proposal"), pro
 const SetupRequest = z.strictObject({ ...common, kind: z.literal("setup"), area: z.enum(DAO_SETUP_AREAS),
   consent: hex64.nullable(), reserved: z.string().nullable() });
 /**
- * A DAO's stop of its agent, filed by anyone and done only by the DAO's vote: every consent naming the agent ID is
- * revoked and its autopilot turned off. No app or deployment is involved (`deployment` and `organization` are empty).
+ * A DAO's stop of its agent, filed by anyone and done only by the DAO's vote: every app consent and consent request
+ * given before it is first applied (`done.at`) is ended, and the agent's autopilot turned off. No app or deployment is involved (`deployment` and
+ * `organization` are empty). `lapsed`: its window closed and no signature was found then, so a new one may be filed.
  */
 const StopRequest = z.strictObject({ ...common, kind: z.literal("stop"),
-  done: z.strictObject({ at: z.number().int(), revoked: z.array(hex64), autopilotOff: z.boolean() }).nullable() });
+  done: z.strictObject({ at: z.number().int(), revoked: z.array(hex64), autopilotOff: z.boolean() }).nullable(),
+  lapsed: z.boolean().optional() });
 const Request = z.discriminatedUnion("kind", [ConsentRequest, VoteRequest, SetupRequest, StopRequest]);
 export type DaoRequest = z.infer<typeof Request>;
 export type DaoConsentRequest = z.infer<typeof ConsentRequest>;
 export type DaoVoteRequest = z.infer<typeof VoteRequest>;
 export type DaoSetupRequest = z.infer<typeof SetupRequest>;
 export type DaoStopRequest = z.infer<typeof StopRequest>;
-const settled = (r: DaoRequest) => r.kind === "proposal" ? r.relayed !== null : r.kind === "stop" ? r.done?.autopilotOff === true : r.consent !== null;
+const settled = (r: DaoRequest) => r.kind === "proposal" ? r.relayed !== null : r.kind === "stop" ? r.done?.autopilotOff === true || r.lapsed === true
+  : r.consent !== null || (r.kind === "consent" && !!r.stoppedBy);
+/**
+ * Nothing more can happen to it: completed, stopped, lapsed, or its window or text expired with no signature. A stop is
+ * finished only once applied or lapsed: a vote that passed is honoured whenever its page is next opened.
+ */
+const finished = (r: DaoRequest, now: number) => settled(r) || (r.kind !== "stop" && ((!r.signature && now >= r.votingUntil) || now >= r.expiresAt));
 export const publicDaoRequest = ({ id, dao, organization, agent, agentId, scopes, expiresAt, votingUntil, description }: DaoConsentRequest) =>
   ({ id, dao, organization, agent, agentId, scopes, expiresAt, votingUntil, hash: id, description });
 export const publicDaoSetup = ({ id, dao, organization, area, expiresAt, votingUntil, description }: DaoSetupRequest) =>
@@ -145,8 +159,15 @@ export function daoRequestPage(record: DaoRequest, now = Date.now()) {
   const recomputed = nep413Hash(record.message, Buffer.from(record.nonce, "base64"), record.host).toString("hex") === record.id;
   const state = record.kind === "proposal" ? (record.relayed ? `relayed to the agent (the proposal was ${record.relayed.state})` : null)
     : record.kind === "stop" ? (record.done ? `stopped: ${record.done.revoked.length} consent(s) revoked, autopilot ${record.done.autopilotOff ? "off" : "not yet confirmed off"}` : null)
-    : record.consent ? (record.kind === "setup" ? `the agent ${record.reserved} was reserved` : "the consent was stored") : null;
-  const status = state ?? (now >= record.votingUntil ? "the vote window closed; nothing was stored" : `waiting for the vote until ${new Date(record.votingUntil).toISOString()}`);
+    : record.consent ? (record.kind === "setup" ? `the agent ${record.reserved} was reserved` : "the consent was stored")
+    : record.kind === "consent" && record.stoppedBy ? "ended by the DAO's stop of the agent; it is never stored" : null;
+  const signed = record.kind === "stop" ? "signed; applied when the stop page is next opened"
+    : now >= record.expiresAt ? "signed, but its text has expired; nothing more is done"
+    : `signed; completed when the app next reads it, until ${new Date(record.expiresAt).toISOString()}`;
+  const status = state ?? (record.signature ? signed
+    : record.kind === "stop" && !record.lapsed && now >= record.votingUntil ? "the vote window closed; the stop page looks once more for a passed vote when next opened"
+    : now >= record.votingUntil ? "the vote window closed with no signature found; nothing was done"
+    : `waiting for the vote until ${new Date(record.votingUntil).toISOString()}`);
   return page("DAO vote check", `<h1>What this DAO vote signs</h1>
 <table>${row("Request", KINDS[record.kind])}${row("DAO", record.dao)}${record.deployment ? row("App deployment", record.deployment) : ""}${record.organization ? row("Organization", record.organization) : ""}${record.agent ? row("Agent", `${record.agent} (${record.agentId})`) : ""}${row("State", status)}</table>
 <h2>The exact text</h2><p>Signed with NEP-413 for recipient <code>${escape(record.host)}</code>, nonce <code>${escape(record.nonce)}</code>.</p>
@@ -196,17 +217,20 @@ export function daoVoteDescription(request: Pick<DaoVoteRequest, "message" | "vo
 export const daoStopText = ({ host, dao, agent, agentId }: { host: string; dao: string; agent: string; agentId: string }) => [
   `Stop MultiAgency agent ${agent} (${agentId}) on ${host}`,
   `Owner: ${dao}`,
-  "End every app consent for this agent, and turn its autopilot off.",
+  "End every app consent for this agent given before this stop is applied, and turn its autopilot off.",
 ].join("\n");
 
+/** The public page where anyone files a DAO's stop of its agent, and where a passed stop is applied. */
+export const stopUrl = ({ host, dao, agent }: { host: string; dao: string; agent: string }) => `https://${host}/confirm/dao/stop/${dao}/${agent}`;
+
 /** What a stop's proposal says. */
-export function daoStopDescription(request: Pick<DaoStopRequest, "agent" | "agentId" | "votingUntil" | "id" | "host">) {
+export function daoStopDescription(request: Pick<DaoStopRequest, "agent" | "agentId" | "dao" | "votingUntil" | "id" | "host">) {
   return [
-    `* Proposal Action: Stop agent ${request.agent} (${request.agentId}): end every app consent for it and turn its autopilot off`,
-    `* Signing window closes: ${new Date(request.votingUntil).toISOString()} (approve before then, or nothing stops)`,
+    `* Proposal Action: Stop agent ${request.agent} (${request.agentId}): end every app consent for it given before this stop is applied and turn its autopilot off`,
+    `* Signing window closes: ${new Date(request.votingUntil).toISOString()} (a vote passed by then applies when the stop page is next opened)`,
     `* Signs: NEP-413 hash ${request.id} for ${request.host} as the agents' owner (v1.signer, path agent-owner)`,
     `* Check before voting: ${checkUrl(request)} (the exact text, and its hash recomputed)`,
-    `* Notes: Filed by the MultiAgency platform with no app involved. Once it passes, open https://${request.host}/confirm/dao/stop/${request.agent} to apply it.`,
+    `* Notes: Filed by the MultiAgency platform with no app involved. Once it passes, open ${stopUrl(request)} to apply it.`,
   ].join(" <br>");
 }
 
@@ -229,10 +253,26 @@ export class DaoRequests {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
     return files.map(file => this.read(file.slice(0, -5))).filter(r => r !== null);
   }
-  /** Throws what `file` would refuse with, so a caller can check before reading the chain. */
+  /**
+   * Throws what `file` would refuse with, so a caller can check before reading the chain. Removes requests finished more
+   * than `DAO_REQUEST_RETENTION_MS` ago first (`access.jsonl` keeps their history), so the records stay bounded.
+   */
   admit(deployment: string, now = Date.now()) {
-    if (this.list().filter(r => r.deployment === deployment && !settled(r) && r.votingUntil > now).length >= MAX_PENDING_DAO_REQUESTS)
+    const kept = this.prune(now).filter(r => r.deployment === deployment);
+    if (kept.filter(r => !settled(r) && r.votingUntil > now).length >= MAX_PENDING_DAO_REQUESTS)
       throw new BadRequest("This deployment has too many DAO requests waiting for a vote. Let some pass or lapse first.");
+    if (kept.filter(r => r.createdAt > now - DAY).length >= MAX_DAO_REQUESTS_PER_DAY)
+      throw new BadRequest(`This deployment filed ${MAX_DAO_REQUESTS_PER_DAY} DAO requests in the last day. File again later.`);
+  }
+  /** Removes finished requests past retention; answers the rest. */
+  private prune(now: number) {
+    return this.list().filter(r => {
+      // Its last moment: the vote window, a stop's applying, or the expiry a recorded signature completes until.
+      const last = Math.max(r.votingUntil, r.kind === "stop" ? r.done?.at ?? 0 : r.signature ? r.expiresAt : 0);
+      if (!finished(r, now) || now - last < DAO_REQUEST_RETENTION_MS) return true;
+      rmSync(join(this.dir, `${r.id}.json`), { force: true });
+      return false;
+    });
   }
   private write(record: DaoRequest) {
     privateDirectory(this.dir);
@@ -288,6 +328,28 @@ export class DaoRequests {
     const record = this.read(id);
     if (record?.kind !== "stop") throw new Error(`No DAO stop request ${id}`);
     return this.write({ ...record, done }) as DaoStopRequest;
+  }
+  /** A stop whose window closed with no signature found, looked for once more: a new one may now be filed. */
+  lapse(id: string) {
+    const record = this.read(id);
+    if (record?.kind !== "stop") throw new Error(`No DAO stop request ${id}`);
+    return this.write({ ...record, lapsed: true }) as DaoStopRequest;
+  }
+  /**
+   * Marks the stop's agent's consent requests filed by `cutoff` and not yet stored, so they never are. Requests filed
+   * after it are the DAO's later choice and stay as they are.
+   */
+  endFiledBefore(stop: DaoStopRequest, cutoff: number) {
+    for (const r of this.list())
+      if (r.kind === "consent" && r.host === stop.host && r.agent === stop.agent && r.createdAt <= cutoff && !r.consent && !r.stoppedBy)
+        this.write({ ...r, stoppedBy: stop.id });
+  }
+  /**
+   * A stop of this agent that ends a consent request filed at `filedAt`: one applied since (its cutoff is later), or one
+   * the DAO signed that isn't applied yet, whose cutoff will be.
+   */
+  stopEnding(agent: string, host: string, filedAt: number) {
+    return this.stops(agent, host).find(s => s.done ? s.done.at >= filedAt : !!s.signature);
   }
   relayed(id: string, state: string, now = Date.now()) {
     const record = this.read(id);

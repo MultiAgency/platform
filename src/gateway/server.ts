@@ -4,7 +4,7 @@ import { serveOwnerFrontend } from "./owner-frontend.js";
 import { providedCapabilities } from "../contract/owner-capabilities.js";
 import { resolveMachineManagement } from "./machine-authority.js";
 import { machineRoutes } from "./machine-routes.js";
-import { APP_ROOT, appRoutes, confirms } from "./app-routes.js";
+import { APP_ROOT, appRoutes, appSetupAreas, confirms } from "./app-routes.js";
 import { confirmAssets, confirmRoutes } from "./app-confirm.js";
 import { daoStopRoutes } from "./dao-stop.js";
 import { payeeBase, supplierCookie, supplierEnvironment, payeeRoute } from "./hosted-supplier.js";
@@ -168,10 +168,11 @@ const server = createServer(async (req, res) => {
     if (await machineRoutes(req, res, pathname, signingHost, selected, () => auth.account(req), () => stopping)) return;
     if (await confirmRoutes(req, res, pathname, signingHost, confirms, APP_ROOT, selected, DIST, () => stopping)) return;
     if (await daoStopRoutes(req, res, pathname, signingHost, APP_ROOT, selected, () => stopping)) return;
+    const setupAreas = appSetupAreas(config.appSetup, site ?? undefined);
     if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, config.appSetup.length ? { setup: async ({ owner, kind, area, deployment, organization }) => {
-      if (!config.appSetup.includes(area) || (site && !site.hostedAreas?.includes(area))) throw new Error("This area is not available on this host");
+      if (!setupAreas.includes(area)) throw new Error("This area is not available on this host");
       return await reserveHosted({ owner, kind, area }, { deployment, organization });
-    }, setupAreas: config.appSetup.filter(area => !site || site.hostedAreas?.includes(area)) } : {})) return;
+    }, setupAreas } : {})) return;
     // Anything under /apps/ or /confirm/ that neither answered: never the file server's pages.
     if (config.headless) return json(res, 404, { error: "Not found" });
 

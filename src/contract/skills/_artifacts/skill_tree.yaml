@@ -20,7 +20,7 @@ skills:
     domain: 'app'
     path: skills/app-server/SKILL.md
     requires: ['getting-started', 'owner-workflows']
-    sources: ['MultiAgency/platform:src/contract/app-client.ts', 'MultiAgency/platform:src/contract/app-access.ts', 'MultiAgency/platform:src/contract/app-consent.ts', 'MultiAgency/platform:docs/agent-access.md']
+    sources: ['MultiAgency/platform:src/contract/app-client.ts', 'MultiAgency/platform:src/contract/app-access.ts', 'MultiAgency/platform:src/contract/app-consent.ts', 'MultiAgency/platform:docs/app-access.md']
   - name: 'Treasury app'
     slug: 'treasury-app'
     domain: 'app'

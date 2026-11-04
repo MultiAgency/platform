@@ -29,7 +29,7 @@ the chain reports removed; exits non-zero if any lookup went unanswered).
 | `POST /apps/v1/o/<organization>/a/<agent>/rpc/<procedure>` | Forwarded to the agent with actor `app:<deployment>:<organization>` |
 | `POST /apps/v1/dao-setups`, `/dao-consents` with `{ message }`; `/dao-votes` with `{ organization, agent, proposal, verdict }` | `201 { request, transactions }`: the DAO's proposal for a member to file (`proposal`, or `proposalAndVote`) |
 | `GET /confirm/dao/<hash>` (public, no credential) | The voter check page: the request's exact text, nonce and host, and whether its hash recomputes; plain HTML, no script |
-| `GET /apps/v1/dao-setups/<hash>`, `/dao-consents/<hash>`, `/dao-votes/<hash>` | `pending` until the DAO's signature is found; then `reserved`, `signed` or `relayed` (410 once its vote window closed) |
+| `GET /apps/v1/dao-setups/<hash>`, `/dao-consents/<hash>`, `/dao-votes/<hash>` | `pending` until the DAO's signature is found; then `reserved`, `signed` or `relayed` (410 once its vote window closed with no signature found, or once what it signed expired; 409 for a consent a DAO stop ended) |
 
 The consent text is exactly `consentMessage({ host, deployment, organization, owner, agent, agentId, scopes, expiresAt })`
 (`src/contract/app-consent.ts`), signed with NEP-413 for recipient the host, with a 32-byte nonce and no callback URL.
@@ -119,9 +119,9 @@ gateway reads each prepared reply before releasing it:
   `approve:{approval_id}:{wallet_pubkey}:{request_hash}` (recorded 2026-10-11 on a payout agent,
   `.agents/skills/near-agent-api`). So the owner sees the terms only where the app shows `payment.terms`, and can't
   catch that swap in the wallet.
-- Refused before forwarding: `signer: "dao"`, `agent_create` with payees, other owner actions (such as
-  `agent_delete`), and anything that doesn't parse as the agent server would read it (oRPC's `RPCSerializer`, then
-  `ownerPrepareInput`).
+- Refused before forwarding, under a wallet's consent: `signer: "dao"`, `agent_create` with payees, other owner actions
+  (such as `agent_delete`), and anything that doesn't parse as the agent server would read it (oRPC's `RPCSerializer`,
+  then `ownerPrepareInput`).
 
 Before 2026-10-27 the app received the NEP-366 intents for creation, freeze and unfreeze and had the owner's wallet sign
 them on its own page. A dishonest app could have handed the wallet another delegate action and relayed it on-chain
@@ -164,11 +164,32 @@ the `treasury` grant, freeze and unfreeze (`owner/prepare` with `signer: "dao"`,
 the agent submits the signature). A DAO sets up a hosted Treasury agent by vote too (`POST /apps/v1/dao-setups`,
 then `agent_create` with `signer: "dao"` under its setup consent, a second vote within the intent's minutes). A
 host that doesn't set up Treasury agents refuses it before filing anything, so no vote is spent on it.
-**A DAO's own stop, with no app:** anyone opens `/confirm/dao/stop/<agent>`. The page files a stop the DAO votes on, or
-shows the one already open, with the exact text, its hash, and the proposal to file (Trezu's custom function call, or the
-whole transaction). Once the vote has passed, opening the page again revokes every consent naming the agent ID, from
-every app, and turns the agent's autopilot off. It only removes authority. Offline- and stack-tested (simulated DAO votes); no host serves it yet. See
+**A DAO's own stop, with no app:** anyone opens `/confirm/dao/stop/<dao>/<agent>` (GET only; a pair this host doesn't
+serve answers 404 before anything is read; at most 60 opens an hour per address and agent). The page files a stop the
+DAO votes on, or shows the one already open, with the exact text, its hash, and the proposal to file (Trezu's custom
+function call, or the whole transaction). Once the vote has passed, opening the page again applies it, and its cutoff is
+that first moment: it revokes every app consent for the agent ID given before then, marks every consent request filed by
+then so it is never stored, whatever its vote, and turns the agent's autopilot off. So a stop filed early, by anyone,
+still ends whatever was given before it applies. Applied again until autopilot is confirmed off, it keeps its first
+cutoff: a consent the DAO gives after the stop applied stays live. A passed stop is honoured whenever the page is next
+opened, even after its window. Until then, autopilot and the consents it will end stay live. It only removes authority.
+Offline- and stack-tested (simulated DAO votes); no host serves it yet. See
 [enforcement](enforcement.md#dao-owners-through-apps-offline--and-stack-tested).
+
+Rolling back: records written from 0.5.0 on carry fields that earlier builds refuse to read, and one refused record
+makes every app route answer an error:
+- **DAO consents** in `.app-access/consents/` carry `signer: "dao"` and `filedAt`. Every earlier build refuses
+  `filedAt`, and 0.4.1 and earlier also refuse `signer`. Move the files whose record has `"signer":"dao"` out of
+  `consents/` before rolling back (losing DAO access only). Wallet consents are written as before and stay readable.
+- **DAO requests** in `.app-access/dao-requests/`: a stop's `lapsed` and a consent request's `stoppedBy` are refused by
+  088239e and before. Remove those fields, or keep the directory out of the earlier build (0.4.1 never reads it). Stop
+proposals filed by those earlier builds link `/confirm/dao/stop/<agent>`, which now answers 404: open
+`/confirm/dao/stop/<dao>/<agent>`, which shows the same open stop.
+
+DAO requests are bounded per deployment: at most 64 waiting for a vote and 256 filed a day. A finished one (completed,
+ended by a stop, lapsed with no signature found, or past what it signed) is removed 30 days later; `access.jsonl` keeps
+its history, and reading it after that answers 404. A signature found once is recorded and completes the request on a
+later read until what the DAO signed expires (the consent's, setup's or proposal's `expiresAt`), never after.
 
 Limits: DAO owners as above (Treasury only; no `payout` or `owner`); payout requests
 pay confidential USDC through `intents`, or withdraw wNEAR (arriving as native NEAR) or USDC to an agreed NEAR account

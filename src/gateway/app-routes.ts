@@ -20,7 +20,7 @@ import type { RouterClient } from "@orpc/server";
 import { proposalText, proposalView } from "../contract/treasury-proposals.js";
 import type { Router } from "../router.js";
 import { agentOrigin } from "./agent-origin.js";
-import { chainDaoVotes, daoConsent, type DaoRequest, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
+import { chainDaoVotes, daoConsent, type DaoConsentRequest, type DaoRequest, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
 import { AuthorityUnanswered, chainDaoOwner, type DaoOwnerReads, resolveDaoAuthority, resolveWalletAuthority } from "./machine-authority.js";
 import { forwardRpc } from "./rpc-proxy.js";
 
@@ -39,6 +39,13 @@ const daoVoteFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0
 const agentCall = (agent: AgentEntry, deployment: string, host: string, organization: string, consent: string, live: string[]): RouterClient<Router> =>
   createORPCClient(new RPCLink({ origin: agentOrigin(agent), url: "/rpc", headers: { "x-gateway-actor": `app:${deployment}:${organization}`,
     "x-gateway-consent": consent, "x-gateway-host": host.toLowerCase(), "x-gateway-consents": live.join(",") } }));
+
+/**
+ * The areas an app may set up hosted agents for on a host: its config's `appSetup`, narrowed on a demo site to the
+ * site's `hostedAreas`. One rule for both the reservation and the refusal before a DAO's vote is filed.
+ */
+export const appSetupAreas = (appSetup: readonly string[], site?: { hostedAreas?: readonly string[] }) =>
+  appSetup.filter(area => !site || (site.hostedAreas ?? []).includes(area));
 
 /** Reserves (or finds) and starts the hosted agent for an owner (a wallet, or a DAO by its vote), area, app deployment and Organization; throws to refuse. */
 export type HostedSetup = (input: { owner: string; kind: "wallet" | "dao"; area: "treasury" | "payables"; deployment: string; organization: string }) => Promise<AgentEntry>;
@@ -93,9 +100,11 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   /**
    * The DAO's signature for a request: the one recorded when it was found, or searched for now while its vote window is
    * open, verified against the DAO's derived key over the exact hash and recorded before anything is done with it.
-   * Answers the request itself (410, 503 or `pending`) and returns null when there is none to act on.
+   * Answers the request itself (410, 503 or `pending`) and returns null when there is none to act on. Nothing completes
+   * once the signed text has expired (its `expiresAt`: the consent's, the setup's or the proposal's), whatever was found.
    */
   const daoSignature = async (record: DaoRequest, pending: () => object): Promise<Buffer | null> => {
+    if (Date.now() >= record.expiresAt) { json(res, 410, { error: `What the DAO signed expired at ${new Date(record.expiresAt).toISOString()}. Nothing was done; file it again.` }); return null; }
     if (record.signature) return Buffer.from(record.signature, "base64");
     if (Date.now() >= record.votingUntil) { json(res, 410, { error: `The DAO's vote didn't pass before ${new Date(record.votingUntil).toISOString()}. Nothing was done; file it again.` }); return null; }
     let found: Buffer | null;
@@ -109,6 +118,13 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   };
   /** The chain reads above wait: a credential revoked meanwhile ends the request before anything is stored or relayed. */
   const stillAuthorized = () => credentials.authenticate(req.headers.authorization, host) !== null;
+  /**
+   * Whether a DAO stop of the agent ended this consent request: marked when the stop was applied, or a stop applied since
+   * it was filed, or signed and not applied yet. Checked again right before storing, with no wait between, and a stop's
+   * own pass revokes every consent given before it, so a consent filed before a stop is never left live once it applies.
+   */
+  const endedByStop = (record: DaoConsentRequest) => !!record.stoppedBy || !!daoRequests.stopEnding(record.agent, record.host, record.createdAt);
+  const stoppedAnswer = () => json(res, 409, { error: "The DAO stopped this agent after this consent was filed. Nothing was stored; file a new consent for the DAO's vote." });
   /** A DAO-owned agent this app reaches under a live DAO consent with `treasury`, as it is now; or why not. */
   const daoTreasury = async (name: string, organization: string) => {
     const agent = selected.find(a => a.name === name && reachable(a, credential.deployment, organization));
@@ -118,7 +134,9 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     const covering = consents.live({ deployment: credential.deployment, host, organization, agent: name })
       .filter(c => c.signer === "dao" && c.owner === agent.owner && c.agentId === authority.agentId && c.scopes.includes("treasury"));
     if (!covering.length) return "No live DAO consent with treasury covers this Organization and agent";
-    return { agent, authority, consent: covering[0]!, live: covering.map(c => c.id) };
+    // The longest-lived one, so a vote filed under it has the most time to pass.
+    const consent = covering.reduce((best, c) => c.expiresAt > best.expiresAt ? c : best);
+    return { agent, authority, consent, live: covering.map(c => c.id) };
   };
 
   // What the owner signs names the agent's current provider ID, so the app reads it here first.
@@ -156,6 +174,9 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
       if (!authority) { json(res, 503, { error: "Whether this agent is already created couldn't be checked. Nothing was stored." }); return true; }
       if (authority.agentId !== null) { json(res, 409, { error: "This owner's agent for that area is already created. Ask the owner to sign a consent for it." }); return true; }
     }
+    // Reserving and the re-read above wait: a credential revoked or a stop begun meanwhile stores nothing.
+    if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was stored; send the same setup again." }); return true; }
+    if (!stillAuthorized()) { json(res, 403, { error: "Access ended before storing. Nothing was stored." }); return true; }
     const record = consents.store(setupConsent(verified, agent.name));
     appendSynced(join(ROOT, "access.jsonl"), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
       event: "setup", consent: record.id, organization: record.organization, owner: record.owner, agent: record.agent, area: verified.setup.area });
@@ -218,6 +239,8 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     if (record?.kind !== "consent" || record.deployment !== credential.deployment || record.host !== host.toLowerCase()) { json(res, 404, { error: "No such DAO consent request" }); return true; }
     const settled = record.consent && consents.list({ deployment: credential.deployment }).find(c => c.id === record.consent);
     if (settled) { json(res, 200, { state: "signed", consent: publicConsent(settled) }); return true; }
+    // Ended before anything is read or recorded for it.
+    if (endedByStop(record)) { stoppedAnswer(); return true; }
     const signature = await daoSignature(record, () => ({ state: "pending", request: publicDaoRequest(record) }));
     if (!signature) return true;
     const agent = selected.find(a => a.name === record.agent && reachable(a, credential.deployment, record.organization));
@@ -225,6 +248,8 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     if (!authority || authority.agentId !== record.agentId || authority.signer.public_key !== record.signer.public_key) {
       json(res, 409, { error: "The DAO signed, but the agent is no longer that DAO's agent with that identity. Nothing was stored." }); return true;
     }
+    // The chain reads above wait: a stop applied meanwhile ends it too. The record is read again for its mark.
+    if (endedByStop((daoRequests.read(record.id) ?? record) as DaoConsentRequest)) { stoppedAnswer(); return true; }
     const consent = daoConsent(record, signature);
     consents.admit(consent);
     if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was stored; read again." }); return true; }
@@ -294,6 +319,9 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
       if (!authority) { json(res, 409, { error: "The reserved agent isn't owned by this DAO's derived account now. Nothing was stored." }); return true; }
       if (authority.agentId !== null) { json(res, 409, { error: "This DAO's agent for that area is already created. File the DAO's consent for it." }); return true; }
     }
+    // Reserving and the re-read above wait: a credential revoked or a stop begun meanwhile stores nothing.
+    if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was stored; read again." }); return true; }
+    if (!stillAuthorized()) { json(res, 403, { error: "Access ended before storing. Nothing was stored." }); return true; }
     const saved = consents.store(consent(agent.name));
     daoRequests.reserved(record.id, saved.id, agent.name);
     appendSynced(join(ROOT, "access.jsonl"), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
@@ -315,8 +343,9 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     try { proposal = proposalView.parse(await agentCall(agent, credential.deployment, host, organization, consent.id, live).proposals.get({ id })); }
     catch { json(res, 409, { error: "The agent didn't answer this proposal for this app. Nothing was filed." }); return true; }
     if (proposal.state !== "proposed") { json(res, 409, { error: `This proposal is ${proposal.state}; the DAO can't vote on it now. Nothing was filed.` }); return true; }
-    const validUntil = Date.parse(proposal.expiresAt);
-    if (!Number.isFinite(validUntil) || validUntil <= Date.now() + 60_000) { json(res, 409, { error: "This proposal expires too soon for a vote. Nothing was filed." }); return true; }
+    // The vote must pass while both the proposal and the consent it is relayed under are live.
+    const validUntil = Math.min(Date.parse(proposal.expiresAt), consent.expiresAt);
+    if (!Number.isFinite(validUntil) || validUntil <= Date.now() + 60_000) { json(res, 409, { error: "This proposal, or the consent it would be relayed under, expires too soon for a vote. Nothing was filed." }); return true; }
     daoRequests.admit(credential.deployment);
     const message = proposalText(proposal, verdict), nonce = randomBytes(32), hash = nep413Hash(message, nonce, host.toLowerCase()).toString("hex");
     let since: number, next: number | null;

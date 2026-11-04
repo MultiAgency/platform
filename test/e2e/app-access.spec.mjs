@@ -377,9 +377,9 @@ test("a DAO consents to an app by its own vote; its grant vote lets autopilot ru
     expect(value(await agent.call('proposals/execute', { id: proposal.id })).state, 'asked again, nothing is sent').toBe('executed');
     expect(stack.portfolio.swaps.length, 'one swap').toBe(1);
 
-    // The DAO stops the agent by its own vote, with no app: every consent ends and autopilot turns off.
+    // The DAO stops the agent by its own vote, with no app: every consent filed before the stop ends and autopilot turns off.
     expect(value(await agent.call('autopilot/enable', { expectedDigest: strategy.digest })).on).toBe(true);
-    const stopPage = `${stack.dashboard}/confirm/dao/stop/portfolio`;
+    const stopPage = `${stack.dashboard}/confirm/dao/stop/${DAO}/portfolio`;
     const filedStop = await (await localFetch(stopPage)).text();
     const stopHash = filedStop.match(/Hash <code>([a-f0-9]{64})<\/code>/)[1];
     expect(value(await agent.call('overview')), 'nothing changes before the vote').toBeTruthy();

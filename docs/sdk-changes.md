@@ -6,7 +6,7 @@ version, so a package staged or packed from changed sources never carries a rele
 commit dates the heading, before its candidate runs; staging copies this file as it is. Under 0.x, any
 public-interface change bumps at least the minor version.
 
-## 0.5.0
+## 0.5.0 (2026-11-04)
 
 - **DAO consent** (added; offline- and stack-tested, not on any host yet): a DAO-owned agent's consent is signed by the DAO's
   own vote. `app.daoConsents.file(message)` files the canonical consent text and answers the proposal a member files
@@ -23,7 +23,8 @@ public-interface change bumps at least the minor version.
   answers `relayed` with the proposal's state. Under a DAO consent with `treasury`, `owner/prepare` with `signer: "dao"`
   prepares `DAO_APP_ACTIONS` (the `treasury` grant, freeze, unfreeze): the app gets the proposal a member files, never an
   intent; the agent submits the DAO's signature once the vote passes, and the app follows `owner/status`. Those are
-  provider intents that expire in minutes, so only a DAO whose vote passes within `expiresAt` completes them.
+  provider intents that expire in minutes, so only a DAO whose vote passes within `expiresAt` completes them. The grant
+  is stack-tested; freeze and unfreeze by DAO vote are offline-tested only.
 - **DAO setup** (added; offline- and stack-tested): `app.daoSetups.file(message)` files a DAO's setup text
   (`setupMessage` with the DAO as owner, area within `DAO_SETUP_AREAS`, at most 7 days) for its vote, refused (403)
   before anything is filed on a host that doesn't set up that area;
@@ -34,16 +35,30 @@ public-interface change bumps at least the minor version.
   `accessOf` and `mayCall`); treasury-app gains "A DAO-owned treasury" (proposal votes; the grant vote authorizes
   unattended swaps).
 - **DAO stop** (added; no SDK change): a DAO stops its agent by its own vote, with no app. Anyone opens
-  `https://<host>/confirm/dao/stop/<agent>`, which files the stop or shows the one open. Once the vote has passed,
-  opening it again revokes every consent naming the agent ID, from every app, and turns its autopilot off. An app's
-  calls then answer `forbidden`.
+  `https://<host>/confirm/dao/stop/<dao>/<agent>`, which files the stop or shows the one open. Once the vote has passed,
+  opening it again applies it: it revokes every app consent for the agent given before then, ends every consent request
+  filed by then (its `daoConsents.state` answers 409, whatever its vote), and turns its autopilot off. Consents the DAO
+  gives after the stop applied stay live. An app's calls under an ended consent answer `forbidden`. Records from 0.5.0
+  on can't be read by earlier builds: see app access, "Rolling back".
+- **DAO requests** (behaviour): a signature found once completes the request on a later read only until what the DAO
+  signed expires (410 after). A vote must pass while the DAO consent it is filed under is live, and is filed under the
+  longest-lived one. A deployment files at most 256 DAO requests a day; a finished request is removed 30 days later, and
+  its `state` then answers 404.
+- **Treasury grant proposals** for a DAO name the strategy they bind (digest suffix and terms), and no longer point
+  members to a dashboard: they compare the hash with the `v1.signer` call.
 - **Voter check page** (added; no SDK change): each DAO request's proposal description links to
   `https://<host>/confirm/dao/<hash>`, a public page showing the exact text the DAO's key signs and its NEP-413 hash
   recomputed. Show members that link.
-- **DAO roles** (added): `accessOf`, `groupOf`, `permits`, and the `DaoPolicy`, `DaoRole` and `Owner` types, the platform's
-  own reading of Sputnik roles (moved from the gateway, unchanged). An app reads the DAO's `get_policy` and gates each
-  member's calls with `mayCall(accessOf(account, owner), path)`: Group members only, `strategy/save` only for a member
-  who may change the DAO's policy. The platform doesn't check members under a DAO's consent; the app does.
+- **Also added to the SDK**: `AppSigner`, `DAO_APP_ACTIONS`, `appMayAskDao`, `AppDaoAction`, and the response schemas
+  `appDaoConsentRequest`/`Filed`/`State`, `appDaoVoteRequest`/`Filed`/`State`, `appDaoSetupRequest`/`Filed`/`State`.
+  `AppInputs["owner/prepare"]` is now `{ action: AppOwnerAction; signer: "wallet" } | { action: AppDaoAction; signer:
+  "dao" }`: code that assumed `signer: "wallet"` narrows on `signer` first.
+- **Behaviour a 0.4.1 app sees**: `GET /apps/v1/agents/<agent>` answers a DAO-owned agent (200, `signer: "dao"`) where it
+  answered 404. `POST /apps/v1/setup` still answers 409 for a DAO owner, now naming `/apps/v1/dao-setups`.
+- **DAO roles** (added): `accessOf`, `groupOf`, `permits`, and the `DaoPolicy`, `DaoRole` and `ConfiguredOwner` types,
+  the platform's own reading of Sputnik roles (moved from the gateway, unchanged). An app reads the DAO's `get_policy`
+  and gates each member's calls with `mayCall(accessOf(account, owner), path)`: Group members only, `strategy/save` only
+  for a member who may change the DAO's policy. The platform doesn't check members under a DAO's consent; the app does.
 
 ## 0.4.1 (2026-11-03)
 

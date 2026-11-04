@@ -749,3 +749,17 @@ test("app access state is written only into a directory no one else can read", t
     intent: { standard: "nep366", payload: {} }, signer: { type: "near", account_id: "owner.near", public_key: "ed25519:k" } }), /must be private/);
   assert.equal(readdirSync(join(dir, "confirm")).length, 0, "nothing written");
 });
+
+test("a setup stores no consent when access ends or a stop begins while its agent is being reserved", async t => {
+  const { port, state, staging } = await routeHarness(t);
+  const body = await signed(setupMessage(setupFields()));
+  state.providerId = null;
+  const reserve = (during: () => void): HostedSetup => async input => { during(); return { name: "payout", owner: input.owner, port: 0, area: input.area, executor: true }; };
+  state.setup = reserve(() => { state.stopping = true; });
+  assert.equal((await call(port, "/apps/v1/setup", "POST", staging, body)).status, 503, "a stop begun meanwhile");
+  state.stopping = false;
+  const credentials = new AppCredentials(".app-access");
+  state.setup = reserve(() => { for (const c of credentials.list()) if (c.deployment === "staging") credentials.revoke(c.id); });
+  assert.equal((await call(port, "/apps/v1/setup", "POST", staging, body)).status, 403, "a credential revoked meanwhile");
+  assert.equal(new AppConsents(".app-access").list({}).length, 0, "nothing stored");
+});

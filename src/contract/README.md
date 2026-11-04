@@ -37,8 +37,8 @@ An app's server reaches agents under `/apps/v1` and never from a browser: the se
 owner signs `consentMessage(...)` (or `setupMessage(...)` for a hosted agent) with NEP-413 in the app; the server submits
 it. A consent reaches the listed reads (`APP_READS`) and owner actions (`APP_OWNER`) and, for `owner/prepare`, only
 actions the owner can read when signing or that platform code builds entirely (`AppOwnerAction`); everything else is
-refused. The app never asks an owner to sign the platform's sign-in text. See the platform's `docs/agent-access.md`,
-"App access". No production MultiAgency host serves the `/apps/v1` routes yet; the operator runs them on a staging host
+refused. The app never asks an owner to sign the platform's sign-in text. See the platform's `docs/app-access.md`.
+No production MultiAgency host serves the `/apps/v1` routes yet; the operator runs them on a staging host
 for its own tests. Build against the SDK repository's local stack (`pnpm test:e2e:stack --app <deployment>`), with a
 simulated provider, chain and wallet.
 

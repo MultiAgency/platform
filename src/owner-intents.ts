@@ -11,6 +11,9 @@ import { agentId, ENV_FILE, executes, saveEnv } from "./env.js";
 import { appendSynced, writeAtomic } from "./synced.js";
 
 import { type GrantLabel, grantRequest, promoteGrantToken, stageGrantToken } from "./grants.js";
+import { ASSETS } from "./contract/assets.js";
+import { loadStrategy } from "./strategy.js";
+import { type Strategy, strategyLabelSuffix } from "./strategy-digest.js";
 import { ownerRequests, type PolicyChanges, policyChange } from "./owner-requests.js";
 import type { AgentRole } from "./policy.js";
 import { daoPolicy, nextProposalId } from "./chain.js";
@@ -316,8 +319,11 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
   const daoId = process.env.TREASURY_ACCOUNT!;
   // The intent is already held: a failed read only drops the one-click filings, leaving filing in Trezu.
   const [policy, nextId] = await Promise.all([daoPolicy(daoId).catch(() => null), nextProposalId(daoId).catch(() => null)]);
-  const unattended = request.type === "grant_issue" && /^treasury(:|$)/.test(String((request as { label?: unknown }).label ?? ""));
-  const description = proposalDescription({ type: generated.type, summary: generated.preview.summary, expiresAt: generated.expires_at, hash: dao.hash, unattended });
+  // A grant's proposal names the strategy it binds; a strategy that can't be read now leaves only its digest suffix.
+  const label = request.type === "grant_issue" ? String((request as { label?: unknown }).label ?? "") : undefined;
+  let strategy: Strategy | undefined;
+  if (label?.startsWith("treasury:")) try { strategy = loadStrategy(); } catch { strategy = undefined; }
+  const description = proposalDescription({ type: generated.type, summary: generated.preview.summary, expiresAt: generated.expires_at, hash: dao.hash, label, strategy });
   return {
     ...base,
     dao: {
@@ -334,24 +340,37 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
 /**
  * What a DAO proposal says it does; proposals are public. A policy update's provider summary may name
  * the payees it adds, so it gets fixed wording and the dashboard shows what it does. Approvals already
- * read generically ("Approve the pending confidential request", #46–#53 on chain).
+ * read generically ("Approve the pending confidential request", #46–#53 on chain). A Treasury grant (label
+ * `treasury:<suffix>`) lets the agent swap within the strategy it binds without a vote each time, so its proposal says
+ * so and names that strategy's terms, when `strategy` is the one the suffix binds.
  */
-/**
- * What a DAO's signing proposal says. `unattended`: a Treasury grant, which lets the agent swap within the saved strategy
- * without a vote each time (its autopilot, approved proposals, and the plans of apps the DAO gave `treasury-execute`).
- */
-export function proposalDescription(intent: { type: string; summary: string; expiresAt: string; hash: string; unattended?: boolean }) {
+export function proposalDescription(intent: { type: string; summary: string; expiresAt: string; hash: string; label?: string; strategy?: Strategy }) {
   const action = intent.type === "policy_update" ? "Change the agent's policy (check it on the dashboard before voting)" : intent.summary;
+  const suffix = intent.type === "grant_issue" && intent.label?.startsWith("treasury:") ? intent.label.slice("treasury:".length) : undefined;
+  const terms = suffix === undefined ? null : !intent.strategy ? "its terms couldn't be read when this was filed; read them on the agent before voting"
+    : strategyLabelSuffix(intent.strategy) === suffix ? strategyTerms(intent.strategy)
+    : "the saved strategy changed after this grant was prepared; read the one this suffix names on the agent before voting";
   return [
     `* Proposal Action: ${action}`,
-    ...(intent.unattended ? ["* Authorizes: swaps within the saved strategy and the DAO's signed policy without a vote each time " +
-      "(the agent's autopilot, approved proposals, and plans of apps the DAO consented to with treasury-execute)"] : []),
+    ...(suffix !== undefined ? [
+      "* Authorizes: the agent's autopilot, and plans of apps the DAO consented to with treasury-execute, to swap without " +
+        "a vote each time, within the strategy below and the DAO's signed policy. The DAO's approved Treasury proposals also execute under it",
+      `* Strategy ${suffix}: ${terms}`] : []),
     `* Agent: ${process.env.AGENT_ID ?? "a new agent"}`,
     `* Signing window closes: ${intent.expiresAt} (approve before then, or the signature can't be used)`,
     `* Signs: hash ${intent.hash} as the agents' owner (v1.signer, path agent-owner)`,
-    "* Notes: Filed from the DAO dashboard, where the hash can be checked against this action before voting.",
+    "* Notes: Filed by the MultiAgency platform. Before voting, check that the proposal's v1.signer call signs exactly this hash (payload_v2.Eddsa).",
   ].join(" <br>");
 }
+
+const assetNames = new Map(Object.entries(ASSETS).map(([name, id]) => [id as string, name]));
+/** A strategy's terms in plain words, for the DAO members who vote on the grant that binds it. */
+const strategyTerms = (strategy: Strategy) => [
+  `targets ${Object.entries(strategy.targetBps).map(([asset, bps]) => `${assetNames.get(asset) ?? asset} ${bps / 100}%`).join(", ")}`,
+  `each swap costs at most ${strategy.maxCostBps / 100}% of its input`,
+  `drift under $${strategy.minLegUsd} is left alone`,
+  `autopilot runs every ${strategy.autopilot.everyMin} min and executes at most $${strategy.autopilot.maxUsd} per run`,
+].join("; ");
 
 /**
  * Apply local effects before marking settled; each effect is safe to repeat after a crash. An intent
