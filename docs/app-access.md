@@ -162,7 +162,8 @@ SDK's `accessOf` and `mayCall`, from the DAO's policy. Under it the app asks for
 votes: on its Treasury proposals (`POST /apps/v1/dao-votes`, relayed to the agent once the signature is found), and on
 the `treasury` grant, freeze and unfreeze (`owner/prepare` with `signer: "dao"`, which answers the proposal to file;
 the agent submits the signature). A DAO sets up a hosted Treasury agent by vote too (`POST /apps/v1/dao-setups`,
-then `agent_create` with `signer: "dao"` under its setup consent, a second vote within the intent's minutes).
+then `agent_create` with `signer: "dao"` under its setup consent, a second vote within the intent's minutes). A
+host that doesn't set up Treasury agents refuses it before filing anything, so no vote is spent on it.
 A DAO can't revoke its own consent through the platform (the deployment or the operator can), and a consent lasts up
 to 366 days. Offline- and stack-tested (simulated DAO votes); no host serves it yet. See
 [enforcement](enforcement.md#dao-owners-through-apps-offline--and-stack-tested).

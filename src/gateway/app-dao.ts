@@ -32,6 +32,8 @@ const common = {
   message: z.string(), nonce: z.string(), signer: z.strictObject({ account_id: z.string(), public_key: z.string() }),
   /** The block height read before filing: no proposal can have signed this hash earlier. */
   since: z.number().int().nonnegative(), description: z.string(),
+  /** The DAO's signature (base64), recorded once found and verified, before it's acted on: a later read completes from it. */
+  signature: z.string().nullable().optional(),
 };
 const ConsentRequest = z.strictObject({ ...common, kind: z.literal("consent"), scopes: z.array(AppScope),
   /** The stored consent's id once the signature was found. */
@@ -233,6 +235,12 @@ export class DaoRequests {
     const record = this.read(id);
     if (record?.kind !== "setup") throw new Error(`No DAO setup request ${id}`);
     return this.write({ ...record, consent, reserved: agent }) as DaoSetupRequest;
+  }
+  /** Records the DAO's verified signature before anything is done with it. */
+  signed(id: string, signature: Buffer) {
+    const record = this.read(id);
+    if (!record) throw new Error(`No DAO request ${id}`);
+    return this.write({ ...record, signature: signature.toString("base64") });
   }
   relayed(id: string, state: string, now = Date.now()) {
     const record = this.read(id);

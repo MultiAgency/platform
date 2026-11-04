@@ -169,7 +169,7 @@ const server = createServer(async (req, res) => {
     if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, config.appSetup.length ? { setup: async ({ owner, kind, area, deployment, organization }) => {
       if (!config.appSetup.includes(area) || (site && !site.hostedAreas?.includes(area))) throw new Error("This area is not available on this host");
       return await reserveHosted({ owner, kind, area }, { deployment, organization });
-    } } : {})) return;
+    }, setupAreas: config.appSetup.filter(area => !site || site.hostedAreas?.includes(area)) } : {})) return;
     // Anything under /apps/ or /confirm/ that neither answered: never the file server's pages.
     if (config.headless) return json(res, 404, { error: "Not found" });
 

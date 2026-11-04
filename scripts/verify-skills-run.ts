@@ -19,9 +19,12 @@ import { connectAgent, revokeAll } from "./examples/payee-workflows-4.ts";
 import { platformFor } from "./examples/app-server-1.ts";
 import { connect } from "./examples/app-server-2.ts";
 import { ownerAction } from "./examples/app-server-3.ts";
-import { payOnce } from "./examples/app-server-4.ts";
+import { daoConsent } from "./examples/app-server-4.ts";
+import { memberMay } from "./examples/app-server-5.ts";
+import { payOnce } from "./examples/app-server-6.ts";
 import { approve, propose } from "./examples/treasury-app-1.ts";
 import { execute as executeProposal } from "./examples/treasury-app-2.ts";
+import { daoApprove } from "./examples/treasury-app-3.ts";
 
 const listen = async (handle: (req: IncomingMessage, res: ServerResponse) => void) => {
   const server = createServer(handle);
@@ -253,6 +256,18 @@ const platform = await listen(async (req, res) => {
   appSent.push({ path: req.url!, authorization: req.headers.authorization ?? null, body });
   if (req.url === "/apps/v1/agents/payout") return res.writeHead(200, { "content-type": "application/json" })
     .end(JSON.stringify({ agent: "payout", owner: "owner.near", agentId: "agent-1", created: true, host: "platform.test", deployment: "staging" }));
+  // A DAO-owned agent: its consent and its proposal votes are filed for a member, then read until the vote passes.
+  const filedAnswer = (request: object) => ({ request, transactions: { proposal: { receiverId: "dao.sputnik-dao.near", actions: [{ type: "FunctionCall", params: { methodName: "add_proposal" } }] },
+    proposalAndVote: { receiverId: "dao.sputnik-dao.near", actions: [{ type: "FunctionCall", params: { methodName: "add_proposal" } }, { type: "FunctionCall", params: { methodName: "act_proposal" } }] } } });
+  const daoRequest = { id: "d".repeat(64), dao: "dao.sputnik-dao.near", organization: "org_1", agent: "treasury", agentId: "agent-2", expiresAt: Date.now() + 1, votingUntil: Date.now() + 1, hash: "d".repeat(64), description: "d" };
+  if (req.url === "/apps/v1/agents/treasury") return res.writeHead(200, { "content-type": "application/json" })
+    .end(JSON.stringify({ agent: "treasury", owner: "dao.sputnik-dao.near", agentId: "agent-2", created: true, host: "platform.test", deployment: "staging", signer: "dao" }));
+  if (req.url === "/apps/v1/dao-consents") { ok(JSON.parse(body).message.includes('"owner":"dao.sputnik-dao.near"')); return res.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify(filedAnswer({ ...daoRequest, scopes: ["read", "treasury"] }))); }
+  if (req.url === `/apps/v1/dao-consents/${"d".repeat(64)}`) return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ state: "pending", request: { ...daoRequest, scopes: ["read", "treasury"] } }));
+  if (req.url === "/apps/v1/dao-votes") { deepStrictEqual(JSON.parse(body), { organization: "org_1", agent: "treasury", proposal: proposal.id, verdict: "approve" });
+    return res.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify(filedAnswer({ ...daoRequest, proposal: proposal.id, verdict: "approve" }))); }
+  if (req.url === `/apps/v1/dao-votes/${"d".repeat(64)}`) return res.writeHead(200, { "content-type": "application/json" })
+    .end(JSON.stringify({ state: "relayed", request: { ...daoRequest, proposal: proposal.id, verdict: "approve" }, proposalState: "approved" }));
   if (req.url === "/apps/v1/consents") {
     if (dropConsent-- > 0) return req.socket.destroy();
     const consent = { id: "c".repeat(64), deployment: "staging", host: "platform.test", organization: "org_1", owner: "owner.near", agent: "payout",
@@ -308,5 +323,19 @@ const proposalExecuted = await executeProposal(app, "org_1", "payout", proposal.
 ok(proposalExecuted.ok && proposalExecuted.value.state === "executed", JSON.stringify(proposalExecuted));
 deepStrictEqual(proposalCalls.splice(0).map(c => c.path), ["execute", "get"], "a lost execution answer is read, never asked again");
 ran.treasuryProposal = "created once (lost answer asked again with the same request), approved with the platform's text, executed once and read back";
+
+// A DAO owner: the app files, a member's wallet signs the answered transaction once, and the state is read; no text is signed.
+const memberSigned: { receiverId: string; actions: readonly unknown[] }[] = [];
+const daoConsented = await daoConsent(app, "platform.test", "staging", "org_1", "treasury", async transaction => { memberSigned.push(transaction); }, true);
+ok(daoConsented.ok && daoConsented.value.state === "pending", JSON.stringify(daoConsented));
+const daoApproved = await daoApprove(app, "org_1", "treasury", proposal.id, async transaction => { memberSigned.push(transaction); }, false);
+ok(daoApproved.ok && daoApproved.value.state === "relayed" && daoApproved.value.proposalState === "approved", JSON.stringify(daoApproved));
+deepStrictEqual(memberSigned.map(t => t.actions.length), [2, 1], "a member who may vote files and votes; one who may not only files");
+const policy = { proposal_bond: "1", default_vote_policy: { threshold: [1, 2] }, roles: [
+  { name: "council", kind: { Group: ["council.near"] }, permissions: ["*:AddProposal", "*:VoteApprove"], vote_policy: {} },
+  { name: "voters", kind: { Group: ["voter.near"] }, permissions: ["call:VoteApprove"], vote_policy: {} } ] };
+ok(memberMay("council.near", "dao.sputnik-dao.near", policy, "strategy/save") && memberMay("voter.near", "dao.sputnik-dao.near", policy, "overview"));
+ok(!memberMay("voter.near", "dao.sputnik-dao.near", policy, "strategy/save") && !memberMay("anyone.near", "dao.sputnik-dao.near", policy, "overview"));
+ran.dao = "consent and proposal vote filed, member signs once, state read; members gated by the DAO's roles";
 await platform.close();
 console.log(JSON.stringify(ran));

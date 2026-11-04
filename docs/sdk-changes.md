@@ -25,10 +25,14 @@ public-interface change bumps at least the minor version.
   intent; the agent submits the DAO's signature once the vote passes, and the app follows `owner/status`. Those are
   provider intents that expire in minutes, so only a DAO whose vote passes within `expiresAt` completes them.
 - **DAO setup** (added; offline- and stack-tested): `app.daoSetups.file(message)` files a DAO's setup text
-  (`setupMessage` with the DAO as owner, area within `DAO_SETUP_AREAS`, at most 7 days) for its vote;
+  (`setupMessage` with the DAO as owner, area within `DAO_SETUP_AREAS`, at most 7 days) for its vote, refused (403)
+  before anything is filed on a host that doesn't set up that area;
   `app.daoSetups.state(id)` answers `pending`, then `reserved` with the hosted agent and its setup consent. Under it the
   app asks only for `agent_create` with `signer: "dao"` and no owner (the DAO's derived account), a second vote that
   must pass within the intent's minutes; then it files the DAO's consent naming the new agent's ID.
+- **Skills**: app-server gains "A DAO owner" (consent, setup and owner actions by DAO vote, members gated with
+  `accessOf` and `mayCall`); treasury-app gains "A DAO-owned treasury" (proposal votes; the grant vote authorizes
+  unattended swaps).
 - **Voter check page** (added; no SDK change): each DAO request's proposal description links to
   `https://<host>/confirm/dao/<hash>`, a public page showing the exact text the DAO's key signs and its NEP-413 hash
   recomputed. Show members that link.

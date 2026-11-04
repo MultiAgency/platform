@@ -2,8 +2,8 @@
 name: treasury-app
 description: >
   Use when an app's server proposes Treasury swaps for an Organization's agent through @multiagency/sdk and has them
-  executed once the owner approves later: proposals by requestId, the exact text the owner signs, one execution per
-  proposal with recovery by state, and the two Treasury consent scopes. Server side only. Read app-server first.
+  executed once the owner approves later: proposals by requestId, the exact text the owner signs (or a DAO's vote), one
+  execution per proposal with recovery by state, and the two Treasury consent scopes. Server side only. Read app-server first.
 metadata:
   purpose: 'Treasury proposals through an app: propose by requestId, the owner signs the exact terms, execute once, recover by state.'
   type: core
@@ -112,6 +112,39 @@ A refusal `not_executable` means the attempt was refused before anything was cla
 provider warning, a short balance, no live treasury grant, the policy not in force): nothing was sent, the proposal
 stays `approved`, and asking again later is safe. `not_approved`: the owner hasn't approved it. Execution re-quotes
 every swap and sends each with a floor at least the signed one.
+
+## A DAO-owned treasury: the DAO approves by vote
+
+When `identity` answers `signer: "dao"`, the DAO approves or rejects a proposal by its vote. The platform files the
+vote from the proposal's own text; your app never builds or relays an approval text (app-server, "A DAO owner").
+
+```ts
+import { appClient } from "@multiagency/sdk";
+
+type MemberSigns = (transaction: { receiverId: string; actions: readonly unknown[] }) => Promise<void>;
+
+/** The DAO's vote on one of your proposals: reading its state after the vote passed relays it; then execute as usual. */
+export async function daoApprove(app: ReturnType<typeof appClient>, organization: string, agent: string, proposal: string,
+  memberSigns: MemberSigns, memberVotes: boolean) {
+  const filed = await app.daoVotes.file({ organization, agent, proposal, verdict: "approve" });
+  if (!filed.ok) return filed;
+  const transaction = memberVotes && filed.value.transactions.proposalAndVote ? filed.value.transactions.proposalAndVote : filed.value.transactions.proposal;
+  if (transaction) await memberSigns(transaction);
+  // `pending` until the vote passes: read again later with the same id.
+  return app.daoVotes.state(filed.value.request.id);
+}
+```
+
+Result: `pending`, then `relayed` with `proposalState` (`approved`). Nothing relays the vote until your server reads
+`state` after it passed: keep reading until it's final. Then `execute(...)` as above. A vote must pass
+before the proposal's `expiresAt`. A swap's signed floor may be out of reach by then: execution is refused
+`not_executable` and the proposal stays approved.
+
+Unattended swaps are the DAO's grant vote: the `treasury` grant, prepared with `owner/prepare` and `signer: "dao"`,
+binds the saved strategy. Its proposal says it authorizes swaps without a vote each time. Under it, autopilot runs once
+your app turns it on (`autopilot/enable`), and with `treasury-execute` (only if the DAO voted it into its consent)
+your plans run. Saving another strategy needs a new
+grant vote, and invalidates open proposals.
 
 ## Common mistakes
 

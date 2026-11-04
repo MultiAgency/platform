@@ -3,8 +3,8 @@ name: app-server
 description: >
   Use when building an app's server (for example the MultiAgency dashboard's) that reaches MultiAgency agents for its
   Organizations through @multiagency/sdk: the deployment's service credential, owner consents and hosted setup signed
-  with the owner's wallet, reads and the owner actions an app may relay, and payout requests sent at most once per
-  requestId and followed by status. Server side only; never in a browser. Not for an owner's own browser app (use
+  with the owner's wallet or a DAO's vote, reads and the owner actions an app may relay, and payout requests sent at
+  most once per requestId and followed by status. Server side only; never in a browser. Not for an owner's own browser app (use
   owner-workflows) or payees (use payee-workflows).
 metadata:
   purpose: 'An app server''s access to agents: credential, consents, relayed owner actions, and payout requests by requestId with recovery by state.'
@@ -18,7 +18,8 @@ sources:
   - 'MultiAgency/platform:src/contract/app-client.ts'
   - 'MultiAgency/platform:src/contract/app-access.ts'
   - 'MultiAgency/platform:src/contract/app-consent.ts'
-  - 'MultiAgency/platform:docs/agent-access.md'
+  - 'MultiAgency/platform:src/contract/dao-roles.ts'
+  - 'MultiAgency/platform:docs/app-access.md'
 ---
 
 # An app's server with appClient
@@ -40,7 +41,8 @@ import { appClient } from "@multiagency/sdk";
 export const platformFor = (platform: `https://${string}`, credential: string) => appClient({ base: platform, credential });
 ```
 
-Result: `await app.identity("payout")` answers `{ ok: true, value: { agent, owner, agentId, created, host, deployment } }`.
+Result: `await app.identity("payout")` answers `{ ok: true, value: { agent, owner, agentId, created, host, deployment, signer } }`.
+`signer` is `wallet` or `dao`: for a DAO-owned agent, follow "A DAO owner" below instead of the wallet sections.
 `session` (401) means the credential is invalid, expired or revoked: an operator matter, not the user's.
 
 ## Connect an Organization's agent: the owner signs a consent
@@ -134,6 +136,74 @@ payees, naming the key that signed the setup. Then read `identity` until it is c
 consent naming its `agentId`. A 409 means it already exists or the deployment reached its agent limit on the host; a
 503 means a check went unanswered: submit the same body again.
 
+## A DAO owner: every signature is the DAO's vote
+
+When `identity` answers `signer: "dao"`, the owner is a Sputnik DAO and has no keys. Each signature is a proposal its
+members pass. The platform builds every text and files the request; your app gets the proposal a member's wallet signs
+(`proposal`, or `proposalAndVote` to file and vote in one transaction), never a text to sign. Show the member the
+proposal's `description` and the check link in it (`https://<host>/confirm/dao/<hash>`), which shows the exact text and
+its hash recomputed.
+
+```ts
+import { appClient, consentMessage } from "@multiagency/sdk";
+
+type MemberSigns = (transaction: { receiverId: string; actions: readonly unknown[] }) => Promise<void>;
+
+/**
+ * A DAO's consent: a member files the proposal (and votes in the same transaction if their role may vote: otherwise
+ * the DAO refuses the whole transaction); the consent is stored when you read its state after the vote passed.
+ */
+export async function daoConsent(app: ReturnType<typeof appClient>, host: string, deployment: string, organization: string,
+  agent: string, memberSigns: MemberSigns, memberVotes: boolean) {
+  const identity = await app.identity(agent);
+  if (!identity.ok) return identity;
+  if (identity.value.signer !== "dao" || !identity.value.agentId) throw new Error("Not a created DAO-owned agent");
+  const filed = await app.daoConsents.file(consentMessage({ host, deployment, organization, owner: identity.value.owner, agent,
+    agentId: identity.value.agentId, scopes: ["read", "treasury"], expiresAt: new Date(Date.now() + 90 * 86_400_000).toISOString() }));
+  if (!filed.ok) return filed;
+  const { proposal, proposalAndVote } = filed.value.transactions;
+  const transaction = memberVotes && proposalAndVote ? proposalAndVote : proposal;
+  if (transaction) await memberSigns(transaction);
+  // `pending` until the DAO's vote passes: read again later with the same id; never file again for that.
+  return app.daoConsents.state(filed.value.request.id);
+}
+```
+
+Result: `state` answers `pending`, then `signed` with the consent (`signer: "dao"`). Nothing watches for the vote:
+reading `state` after it passed is what finds the DAO's signature and stores the consent, so keep reading until it's
+final (for a vote, `state` is also what relays it). 410 means the vote didn't pass before `votingUntil`: file again
+for a new vote. `proposalAndVote` is null when the DAO's next proposal id couldn't be read; file `proposal` then. The
+same shape covers the rest:
+- **Setup:** `app.daoSetups.file(setupMessage({ … owner: dao, area: "treasury", … }))`, at most 7 days ahead, Treasury
+  only, and only on a host whose setup includes Treasury (the deployed platform host's doesn't yet: 403). `state` answers `reserved` with the agent and a setup consent. Then `owner/prepare` with
+  `{ type: "agent_create", role: "treasury" }` and `signer: "dao"`. Then file the DAO's consent naming the new `agentId`.
+- **Owner actions:** under a `treasury` consent, `owner/prepare` with `signer: "dao"` prepares the `treasury` grant,
+  freeze or unfreeze. A member files the answer's `dao.proposal` (or `dao.proposalAndVote`); `dao.transaction` is the
+  `v1.signer` call inside that proposal, never one a member signs. The agent finds and submits the DAO's signature
+  itself once the vote passes; follow `owner/status`.
+- **Treasury proposals:** see treasury-app.
+
+Scopes: `read`, `treasury`, and `treasury-execute` if the DAO votes it in. Not `owner` or `payout`. Consent and
+proposal votes may take the DAO's voting period (at most 7 days). Creation, the grant, freeze and unfreeze are provider
+intents that expire in minutes, so they complete only for a DAO whose vote passes that fast: show `expiresAt`. A DAO
+can't revoke your consent through the platform; your deployment or the operator can.
+
+The platform authorizes your app, not a member. Gate each member with the platform's own reading of the DAO's roles:
+
+```ts
+import { accessOf, mayCall, type DaoPolicy } from "@multiagency/sdk";
+
+/** Whether `account` may make your app call `path` for the DAO: read the DAO's `get_policy` view at most a minute ago. */
+export function memberMay(account: string, dao: string, policy: DaoPolicy, path: string) {
+  // `signer` isn't read for a DAO's members: they never sign as the DAO.
+  const access = accessOf(account, { account: dao, policy, signer: dao });
+  return access !== null && mayCall(access, path);
+}
+```
+
+Only accounts in the DAO's Group roles are members; Everyone's rights admit no one. `strategy/save` needs a member who
+may change the DAO's policy. Pass `memberVotes` from `access.canVote`.
+
 ## Request a payout once, and follow it
 
 To fund the agent first, `agentCalls.call("deposit")` (payout scope) answers a one-time address (with `memo`,
@@ -194,6 +264,10 @@ payout is held, so a withdrawal is paid only once the owner turns `owner_approva
 - **Withdrawing to a `nearcom:` address** (CRITICAL): it is not on any chain; near.com users are paid through `intents`.
 - **Showing your own record of a held payout when asking for a vote** (HIGH): show the prepared vote's
   `payment.terms`, which the platform proved; your record may name another payout than the one the vote releases.
+- **Building a DAO's proposal yourself** (CRITICAL): file only the transaction the platform answered, and show its check
+  link. A proposal that signs another hash isn't the request, whatever its description says.
+- **Letting anyone signed in act for a DAO** (HIGH): the platform admits your app, not the member. Check
+  `memberMay(...)` on every call.
 
 ## Completion
 

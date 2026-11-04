@@ -20,7 +20,7 @@ import type { RouterClient } from "@orpc/server";
 import { proposalText, proposalView } from "../contract/treasury-proposals.js";
 import type { Router } from "../router.js";
 import { agentOrigin } from "./agent-origin.js";
-import { chainDaoVotes, daoConsent, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
+import { chainDaoVotes, daoConsent, type DaoRequest, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
 import { AuthorityUnanswered, chainDaoOwner, type DaoOwnerReads, resolveDaoAuthority, resolveWalletAuthority } from "./machine-authority.js";
 import { forwardRpc } from "./rpc-proxy.js";
 
@@ -57,7 +57,9 @@ const reachable = (agent: AgentEntry, deployment: string, organization?: string)
  * provider-confirmed ownership. Browsers never reach these routes.
  */
 /** Chain reads the routes make, replaceable in tests. */
-export type AppRouteOptions = { keyState?: KeyStateLookup; setup?: HostedSetup; daoOwner?: DaoOwnerReads; daoVotes?: DaoVotes };
+export type AppRouteOptions = { keyState?: KeyStateLookup; setup?: HostedSetup; daoOwner?: DaoOwnerReads; daoVotes?: DaoVotes;
+  /** The areas `setup` reserves agents for on this host: a DAO's setup for any other is refused before its vote is filed. */
+  setupAreas?: readonly string[] };
 
 export async function appRoutes(req: IncomingMessage, res: ServerResponse, pathname: string, host: string,
   selected: AgentEntry[], stopping: () => boolean, options: AppRouteOptions = {}): Promise<boolean> {
@@ -88,6 +90,23 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   if (!credential) { json(res, 401, { error: "Invalid, expired or revoked app credential" }); return true; }
   if (!mayUse(credential.id)) { json(res, 429, { error: "Request limit reached" }); return true; }
   const url = new URL(req.url ?? "/", "http://gateway");
+  /**
+   * The DAO's signature for a request: the one recorded when it was found, or searched for now while its vote window is
+   * open, verified against the DAO's derived key over the exact hash and recorded before anything is done with it.
+   * Answers the request itself (410, 503 or `pending`) and returns null when there is none to act on.
+   */
+  const daoSignature = async (record: DaoRequest, pending: () => object): Promise<Buffer | null> => {
+    if (record.signature) return Buffer.from(record.signature, "base64");
+    if (Date.now() >= record.votingUntil) { json(res, 410, { error: `The DAO's vote didn't pass before ${new Date(record.votingUntil).toISOString()}. Nothing was done; file it again.` }); return null; }
+    let found: Buffer | null;
+    try { found = await daoVotes.findSignature(record.dao, { owner: record.signer, hash: record.id, since: record.since }); }
+    catch { json(res, 503, { error: "The DAO's proposals couldn't be read now. Nothing changed; read again." }); return null; }
+    let verified = false;
+    try { verified = !!found && verifyEd25519(record.signer.public_key, Buffer.from(record.id, "hex"), found); } catch { verified = false; }
+    if (!verified) { json(res, 200, pending()); return null; }
+    daoRequests.signed(record.id, found!);
+    return found;
+  };
   /** The chain reads above wait: a credential revoked meanwhile ends the request before anything is stored or relayed. */
   const stillAuthorized = () => credentials.authenticate(req.headers.authorization, host) !== null;
   /** A DAO-owned agent this app reaches under a live DAO consent with `treasury`, as it is now; or why not. */
@@ -199,15 +218,8 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     if (record?.kind !== "consent" || record.deployment !== credential.deployment || record.host !== host.toLowerCase()) { json(res, 404, { error: "No such DAO consent request" }); return true; }
     const settled = record.consent && consents.list({ deployment: credential.deployment }).find(c => c.id === record.consent);
     if (settled) { json(res, 200, { state: "signed", consent: publicConsent(settled) }); return true; }
-    if (Date.now() >= record.votingUntil) { json(res, 410, { error: `The DAO's vote didn't pass before ${new Date(record.votingUntil).toISOString()}. File the consent again.` }); return true; }
-    let signature: Buffer | null;
-    try { signature = await daoVotes.findSignature(record.dao, { owner: record.signer, hash: record.id, since: record.since }); }
-    catch { json(res, 503, { error: "The DAO's proposals couldn't be read now. Nothing changed; read again." }); return true; }
-    if (!signature) { json(res, 200, { state: "pending", request: publicDaoRequest(record) }); return true; }
-    // Only the DAO's derived key over this exact hash counts, whatever found it.
-    let verified = false;
-    try { verified = verifyEd25519(record.signer.public_key, Buffer.from(record.id, "hex"), signature); } catch { verified = false; }
-    if (!verified) { json(res, 200, { state: "pending", request: publicDaoRequest(record) }); return true; }
+    const signature = await daoSignature(record, () => ({ state: "pending", request: publicDaoRequest(record) }));
+    if (!signature) return true;
     const agent = selected.find(a => a.name === record.agent && reachable(a, credential.deployment, record.organization));
     const authority = agent && agent.owner === record.dao ? await resolveDaoAuthority(agent, daoOwner) : null;
     if (!authority || authority.agentId !== record.agentId || authority.signer.public_key !== record.signer.public_key) {
@@ -232,6 +244,8 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     const body = daoConsentFiling.safeParse(await readJson(req));
     if (!body.success) { json(res, 400, { error: "Send the canonical setup text as message." }); return true; }
     const { text, expiresAt } = verifyDaoSetupText(body.data.message, { host, deployment: credential.deployment });
+    // A vote takes the DAO's time: refuse here what the host could never reserve, before anything is filed.
+    if (!options.setupAreas?.includes(text.area)) { json(res, 403, { error: `This host doesn't set up ${text.area} agents. Nothing was filed.` }); return true; }
     let policy: Awaited<ReturnType<DaoOwnerReads["policy"]>>, signer: Awaited<ReturnType<DaoOwnerReads["owner"]>>;
     try { policy = await daoOwner.policy(text.owner); signer = policy ? await daoOwner.owner(text.owner) : undefined as never; }
     catch { throw new AuthorityUnanswered(); }
@@ -258,19 +272,14 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     if (record?.kind !== "setup" || record.deployment !== credential.deployment || record.host !== host.toLowerCase()) { json(res, 404, { error: "No such DAO setup request" }); return true; }
     const stored = record.consent && consents.list({ deployment: credential.deployment }).find(c => c.id === record.consent);
     if (stored && record.reserved) { json(res, 200, { state: "reserved", agent: record.reserved, consent: publicConsent(stored) }); return true; }
-    if (Date.now() >= record.votingUntil) { json(res, 410, { error: `The DAO's vote didn't pass before ${new Date(record.votingUntil).toISOString()}. Nothing was set up.` }); return true; }
     if (!options.setup) { json(res, 403, { error: "Agent setup isn't available on this host" }); return true; }
-    let signature: Buffer | null;
-    try { signature = await daoVotes.findSignature(record.dao, { owner: record.signer, hash: record.id, since: record.since }); }
-    catch { json(res, 503, { error: "The DAO's proposals couldn't be read now. Nothing changed; read again." }); return true; }
-    let verified = false;
-    try { verified = !!signature && verifyEd25519(record.signer.public_key, Buffer.from(record.id, "hex"), signature); } catch { verified = false; }
-    if (!verified) { json(res, 200, { state: "pending", request: publicDaoSetup(record) }); return true; }
+    const signature = await daoSignature(record, () => ({ state: "pending", request: publicDaoSetup(record) }));
+    if (!signature) return true;
     // The DAO's derived key must still be the one it signed with: its policy and key are read again.
     let current: Awaited<ReturnType<DaoOwnerReads["owner"]>> | null;
     try { current = await daoOwner.policy(record.dao) ? await daoOwner.owner(record.dao) : null; } catch { throw new AuthorityUnanswered(); }
     if (current?.public_key !== record.signer.public_key) { json(res, 409, { error: "The DAO signed, but its owner key changed. Nothing was set up." }); return true; }
-    const consent = (agent: string) => daoSetupConsent(record, signature!, agent);
+    const consent = (agent: string) => daoSetupConsent(record, signature, agent);
     consents.admit(consent(""));
     if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was set up; read again." }); return true; }
     if (!stillAuthorized()) { json(res, 403, { error: "Access ended before setting up. Nothing was set up." }); return true; }
@@ -330,13 +339,8 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     const record = daoRequests.read(voteState[1]!);
     if (record?.kind !== "proposal" || record.deployment !== credential.deployment || record.host !== host.toLowerCase()) { json(res, 404, { error: "No such DAO vote request" }); return true; }
     if (record.relayed) { json(res, 200, { state: "relayed", request: publicDaoVote(record), proposalState: record.relayed.state }); return true; }
-    if (Date.now() >= record.votingUntil) { json(res, 410, { error: `The DAO's vote didn't pass before ${new Date(record.votingUntil).toISOString()}. Nothing was relayed.` }); return true; }
-    let signature: Buffer | null;
-    try { signature = await daoVotes.findSignature(record.dao, { owner: record.signer, hash: record.id, since: record.since }); }
-    catch { json(res, 503, { error: "The DAO's proposals couldn't be read now. Nothing changed; read again." }); return true; }
-    let verified = false;
-    try { verified = !!signature && verifyEd25519(record.signer.public_key, Buffer.from(record.id, "hex"), signature); } catch { verified = false; }
-    if (!verified) { json(res, 200, { state: "pending", request: publicDaoVote(record) }); return true; }
+    const signature = await daoSignature(record, () => ({ state: "pending", request: publicDaoVote(record) }));
+    if (!signature) return true;
     // The consent it was filed under must still be live, and the agent still the DAO's with that identity.
     const found = await daoTreasury(record.agent, record.organization);
     if (typeof found === "string" || !found.live.includes(record.under)) {
@@ -349,7 +353,7 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     if (!stillAuthorized() || !consents.live({ deployment: credential.deployment, host, organization: record.organization, agent: record.agent }).some(c => c.id === record.under)) {
       json(res, 403, { error: "Access ended before relaying. Nothing was relayed." }); return true;
     }
-    const signed = { message: record.message, nonce: record.nonce, publicKey: record.signer.public_key, signature: signature!.toString("base64") };
+    const signed = { message: record.message, nonce: record.nonce, publicKey: record.signer.public_key, signature: signature.toString("base64") };
     const client = agentCall(found.agent, credential.deployment, host, record.organization, record.under, found.live).proposals;
     let answer: unknown;
     // Relaying the same signature again is answered with the proposal as it is: the agent keeps the first approval.

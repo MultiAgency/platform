@@ -37,7 +37,9 @@ async function harness(t: import("node:test").TestContext) {
     /** What `findSignature` finds on chain: null until a proposal passes. */
     signature: null as Buffer | null, findDown: false, stopping: false,
     /** The agent's answers by procedure path (`/rpc/<path>`), as `{ status, json }`; anything else answers ok. */
-    replies: {} as Record<string, { status: number; json: unknown }> };
+    replies: {} as Record<string, { status: number; json: unknown }>,
+    /** The areas this host sets up hosted agents for (its config's `appSetup`). */
+    setupAreas: ["treasury", "payables"] as string[] };
   const forwarded: { path: string; headers: Record<string, unknown>; body: any }[] = [];
   const upstream = createServer((req, res) => { let text = ""; req.on("data", chunk => text += chunk); req.on("end", () => {
     forwarded.push({ path: req.url!, headers: req.headers, body: text ? JSON.parse(text) : null });
@@ -49,6 +51,7 @@ async function harness(t: import("node:test").TestContext) {
   const agents: AgentEntry[] = [agent];
   const setups: Parameters<HostedSetup>[0][] = [];
   const setup: HostedSetup = async input => {
+    if (!state.setupAreas.includes(input.area)) throw new Error("This area is not available on this host");
     setups.push(input);
     const reserved = { name: "own-dao", owner: input.owner, port: agent.port, area: input.area, executor: true, deployment: input.deployment, organization: input.organization } as AgentEntry;
     if (!agents.some(a => a.name === reserved.name)) agents.push(reserved);
@@ -64,7 +67,7 @@ async function harness(t: import("node:test").TestContext) {
   };
   const server = createServer(async (req, res) => { try {
     if (await confirmRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, confirms, APP_ROOT, agents, dir, () => state.stopping)) return;
-    if (!await appRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, agents, () => state.stopping, { daoOwner, daoVotes, setup })) { res.writeHead(404); res.end("{}"); }
+    if (!await appRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, agents, () => state.stopping, { daoOwner, daoVotes, setup, setupAreas: state.setupAreas })) { res.writeHead(404); res.end("{}"); }
   } catch (e) { sendFailure(res, e); } });
   const port = await listen(server);
   t.after(async () => { await close(server); await close(upstream); process.chdir(cwd); rmSync(dir, { recursive: true, force: true }); });
@@ -202,10 +205,16 @@ test("a DAO's vote that passes too late, or for an agent that changed meanwhile,
   state.providerId = "replacement";
   vote(pending.hash);
   assert.equal((await call(port, `/apps/v1/dao-consents/${pending.hash}`, "GET", staging)).status, 409, "the agent was replaced before the vote passed");
+  assert.equal((await call(port, `/apps/v1/dao-consents/${pending.hash}`, "GET", staging)).status, 409, "and stays refused while it is");
+  assert.equal(new AppConsents(".app-access").list({}).length, 0);
   state.providerId = "provider-id";
-  const path = join(".app-access", "dao-requests", `${pending.hash}.json`);
+  // A vote that hasn't passed when its window closes: nothing is searched for or stored after that.
+  state.signature = null;
+  const late = (await file()).body.request;
+  const path = join(".app-access", "dao-requests", `${late.hash}.json`);
   writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), votingUntil: Date.now() - 1 }));
-  assert.equal((await call(port, `/apps/v1/dao-consents/${pending.hash}`, "GET", staging)).status, 410);
+  vote(late.hash);
+  assert.equal((await call(port, `/apps/v1/dao-consents/${late.hash}`, "GET", staging)).status, 410);
   assert.equal(new AppConsents(".app-access").list({}).length, 0);
 });
 
@@ -359,6 +368,9 @@ test("a DAO sets up its hosted Treasury agent by vote; the setup consent asks on
   const setupText = (over = {}) => setupMessage({ host: HOST, deployment: "staging", organization: "org_1", owner: DAO, area: "treasury", expiresAt: later(3), ...over });
   const fileSetup = (over = {}) => call(port, "/apps/v1/dao-setups", "POST", staging, { message: setupText(over) });
   assert.equal((await fileSetup({ area: "payables" })).status, 400, "Treasury only");
+  state.setupAreas = ["payables"];
+  assert.equal((await fileSetup()).status, 403, "a host that doesn't set up Treasury agents files no vote the DAO would waste");
+  state.setupAreas = ["treasury", "payables"];
   assert.equal((await fileSetup({ expiresAt: later(8) })).status, 400, "within the proposal period");
   state.dao = false;
   assert.equal((await fileSetup()).status, 409, "an owner that isn't a DAO");
@@ -501,4 +513,35 @@ test("each DAO request has a public check page: the exact text, and its hash rec
   assert.ok(tampered.text.includes("org_&lt;b&gt;") && !tampered.text.includes("org_<b>"), "every value is escaped");
   writeFileSync(path, JSON.stringify({ ...record, host: "other.test" }));
   assert.equal((await page(port, `/confirm/dao/${pending.hash}`)).status, 404);
+});
+
+test("a request whose signature was found completes on a later read even after its vote window, as after a crash mid-step", async t => {
+  const { port, state, forwarded, staging, file, vote, consented } = await harness(t);
+  const edit = (hash: string, change: (r: any) => object) => {
+    const path = join(".app-access", "dao-requests", `${hash}.json`);
+    writeFileSync(path, JSON.stringify(change(JSON.parse(readFileSync(path, "utf8")))));
+  };
+  // Consent: stored, then the gateway stopped before recording it on the request; read after the window closed.
+  const { request: pending } = (await file()).body;
+  vote(pending.hash);
+  const signed = (await call(port, `/apps/v1/dao-consents/${pending.hash}`, "GET", staging)).body;
+  edit(pending.hash, r => ({ ...r, consent: null, votingUntil: Date.now() - 1 }));
+  state.signature = null;
+  const again = await call(port, `/apps/v1/dao-consents/${pending.hash}`, "GET", staging);
+  assert.equal(again.status, 200, JSON.stringify(again.body));
+  assert.equal(again.body.consent.id, signed.consent.id, "the same consent, completed from the recorded signature");
+
+  // Vote: relayed, then stopped before recording it; the next read relays the same signature again, which the agent keeps once.
+  await consented();
+  state.replies["/rpc/proposals/get"] = { status: 200, json: PROPOSAL };
+  state.replies["/rpc/proposals/approve"] = { status: 200, json: { ...PROPOSAL, state: "approved" } };
+  const { request: ballot } = (await call(port, "/apps/v1/dao-votes", "POST", staging, { organization: "org_1", agent: "treasury", proposal: "p-1", verdict: "approve" })).body;
+  vote(ballot.hash);
+  assert.equal((await call(port, `/apps/v1/dao-votes/${ballot.hash}`, "GET", staging)).body.state, "relayed");
+  const first = forwarded.at(-1)!.body.json.signed;
+  edit(ballot.hash, r => ({ ...r, relayed: null, votingUntil: Date.now() - 1 }));
+  state.signature = null;
+  const relayed = await call(port, `/apps/v1/dao-votes/${ballot.hash}`, "GET", staging);
+  assert.equal(relayed.status, 200, JSON.stringify(relayed.body));
+  assert.deepEqual(forwarded.at(-1)!.body.json.signed, first, "the same signature, never a new one");
 });
