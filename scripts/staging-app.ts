@@ -13,7 +13,9 @@ import { appClient, consentMessage, setupMessage, type AppOwnerAction, type AppP
 const base = process.env.PLATFORM_URL as `https://${string}` | undefined;
 const credential = process.env.PLATFORM_APP_CREDENTIAL, deployment = process.env.PLATFORM_DEPLOYMENT ?? "staging";
 const organization = process.env.ORGANIZATION ?? "org_step8", port = Number(process.env.PORT ?? 4318);
-if (!base?.startsWith("https://") || !credential?.startsWith("tap_")) throw new Error("Set PLATFORM_URL (https://…) and PLATFORM_APP_CREDENTIAL (tap_…)");
+if (!base?.startsWith("https://")) throw new Error("Set PLATFORM_URL (https://…)");
+// The token as `app-credential issue` prints it: a placeholder or a truncated paste would only fail at the first call.
+if (!credential || !/^tap_[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/.test(credential)) throw new Error("Set PLATFORM_APP_CREDENTIAL to the whole tap_… token app-credential issued");
 const host = new URL(base).host;
 const app = appClient({ base, credential });
 const later = (ms: number) => new Date(Date.now() + ms).toISOString();
@@ -410,10 +412,15 @@ var runs = {
   daoReject: async function () { var c = needAgent(); filed("proposal", await api("daoVote", { organization: c.org, agent: c.agent, proposal: $("proposalId").value.trim(), verdict: "reject" }, "dao reject")); },
   // The member's wallet signs exactly the transaction the platform answered; a member who can't vote files only.
   memberFiles: async function () {
-    needWallet(); if (!daoRequest) throw new Error("File a DAO request first");
+    if (!daoRequest) throw new Error("File a DAO request first");
     var t = daoRequest.transactions, transaction = $("memberVotes").checked && t.proposalAndVote ? t.proposalAndVote : t.proposal;
     if (!transaction) throw new Error("No transaction to sign: the DAO's policy couldn't be read when it was filed");
-    var sent = await (await wallet()).signAndSendTransaction({ receiverId: transaction.receiverId, actions: transaction.actions });
+    // The wallet connected now, even after a reload; the member's account signs, as the web app sends it.
+    var connected = await connector.getConnectedWallet(), signerId = connected.accounts[0] && connected.accounts[0].accountId;
+    if (!signerId) throw new Error("Connect the member's wallet first");
+    $("account").textContent = signerId;
+    record("member signing", daoRequest.kind, { signerId: signerId, receiverId: transaction.receiverId, methods: transaction.actions.map(function (a) { return a.params.methodName; }) }, { ok: true, value: "waiting for the wallet" });
+    var sent = await connected.wallet.signAndSendTransaction({ signerId: signerId, receiverId: transaction.receiverId, actions: transaction.actions });
     record("member signed", daoRequest.kind, { receiverId: transaction.receiverId, actions: transaction.actions.length }, { ok: true, value: sent && (sent.transaction ? sent.transaction.hash : sent) });
   },
   daoState: async function () {

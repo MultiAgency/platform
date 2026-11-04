@@ -252,6 +252,35 @@ Not checked: the payee's receipt in near.com; what the wallet displayed for the 
 API #51 (2026-10-27) reports an uncapped budget window's spend as `null`, which the agent's overview refused
 ([enforcement](enforcement.md#recovery-limitation)).
 
+## A DAO-owned Treasury agent through an app on platform staging, 2026-11-04 (UTC)
+
+The first run of DAO owners through apps on mainnet, user-run. It used:
+- **Staging:** platform staging at api.dev.multiagency.ai (Railway deployment `bc635cb7`, release candidate `0263df8e`,
+  commit `6ba0831`, SDK 0.5.0).
+- **The app:** the local app stand-in (`scripts/staging-app.ts`, deployment `staging`, Organization `org_dao1`).
+- **The DAO:** `agentic.sputnik-dao.near`, which passes a proposal with one vote. One member, `multiagentic.near`,
+  filed and voted each proposal, through a wallet from the stand-in and through `near-cli-rs` for the stop.
+
+No funds moved.
+
+| Check | Result |
+|---|---|
+| A DAO sets up a hosted agent by vote | The setup's check page recomputed the hash ("it matches"). Proposal #59, filed and approved in one transaction (~22:19), signed it through `v1.signer`. FastNEAR's transaction API showed the signature, and the platform reserved `own-4f7bfc06…` with a setup consent (`signer: dao`, `unborn`) |
+| The agent is created by a second, fast vote | The provider's creation intent named owner `c1bec849…eb45`, the account `v1.signer` derives for the DAO on path `agent-owner`. The vote passed inside the intent's window, and the agent found the signature and submitted it itself: `SUCCESS` 22:28:52 |
+| The DAO consents to the app by vote | Proposal #61 (filed 22:30:05) signs exactly the request's hash. The consent was stored at 22:31:22 with `signer: dao`, scopes `read` and `treasury`, and the DAO's derived key |
+| The strategy-bound grant by a fast vote | The proposal (#62) named the strategy suffix and terms and said it authorizes swaps without a vote each time. `SUCCESS` at 22:35:24, about 2.5 minutes before the intent expired |
+| An app turns autopilot on under the DAO's grant | `autopilot/enable` with the strategy's digest answered `on: true` (22:43:27) |
+| The DAO stops its agent with no app | The stop page filed the stop. Its check page matched. Proposal #63 was filed and voted through `near-cli-rs`; `v1.signer` logged the request for `agent-owner` over the stop's hash. Opening the page after the vote applied it at 22:51:32: 2 consents revoked, autopilot off |
+
+**Found:**
+- **No app route funds the agent.** A DAO's consent (`read`, `treasury`) can't reach `deposit` (it's in the `payout`
+  scope) or `treasury/fund`, and no app read returns the agent's wallet account. Funding and a DAO-approved proposal
+  (runbook steps 5–6) weren't run.
+- **The member's wallet couldn't preview the proposals.** Its simulator doesn't support `v1.signer`'s yield/resume, so
+  only the call list showed.
+
+Not checked: Trezu's display of these proposals, freeze and unfreeze by DAO vote, and a proposal's execution.
+
 ## Token registration reads on the USDC contract, 2026-10-29T14:44Z
 
 Read-only RPC calls (`storage_balance_of` on the USDC contract, final finality), no funds moved. They back the

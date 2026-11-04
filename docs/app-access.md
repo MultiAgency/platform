@@ -173,7 +173,12 @@ then so it is never stored, whatever its vote, and turns the agent's autopilot o
 still ends whatever was given before it applies. Applied again until autopilot is confirmed off, it keeps its first
 cutoff: a consent the DAO gives after the stop applied stays live. A passed stop is honoured whenever the page is next
 opened, even after its window. Until then, autopilot and the consents it will end stay live. It only removes authority.
-Offline- and stack-tested (simulated DAO votes); no host serves it yet. See
+Offline- and stack-tested (simulated DAO votes). Mainnet-observed on platform staging on 2026-11-04 with
+`agentic.sputnik-dao.near` ([mainnet log](mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc)): setup, creation, consent, the strategy-bound grant, autopilot on, and
+the DAO's own stop. Not observed: funding (see below), a DAO-approved proposal, freeze and unfreeze. Not in production.
+
+**Funding a DAO-owned agent through an app isn't possible yet** (found on that run). A DAO's consent can't reach
+`deposit`, which is in the `payout` scope, or `treasury/fund`, and no app read returns the agent's wallet account. See
 [enforcement](enforcement.md#dao-owners-through-apps-offline--and-stack-tested).
 
 Rolling back: records written from 0.5.0 on carry fields that earlier builds refuse to read, and one refused record

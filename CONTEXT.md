@@ -371,7 +371,8 @@ app's Treasury proposals and on the Treasury grant, freeze and unfreeze, and a D
 Treasury agent by vote; the app never gets a text to sign. A **DAO stop** is the DAO's own vote, filed from a public
 page with no app, that ends every consent for its agent given before the stop is applied (and every consent request
 filed by then) and turns its autopilot off; consents the DAO gives after it applied stay live. The DAO parts are
-offline- and stack-tested only. Revocable by the deployment or the operator, and a DAO's consent by its own stop; a
+offline- and stack-tested; setup, creation, consent, the grant and the stop are mainnet-observed on platform staging
+(2026-11-04). Revocable by the deployment or the operator, and a DAO's consent by its own stop; a
 revocation is a permanent tombstone. A wallet's consent is offline- and stack-tested and mainnet-observed on platform
 staging (2026-10-28); not in production. See docs/app-access.md.
 

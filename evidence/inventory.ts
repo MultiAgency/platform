@@ -528,6 +528,11 @@ export const VERIFICATIONS: { claim: string; evidence: string; when: string; pub
     "claim": "DAO ownership: creation, grant, policy changes, freeze and held-payout approvals",
     "evidence": "Tested on mainnet with `agentic.sputnik-dao.near`: creating an agent, issuing a grant, changing its policy and freezing it, each by DAO vote (proposals #9 to #12). The freeze was filed from the dashboard through Trezu. Later, policy edits and the approvals of two held payouts were filed and voted the same way from the dashboard; both payouts settled (approvals #17 and #21, edits #20 and #22).",
     "when": "Historical README observation; UTC date and deployment were not recorded in that summary"
+  },
+  {
+    "claim": "Through app access, a DAO sets up and creates a hosted Treasury agent, consents to an app, issues its strategy-bound grant and stops the agent, each by its own vote",
+    "evidence": "[DAO through an app on staging](docs/mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc): `agentic.sputnik-dao.near`, proposals #59, #61, #62 and #63 plus the creation vote, platform staging deployment `bc635cb7`; funding and a DAO-approved proposal weren't run",
+    "when": "2026-11-04T22:19Z to 22:51Z"
   }
 ];
 

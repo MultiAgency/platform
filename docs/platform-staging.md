@@ -26,8 +26,12 @@ directory, hosted agents and consents are kept, and the host is unchanged, so si
    for Payables, no configured agents: every agent is a hosted agent created through app setup), `NEAR_INTENTS_AGENT_API_KEY` (a separate
    key for staging from the same partner account, so it can be revoked without touching production's), `NEAR_INTENTS_AGENT_API_URL`,
    `FASTNEAR_API_KEY`, and a new `SESSION_SECRET`. No `DAO_ENV`, `PAYOUT_ENV` or `RESTORE_*`.
-3. Deploy the release candidate's `platform` package: from `<release>/platform`, `railway up --service gateway
-   --environment staging`. To check before DNS, set
+3. Deploy the release candidate's `platform` package from a copy outside any git repository. Inside this one,
+   `railway up` uploads the repository's root, not the package (seen 2026-11-04): with its `.gitignore` that has no
+   `Dockerfile`, so Railway falls back to Railpack and fails with "No start command detected", and without it the upload
+   takes in `.test-artifacts/`. So `cp -R <release>/platform /tmp/platform-<candidate>`, `cd` there, `railway link
+   --project <id> --environment staging --service gateway`, then `railway up --service gateway --environment staging`.
+   The build log should show the Dockerfile's steps, and the upload is the package's size (about 0.9 MB for 0.5.0). To check before DNS, set
    `DASHBOARD_HOST` to the Railway domain, then point a CNAME for `api.dev.multiagency.ai` (Namecheap) at the domain
    `railway domain status` shows and remove `DASHBOARD_HOST`.
 4. Read-only checks: `/health` 200; `/apps/v1/agents/x` without a credential 401, with a browser `Origin` 403, on another
@@ -174,7 +178,7 @@ Stop rules as above. Record each outcome in `docs/mainnet-log.md`; amounts, fees
 release record. What step 9 shows decides whether approving a held withdrawal can be bound and enabled
 ([enforcement](enforcement.md)).
 
-## A DAO-owned Treasury agent on staging (prepared, not run)
+## A DAO-owned Treasury agent on staging (run 2026-11-04, steps 1–4 and 7: [mainnet log](mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc))
 
 User-run, on mainnet, through staging, never scheduled. It would be the first evidence of DAO owners through apps,
 which so far is offline- and stack-tested against simulated votes only (`test/app-dao.test.ts`,
@@ -185,9 +189,19 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 - what the provider answers for a DAO-owned hosted agent
 
 **Before starting**
-- **Staging runs 0.5.0's `platform` package.** Candidate `0263df8e`, commit `6ba0831`, deployed with
-  `deploy/platform-staging.json`, whose `appSetup` lists `treasury`. The deployed staging host runs `b9221b45` (Payables
-  only) until then. Deploy as in steps 3–4 above, and record the Railway deployment id.
+- **Staging runs 0.5.0's `platform` package.** Since 2026-11-04T21:46Z: candidate `0263df8e`, commit `6ba0831`,
+  Railway deployment `bc635cb7`, image `sha256:5994c8f6…`, with `deploy/platform-staging.json`, whose `appSetup` lists
+  `treasury`.
+
+  Read-only checks right after:
+  - `/health` gives 200.
+  - `/apps/v1/agents/x` gives 401 without a credential, and 403 with a browser `Origin`.
+  - `/`, `/gw/challenge` and `/a/x/access` give 404.
+  - `POST /apps/v1/dao-consents` gives 401 without a credential.
+  - An unknown DAO's `/confirm/dao/stop/<dao>/<agent>` gives a 404 with an HTML page, no script, under
+    `default-src 'none'`.
+
+  It replaced `b9221b45`, which served Payables setup only.
 - **A staging credential** for the platform's own test deployment `staging` (step 5 above).
 - **The stand-in,** `scripts/staging-app.ts`, section "4. DAO owner" (2026-11-04):
   - It files DAO setup, consent and proposal votes, and prepares creation, the grant, freeze and unfreeze with
