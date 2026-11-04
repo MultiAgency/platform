@@ -79,10 +79,11 @@ export const appConfirm = z.looseObject({ url: z.string(), expiresAt: z.string()
  */
 export const AppSigner = z.enum(["wallet", "dao"]);
 /**
- * The scopes a DAO's consent may carry: reads, and Treasury settings and proposals the DAO approves by vote. Not
- * `owner` (the platform files a DAO's owner actions itself), `payout` or `treasury-execute` (not yet).
+ * The scopes a DAO's consent may carry: reads, Treasury settings, autopilot and proposals the DAO approves by vote, and
+ * with `treasury-execute` the app's plans within the policy and the strategy the DAO's grant binds, without a vote
+ * each time. Not `owner` (the platform files a DAO's owner actions itself) or `payout` (not yet).
  */
-export const DAO_CONSENT_SCOPES = ["read", "treasury"] as const satisfies readonly AppScope[];
+export const DAO_CONSENT_SCOPES = ["read", "treasury", "treasury-execute"] as const satisfies readonly AppScope[];
 
 /** `GET /apps/v1/agents/<agent>`: what the owner's consent must name. */
 export const appAgent = z.looseObject({ agent: z.string(), owner: z.string(), agentId: z.string().nullable(), created: z.boolean(),
@@ -98,11 +99,18 @@ export const appConsentView = z.looseObject({ id: z.string(), deployment: z.stri
  * Each is a provider owner intent that expires in minutes, so the vote must pass within `expiresAt`.
  */
 export const DAO_APP_ACTIONS = ["grant_issue", "agent_freeze", "agent_unfreeze"] as const;
-/** Whether a parsed owner action is one an app may ask a DAO to vote on: a Treasury grant, freeze or unfreeze. */
-export function appMayAskDao(action: { type: string; label?: string }) {
+/**
+ * Whether a parsed owner action is one an app may ask a DAO to vote on: a Treasury grant, freeze or unfreeze, or, under
+ * a DAO's setup consent only, the Treasury agent's creation (its owner is the DAO's derived account, never given).
+ */
+export function appMayAskDao(action: { type: string; label?: string; owner?: unknown; role?: string; payees?: readonly unknown[] }) {
+  if (action.type === "agent_create") return action.owner === undefined && !action.payees?.length && (action.role ?? "treasury") === "treasury";
   return (DAO_APP_ACTIONS as readonly string[]).includes(action.type) && (action.type !== "grant_issue" || action.label === "treasury");
 }
-export type AppDaoAction = Of<"agent_freeze"> | Of<"agent_unfreeze"> | (Of<"grant_issue"> & { label: "treasury" });
+export type AppDaoAction = Of<"agent_freeze"> | Of<"agent_unfreeze"> | (Of<"grant_issue"> & { label: "treasury" })
+  | { type: "agent_create"; role?: "treasury" };
+/** The areas a DAO may set up a hosted agent for through an app: Treasury only. */
+export const DAO_SETUP_AREAS = ["treasury"] as const;
 
 /** A NEAR transaction for a DAO member's wallet to sign, as near-kit builds it (receiver and function-call actions). */
 const memberTransaction = z.looseObject({ receiverId: z.string(), actions: z.array(z.looseObject({ type: z.literal("FunctionCall"), params: z.looseObject({}) })) });
@@ -127,6 +135,19 @@ export const appDaoVoteFiled = z.looseObject({ request: appDaoVoteRequest,
 export const appDaoVoteState = z.discriminatedUnion("state", [
   z.looseObject({ state: z.literal("pending"), request: appDaoVoteRequest }),
   z.looseObject({ state: z.literal("relayed"), request: appDaoVoteRequest, proposalState: z.string() }),
+]);
+/**
+ * A DAO's request that the platform set up a hosted agent for it, signed by its vote (the setup text, `setupMessage`,
+ * with the DAO as owner). Once the signature is found the platform reserves the agent and stores a setup consent; the
+ * app then asks for `agent_create` with `signer: "dao"`, a second vote that must pass within the intent's minutes.
+ */
+export const appDaoSetupRequest = z.looseObject({ id: z.string(), dao: z.string(), organization: z.string(), area: z.string(),
+  expiresAt: z.number(), votingUntil: z.number(), hash: z.string(), description: z.string() });
+export const appDaoSetupFiled = z.looseObject({ request: appDaoSetupRequest,
+  transactions: z.looseObject({ proposal: memberTransaction.nullable(), proposalAndVote: memberTransaction.nullable() }) });
+export const appDaoSetupState = z.discriminatedUnion("state", [
+  z.looseObject({ state: z.literal("pending"), request: appDaoSetupRequest }),
+  z.looseObject({ state: z.literal("reserved"), agent: z.string(), consent: appConsentView }),
 ]);
 /** A DAO consent's state: still waiting for the vote, or stored once the DAO's signature was found on chain. */
 export const appDaoConsentState = z.discriminatedUnion("state", [

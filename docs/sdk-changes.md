@@ -11,9 +11,11 @@ public-interface change bumps at least the minor version.
 - **DAO consent** (added; offline- and stack-tested, not on any host yet): a DAO-owned agent's consent is signed by the DAO's
   own vote. `app.daoConsents.file(message)` files the canonical consent text and answers the proposal a member files
   (`proposal`, or `proposalAndVote`); `app.daoConsents.state(id)` answers `pending` until the DAO's signature is found on
-  chain, then the stored consent. A DAO's consent carries only `DAO_CONSENT_SCOPES` (`read` and `treasury`). Under it the
-  app reads, saves strategy settings, sweeps, creates and executes proposals and turns autopilot on and off; it can't
-  sign or submit owner actions itself, or run plans without a proposal. `appAgent` and `appConsentView` gain an optional
+  chain, then the stored consent. A DAO's consent carries only `DAO_CONSENT_SCOPES` (`read`, `treasury`, and `treasury-execute` as
+  the DAO's opt-in). Under it the app reads, saves strategy settings, sweeps, creates and executes proposals, and turns
+  autopilot on and off; with `treasury-execute` it runs plans too. Autopilot and plans swap without a vote each time,
+  only under the grant the DAO voted for the saved strategy, whose proposal says so. The app can't sign or submit owner
+  actions itself. `appAgent` and `appConsentView` gain an optional
   `signer` (`wallet` or `dao`; absent means `wallet`).
 - **DAO votes** (added; offline- and stack-tested): `app.daoVotes.file({ organization, agent, proposal, verdict })` files
   the DAO's vote on one of the app's Treasury proposals from the platform's own `proposalText`; `app.daoVotes.state(id)`
@@ -22,6 +24,15 @@ public-interface change bumps at least the minor version.
   prepares `DAO_APP_ACTIONS` (the `treasury` grant, freeze, unfreeze): the app gets the proposal a member files, never an
   intent; the agent submits the DAO's signature once the vote passes, and the app follows `owner/status`. Those are
   provider intents that expire in minutes, so only a DAO whose vote passes within `expiresAt` completes them.
+- **DAO setup** (added; offline- and stack-tested): `app.daoSetups.file(message)` files a DAO's setup text
+  (`setupMessage` with the DAO as owner, area within `DAO_SETUP_AREAS`, at most 7 days) for its vote;
+  `app.daoSetups.state(id)` answers `pending`, then `reserved` with the hosted agent and its setup consent. Under it the
+  app asks only for `agent_create` with `signer: "dao"` and no owner (the DAO's derived account), a second vote that
+  must pass within the intent's minutes; then it files the DAO's consent naming the new agent's ID.
+- **DAO roles** (added): `accessOf`, `groupOf`, `permits`, and the `DaoPolicy`, `DaoRole` and `Owner` types, the platform's
+  own reading of Sputnik roles (moved from the gateway, unchanged). An app reads the DAO's `get_policy` and gates each
+  member's calls with `mayCall(accessOf(account, owner), path)`: Group members only, `strategy/save` only for a member
+  who may change the DAO's policy. The platform doesn't check members under a DAO's consent; the app does.
 
 ## 0.4.1 (2026-11-03)
 

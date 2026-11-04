@@ -29,7 +29,8 @@ const ROLE_READS = /\b(daoPolicy|describeTreasury|council|permits|groupOf)\(|get
 /**
  * Requesters never learn the roster: the invoice host never reads the DAO's roles. Pinned at the source
  * of everything it can load, so a role read added anywhere on its path fails here. chain.ts, which
- * defines the reads for the dashboard, is on the path for other lookups and is left out.
+ * defines the reads for the dashboard, is on the path for other lookups and is left out, as is
+ * contract/dao-roles.ts: pure functions over a policy they are given, which read nothing.
  */
 test("nothing the invoice host loads reads the DAO's roles", () => {
   const modules = reachable("src/invoice-http.ts");
@@ -37,7 +38,7 @@ test("nothing the invoice host loads reads the DAO's roles", () => {
     assert.ok(modules.has(join(root, file)), `The import walk must reach ${file}`);
   const offenders = [...modules]
     .map(([file, source]) => [relative(root, file), source] as const)
-    .filter(([name, source]) => name !== "src/chain.ts" && (/gateway\/roles\.ts$/.test(name) || ROLE_READS.test(source)))
+    .filter(([name, source]) => !["src/chain.ts", "src/contract/dao-roles.ts"].includes(name) && (/gateway\/roles\.ts$/.test(name) || ROLE_READS.test(source)))
     .map(([name]) => name);
   assert.deepEqual(offenders, []);
 });

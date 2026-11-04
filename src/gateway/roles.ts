@@ -2,7 +2,8 @@ import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import { z } from "zod";
-import { type DaoPolicy, daoPolicy, groupOf, permits } from "../chain.js";
+import { daoPolicy } from "../chain.js";
+import { accessOf, type Owner } from "../contract/dao-roles.js";
 import { daoOwner } from "../dao-owner.js";
 import type { Router } from "../router.js";
 import { agentOrigin } from "./agent-origin.js";
@@ -20,37 +21,10 @@ import { agentOrigin } from "./agent-origin.js";
  */
 
 import type { Access } from "../contract/permissions.js";
-export type { Access };
-/**
- * An agent's configured owner: a DAO with its policy, or an account (`policy: null`) that holds its own
- * keys. `signer` is the account that signs as the agent's owner: the account itself, or for a DAO the
- * account its MPC key controls (src/dao-owner.ts).
- */
-export type Owner = { account: string; policy: DaoPolicy | null; signer: string };
+export type { Access, Owner };
+export { accessOf };
 /** The agent's owner as its server reports it (the Agent API's), or null before the agent exists. */
 export type AgentOwner = { type: string; account_id?: string } | null;
-
-export function accessOf(account: string, owner: Owner): Access | null {
-  if (!owner.policy) {
-    if (account !== owner.account) return null;
-    // No proposals: the owner's own wallet signs.
-    return { canSign: true, canPropose: false, canVote: false, canExecute: true, canManage: true };
-  }
-  // Everyone's public proposal rights do not grant access to this private workspace.
-  if (!owner.policy.roles.some((r) => groupOf(r).includes(account))) return null;
-  const roles = owner.policy.roles.filter((r) => r.kind === "Everyone" || groupOf(r).includes(account));
-  const permissions = roles.flatMap((r) => r.permissions);
-  const canPropose = permits(permissions, "call", "AddProposal");
-  const canVote = permits(permissions, "call", "VoteApprove");
-  return {
-    canSign: false,
-    canPropose,
-    canVote,
-    // App controls derived from DAO permissions; they never replace owner signatures or grant checks.
-    canExecute: canPropose && canVote,
-    canManage: permits(permissions, "policy", "AddProposal") && permits(permissions, "policy", "VoteApprove"),
-  };
-}
 
 /** Whether the agent answers to the configured owner: not created yet (the owner sets it up), or owned by its signer. */
 export const ownedBy = (agent: AgentOwner, owner: Owner) => agent === null || (agent.type === "near" && agent.account_id === owner.signer);

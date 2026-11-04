@@ -540,11 +540,11 @@ test("a signed setup reserves the owner's hosted agent and lets the app prepare 
   state.providerId = null;
   state.setup = async input => { reserved.push(input); return { name: "payout", owner: input.owner, port: 0, area: input.area, executor: true }; };
   state.dao = true;
-  assert.equal((await post(body)).status, 409, "a DAO owner can't set up from the app yet");
+  assert.equal((await post(body)).status, 409, "a DAO owner's setup goes to /apps/v1/dao-setups");
   state.dao = false;
   const done = await post(body);
   assert.equal(done.status, 201, JSON.stringify(done.body));
-  assert.deepEqual(reserved, [{ owner: "owner.near", area: "payables", deployment: "staging", organization: "org_1" }], "the setup is scoped to its deployment and Organization");
+  assert.deepEqual(reserved, [{ owner: "owner.near", kind: "wallet", area: "payables", deployment: "staging", organization: "org_1" }], "the setup is scoped to its deployment and Organization");
   assert.deepEqual([done.body.agent, done.body.consent.agentId, done.body.consent.scopes], ["payout", "unborn", ["owner"]]);
   assert.equal(done.body.consent.signature, undefined);
   assert.equal((await post(body)).body.consent.id, done.body.consent.id, "the same signature sets up once");

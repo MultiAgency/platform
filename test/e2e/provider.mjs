@@ -263,7 +263,8 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         }
         const nep413 = () => ({ standard: 'nep413', payload: { message: JSON.stringify(body), nonce: randomBytes(32).toString('base64'), recipient: 'local-provider' } });
         if (body.type === 'agent_create') {
-          if (body.owner?.account_id !== account || body.owner.public_key !== PUBLIC_KEY || !body.policy) throw new Error('Unexpected agent creation');
+          // The simulated DAO's derived account may own a created agent too: a DAO's setup through an app.
+          if (![account, ...(dao ? [DAO_SIGNER] : [])].includes(body.owner?.account_id) || body.owner.public_key !== PUBLIC_KEY || !body.policy) throw new Error('Unexpected agent creation');
           const generated = { correlation_id: randomUUID(), type: 'agent_create', signer: body.owner, expires_at: expires, intent: nep413(), preview: { summary: `Create the local agent "${body.name}"` } };
           intents.push({ ...generated, createRequest: body }); return json(res, generated);
         }

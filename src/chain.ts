@@ -1,5 +1,6 @@
 import type { Intent } from "@near-intents-agent-api/sdk";
 import { AccountDoesNotExistError, FunctionCallError, Near } from "near-kit";
+import { type DaoPolicy, groupOf, permits } from "./contract/dao-roles.js";
 import { ASSETS } from "./policy.js";
 
 import { fastnearAuthorization } from "./fastnear.js";
@@ -27,29 +28,6 @@ const near = new Near(mainnet);
 
 export const contractOf = (asset: string) => asset.replace(/^nep141:/, "");
 
-export type DaoPolicy = {
-  /** Attached to every add_proposal, exactly (yoctoNEAR). */
-  proposal_bond: string;
-  roles: DaoRole[];
-  default_vote_policy: { threshold: unknown };
-};
-/** A role's kind is `Everyone`, a named `Group`, or token holders with at least a `Member` balance. */
-type DaoRole = {
-  name: string;
-  kind: { Group: string[] } | { Member: string } | string;
-  permissions: string[];
-  vote_policy: Record<string, { threshold: unknown }>;
-};
-
-/** The accounts a role names: a Group lists them; Everyone and token-weighted Member roles name none. */
-export const groupOf = (role: DaoRole) => (typeof role.kind === "object" && "Group" in role.kind ? role.kind.Group : []);
-
-/**
- * Whether `permissions` grant `action` on `kind` proposals, as the DAO contract reads them:
- * `<kind>:<action>`, `<kind>:*`, `*:<action>` or `*:*` (sputnikdao2/src/policy.rs `can_execute_action`).
- */
-export const permits = (permissions: string[], kind: string, action: string) =>
-  permissions.some((p) => p === `${kind}:${action}` || p === `${kind}:*` || p === `*:${action}` || p === "*:*");
 
 type DaoProposal = {
   id: number;

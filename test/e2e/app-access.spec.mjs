@@ -326,7 +326,7 @@ test("an app sets up an Organization's own Treasury agent; its plans run only un
   }
 });
 
-test("a DAO consents to an app by its own vote, a vote grants and approves its proposal, and the approved proposal executes once", async ({}, info) => {
+test("a DAO consents to an app by its own vote; its grant vote lets autopilot run; a vote approves its proposal, which executes once", async ({}, info) => {
   test.setTimeout(180_000);
   const stack = await environment(info.outputPath('environment'), { daoPortfolio: true, headless: true });
   try {
@@ -353,6 +353,9 @@ test("a DAO consents to an app by its own vote, a vote grants and approves its p
     expect(grant.intent, 'the app never gets an intent to sign').toBeUndefined();
     passes(grant.dao.proposal);
     await expect.poll(async () => value(await agent.call('owner/status', { correlationId: grant.correlationId })).status, { timeout: 45_000 }).toBe('SUCCESS');
+    // The DAO's grant vote is what authorizes unattended swaps: autopilot turns on under it, and off.
+    expect(value(await agent.call('autopilot/enable', { expectedDigest: strategy.digest })).on).toBe(true);
+    expect(value(await agent.call('autopilot/stop')).on).toBe(false);
 
     const proposal = value(await agent.call('proposals/create', { requestId: 'dao-1', legs: [{ from: USDC, to: 'nep141:wrap.near', amount: '1000000' }], expiresAt: later(2) }));
     expect(await agent.call('proposals/approve', { id: proposal.id, signed: { message: 'x', nonce: 'x', publicKey: PUBLIC_KEY, signature: 'x' } }),
@@ -367,5 +370,37 @@ test("a DAO consents to an app by its own vote, a vote grants and approves its p
     expect(done).toMatchObject({ state: 'executed', operations: [expect.objectContaining({ method: 'swap', status: 'SUCCESS' })] });
     expect(value(await agent.call('proposals/execute', { id: proposal.id })).state, 'asked again, nothing is sent').toBe('executed');
     expect(stack.portfolio.swaps.length, 'one swap').toBe(1);
+  } finally { await stack.close(); }
+});
+
+test("a DAO sets up its own hosted Treasury agent by vote, creates it by a second vote, then consents to the app by a third", async ({}, info) => {
+  test.setTimeout(180_000);
+  const stack = await environment(info.outputPath('environment'), { daoPortfolio: true, headless: true, appSetup: ['treasury', 'payables'] });
+  try {
+    const { host, app } = await connect(stack);
+    const passes = transaction => {
+      const kind = transaction.actions[0].params.args.proposal.kind.FunctionCall.actions[0];
+      stack.simulated.daoVote(JSON.parse(Buffer.from(kind.args, 'base64').toString()).request.payload_v2.Eddsa);
+    };
+    const filed = value(await app.daoSetups.file(setupMessage({ host, deployment: 'local', organization: 'org_2', owner: DAO, area: 'treasury', expiresAt: later(3) })));
+    expect(value(await app.daoSetups.state(filed.request.id)).state, 'nothing is reserved before the vote').toBe('pending');
+    passes(filed.transactions.proposal);
+    const reserved = value(await app.daoSetups.state(filed.request.id));
+    expect(reserved).toMatchObject({ state: 'reserved', consent: { signer: 'dao', agentId: 'unborn', scopes: ['owner'] } });
+    await expect.poll(async () => (await app.identity(reserved.agent)).value?.created, { timeout: 30_000 }).toBe(false);
+
+    const agent = app.agent('org_2', reserved.agent);
+    const create = value(await agent.call('owner/prepare', { action: { type: 'agent_create', role: 'treasury' }, signer: 'dao' }));
+    expect(create.intent, 'the app never gets an intent to sign').toBeUndefined();
+    passes(create.dao.proposal);
+    await expect.poll(async () => value(await agent.call('owner/status', { correlationId: create.correlationId })).status, { timeout: 45_000 }).toBe('SUCCESS');
+    const identity = value(await app.identity(reserved.agent));
+    expect(identity).toMatchObject({ owner: DAO, signer: 'dao', created: true });
+
+    const consent = value(await app.daoConsents.file(consentMessage({ host, deployment: 'local', organization: 'org_2', owner: DAO,
+      agent: reserved.agent, agentId: identity.agentId, scopes: ['read', 'treasury'], expiresAt: later(90) })));
+    passes(consent.transactions.proposal);
+    expect(value(await app.daoConsents.state(consent.request.id))).toMatchObject({ state: 'signed', consent: { agentId: identity.agentId } });
+    expect((await agent.call('overview')).ok, 'the DAO consent reads the agent it created').toBe(true);
   } finally { await stack.close(); }
 });

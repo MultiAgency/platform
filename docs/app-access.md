@@ -21,12 +21,14 @@ the chain reports removed; exits non-zero if any lookup went unanswered).
 
 | Request | Result |
 | --- | --- |
-| `GET /apps/v1/agents/<agent>` | `{ agent, owner, agentId, created, host, deployment }`: what the owner's consent must name (wallet-owned agents only; `agentId` null and `created` false before the agent exists) |
+| `GET /apps/v1/agents/<agent>` | `{ agent, owner, agentId, created, host, deployment, signer }`: what the owner's consent must name (`signer` is `wallet` or `dao`; `agentId` null and `created` false before the agent exists) |
 | `POST /apps/v1/setup` with a signed setup text | `201 { agent, consent }`: reserves and starts this owner's hosted agent for the area, and a setup consent (below) |
 | `POST /apps/v1/consents` with `{ message, nonce, publicKey, signature }` | `201 { consent }`; responses omit the message, nonce and signature, which the record keeps (mode 0600) |
 | `GET /apps/v1/consents[?organization=]` | This deployment's consents on this host |
 | `DELETE /apps/v1/consents/<id>` | `{ revoked: true }`; this deployment's on this host only; permanent (below) |
 | `POST /apps/v1/o/<organization>/a/<agent>/rpc/<procedure>` | Forwarded to the agent with actor `app:<deployment>:<organization>` |
+| `POST /apps/v1/dao-setups`, `/dao-consents` with `{ message }`; `/dao-votes` with `{ organization, agent, proposal, verdict }` | `201 { request, transactions }`: the DAO's proposal for a member to file (`proposal`, or `proposalAndVote`) |
+| `GET /apps/v1/dao-setups/<hash>`, `/dao-consents/<hash>`, `/dao-votes/<hash>` | `pending` until the DAO's signature is found; then `reserved`, `signed` or `relayed` (410 once its vote window closed) |
 
 The consent text is exactly `consentMessage({ host, deployment, organization, owner, agent, agentId, scopes, expiresAt })`
 (`src/contract/app-consent.ts`), signed with NEP-413 for recipient the host, with a 32-byte nonce and no callback URL.
@@ -36,7 +38,7 @@ must be a wallet whose agent's server reports that owner and the provider agent 
 check), so a signature held for an agent that was since replaced isn't attached to the replacement.
 
 **Setup.** The owner signs `setupMessage({ host, deployment, organization, owner, area, expiresAt })` (at most an hour;
-the same checks as a consent). Wallet owners only: a DAO owner gets 409. The platform then reserves the hosted agent for
+the same checks as a consent). A DAO owner gets 409 here and files its setup at `/apps/v1/dao-setups` instead (below). The platform then reserves the hosted agent for
 that owner and area if the host's config lists the area in `appSetup` (independent of self-service `/gw/agents`; a demo
 host also narrows it to its `hostedAreas`) and the registry has capacity, starts it, and stores a setup consent: `owner` scope with the reserved stand-in agent ID
 `unborn`, which no signed consent may name. It acts only while the agent's server reports no agent created, so it serves the
@@ -151,14 +153,20 @@ reachable. Each
 consent, call and revocation is appended to `.app-access/access.jsonl`.
 
 DAO owners: a DAO's consent is signed by its own vote (`POST /apps/v1/dao-consents`, then `GET /apps/v1/dao-consents/<hash>`
-until the DAO's signature is found; coordination/p5-treasury-dao-consent.md). It carries only `read` and `treasury`,
-and each call re-reads that the agent is still owned by the DAO's derived account. Under it the app asks for the DAO's
+until the DAO's signature is found; coordination/p5-treasury-dao-consent.md). It carries only `read`, `treasury` and,
+as the DAO's opt-in, `treasury-execute`, and each call re-reads that the agent is still owned by the DAO's derived
+account. The DAO's grant vote is what authorizes unattended swaps (autopilot, and with `treasury-execute` the app's
+plans), within the strategy it binds and the DAO's signed policy; the grant's proposal says so. The platform authorizes the app, not a member: the app gates its own members with the
+SDK's `accessOf` and `mayCall`, from the DAO's policy. Under it the app asks for the DAO's
 votes: on its Treasury proposals (`POST /apps/v1/dao-votes`, relayed to the agent once the signature is found), and on
 the `treasury` grant, freeze and unfreeze (`owner/prepare` with `signer: "dao"`, which answers the proposal to file;
-the agent submits the signature). Offline- and stack-tested (simulated DAO votes); no host serves it yet, and DAO setup
-through an app isn't built.
+the agent submits the signature). A DAO sets up a hosted Treasury agent by vote too (`POST /apps/v1/dao-setups`,
+then `agent_create` with `signer: "dao"` under its setup consent, a second vote within the intent's minutes).
+A DAO can't revoke its own consent through the platform (the deployment or the operator can), and a consent lasts up
+to 366 days. Offline- and stack-tested (simulated DAO votes); no host serves it yet. See
+[enforcement](enforcement.md#dao-owners-through-apps-offline--and-stack-tested).
 
-Limits: DAO owners as above (no DAO setup, and owner actions through the app take `signer: "wallet"` only); payout requests
+Limits: DAO owners as above (Treasury only; no `payout` or `owner`); payout requests
 pay confidential USDC through `intents`, or withdraw wNEAR (arriving as native NEAR) or USDC to an agreed NEAR account
 (mainnet-observed on staging 2026-10-30), and a held withdrawal can only be rejected (approving one isn't built yet,
 though its approval's hash is now observed); the owner can't revoke on the platform directly

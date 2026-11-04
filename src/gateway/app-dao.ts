@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { DAO_CONSENT_SCOPES } from "../contract/app-access.js";
-import { AppScope, parseConsentMessage } from "../contract/app-consent.js";
+import { DAO_CONSENT_SCOPES, DAO_SETUP_AREAS } from "../contract/app-access.js";
+import { AppScope, parseConsentMessage, parseSetupMessage, UNBORN_AGENT } from "../contract/app-consent.js";
 import { MAX_PROPOSAL_MS } from "../contract/treasury-proposals.js";
 import { nextProposalId } from "../chain.js";
 import { findSignature, latestBlock } from "../dao-owner.js";
@@ -38,13 +38,19 @@ const ConsentRequest = z.strictObject({ ...common, kind: z.literal("consent"), s
 /** A vote on a Treasury proposal, under the DAO consent `under`; `relayed` once the signature reached the agent. */
 const VoteRequest = z.strictObject({ ...common, kind: z.literal("proposal"), proposal: z.string(), verdict: z.enum(["approve", "reject"]),
   under: hex64, relayed: z.strictObject({ at: z.number().int(), state: z.string() }).nullable() });
-const Request = z.discriminatedUnion("kind", [ConsentRequest, VoteRequest]);
+/** A DAO's setup of a hosted agent; `consent` and `agent` once the signature was found and the agent reserved. */
+const SetupRequest = z.strictObject({ ...common, kind: z.literal("setup"), area: z.enum(DAO_SETUP_AREAS),
+  consent: hex64.nullable(), reserved: z.string().nullable() });
+const Request = z.discriminatedUnion("kind", [ConsentRequest, VoteRequest, SetupRequest]);
 export type DaoRequest = z.infer<typeof Request>;
 export type DaoConsentRequest = z.infer<typeof ConsentRequest>;
 export type DaoVoteRequest = z.infer<typeof VoteRequest>;
-const settled = (r: DaoRequest) => r.kind === "consent" ? r.consent !== null : r.relayed !== null;
+export type DaoSetupRequest = z.infer<typeof SetupRequest>;
+const settled = (r: DaoRequest) => r.kind === "proposal" ? r.relayed !== null : r.consent !== null;
 export const publicDaoRequest = ({ id, dao, organization, agent, agentId, scopes, expiresAt, votingUntil, description }: DaoConsentRequest) =>
   ({ id, dao, organization, agent, agentId, scopes, expiresAt, votingUntil, hash: id, description });
+export const publicDaoSetup = ({ id, dao, organization, area, expiresAt, votingUntil, description }: DaoSetupRequest) =>
+  ({ id, dao, organization, area, expiresAt, votingUntil, hash: id, description });
 export const publicDaoVote = ({ id, dao, organization, agent, agentId, proposal, verdict, votingUntil, description }: DaoVoteRequest) =>
   ({ id, dao, organization, agent, agentId, proposal, verdict, votingUntil, hash: id, description });
 
@@ -75,6 +81,42 @@ export function verifyDaoConsentText(message: string, expected: { host: string; 
   const other = text.scopes.filter(scope => !allowed.has(scope));
   if (other.length) throw new BadRequest(`A DAO's consent carries only ${DAO_CONSENT_SCOPES.join(" and ")}, not ${other.join(", ")}.`);
   return { text, expiresAt };
+}
+
+/**
+ * A setup text a DAO may vote on: canonical, for this host and the calling deployment, an area within `DAO_SETUP_AREAS`,
+ * and expiring between a minute and Sputnik's default proposal period from now (a vote takes longer than a wallet's
+ * hour). Throws a BadRequest saying why.
+ */
+export function verifyDaoSetupText(message: string, expected: { host: string; deployment: string }, now = Date.now()) {
+  const text = parseSetupMessage(message);
+  if (!text) throw new BadRequest("The setup text isn't a canonical app setup.");
+  if (text.host !== expected.host.toLowerCase()) throw new BadRequest("The setup names another platform host.");
+  if (text.deployment !== expected.deployment) throw new BadRequest("The setup names another app deployment.");
+  const expiresAt = Date.parse(text.expiresAt);
+  if (expiresAt <= now + 60_000) throw new BadRequest("The setup has expired or expires within a minute.");
+  if (expiresAt > now + MAX_PROPOSAL_MS) throw new BadRequest("A DAO's setup lasts at most 7 days.");
+  if (!(DAO_SETUP_AREAS as readonly string[]).includes(text.area)) throw new BadRequest(`A DAO sets up only ${DAO_SETUP_AREAS.join(", ")} agents through an app.`);
+  return { text: { ...text, area: text.area as (typeof DAO_SETUP_AREAS)[number] }, expiresAt };
+}
+
+/** What the DAO's proposal says for a setup: which app, Organization and area, and that creating the agent is a second vote. */
+export function daoSetupDescription(request: Pick<DaoSetupRequest, "deployment" | "organization" | "area" | "expiresAt" | "votingUntil" | "id" | "host">) {
+  return [
+    `* Proposal Action: Setup: app deployment ${request.deployment} may set up a hosted ${request.area} agent owned by this DAO for ` +
+      `Organization ${request.organization}, and ask the DAO to create it, until ${new Date(request.expiresAt).toISOString()}`,
+    `* Signing window closes: ${new Date(request.votingUntil).toISOString()} (approve before then, or nothing is set up)`,
+    `* Signs: NEP-413 hash ${request.id} for ${request.host} as the agents' owner (v1.signer, path agent-owner)`,
+    "* Notes: Filed by the MultiAgency platform for an app. Creating the agent is a separate vote, which must pass within minutes.",
+  ].join(" <br>");
+}
+
+/** The setup consent a found signature completes: `owner` scope for the reserved agent, only while it isn't created. */
+export function daoSetupConsent(request: DaoSetupRequest, signature: Buffer, agent: string): VerifiedConsent {
+  return { version: 1, id: createHash("sha256").update(signature.toString("hex")).digest("hex"), deployment: request.deployment,
+    host: request.host, organization: request.organization, owner: request.dao, agent, agentId: UNBORN_AGENT, scopes: ["owner"],
+    expiresAt: request.expiresAt, message: request.message, nonce: request.nonce, publicKey: request.signer.public_key,
+    signature: signature.toString("base64"), signer: "dao" };
 }
 
 /** What the DAO's proposal says: the consent's terms, the vote's deadline, and the hash its key signs. */
@@ -139,10 +181,22 @@ export class DaoRequests {
     const votingUntil = Math.min(request.expiresAt, now + MAX_PROPOSAL_MS);
     return this.write({ ...request, version: 1, kind: "proposal", votingUntil, description: daoVoteDescription({ ...request, votingUntil }), relayed: null }) as DaoVoteRequest;
   }
+  /** A setup request: its vote must pass before the setup text expires (at most the proposal period). */
+  fileSetup(request: Omit<DaoSetupRequest, "version" | "kind" | "consent" | "reserved" | "votingUntil" | "description">, now = Date.now()) {
+    this.admit(request.deployment, now);
+    const votingUntil = Math.min(request.expiresAt, now + MAX_PROPOSAL_MS);
+    return this.write({ ...request, version: 1, kind: "setup", votingUntil, description: daoSetupDescription({ ...request, votingUntil }),
+      consent: null, reserved: null }) as DaoSetupRequest;
+  }
   settle(id: string, consent: string) {
     const record = this.read(id);
     if (record?.kind !== "consent") throw new Error(`No DAO consent request ${id}`);
     this.write({ ...record, consent });
+  }
+  reserved(id: string, consent: string, agent: string) {
+    const record = this.read(id);
+    if (record?.kind !== "setup") throw new Error(`No DAO setup request ${id}`);
+    return this.write({ ...record, consent, reserved: agent }) as DaoSetupRequest;
   }
   relayed(id: string, state: string, now = Date.now()) {
     const record = this.read(id);

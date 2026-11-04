@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import { appAgent, appConsentList, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoVoteFiled, appDaoVoteState, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
+import { appAgent, appConsentList, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
 import type { appConsentSubmission } from "./app-consent.js";
 import { ownerClient, type OwnerCallOptions, type OwnerFailure, type OwnerOutput, type OwnerProcedure, type OwnerResult } from "./owner-client.js";
 import type { ownerStreams } from "./owner-outputs.js";
@@ -81,6 +81,16 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
     daoConsents: {
       file: (message: string) => route("/dao-consents", appDaoConsentFiled, post({ message })),
       state: (id: string) => route(`/dao-consents/${encodeURIComponent(id)}`, appDaoConsentState),
+    },
+    /**
+     * A DAO's hosted Treasury agent, set up by its vote: `file` takes the canonical setup text (owner the DAO, area
+     * within `DAO_SETUP_AREAS`, at most 7 days) and answers the proposal a member files; `state` reads it until the
+     * DAO's signature is found, then the reserved agent and its setup consent. Then ask for `agent_create` with
+     * `signer: "dao"` (a vote that must pass within minutes), and once created file the DAO's consent naming its ID.
+     */
+    daoSetups: {
+      file: (message: string) => route("/dao-setups", appDaoSetupFiled, post({ message })),
+      state: (id: string) => route(`/dao-setups/${encodeURIComponent(id)}`, appDaoSetupState),
     },
     /**
      * A DAO's vote on one of this app's Treasury proposals under its DAO consent: `file` answers the proposal a member

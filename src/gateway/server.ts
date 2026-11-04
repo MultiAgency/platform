@@ -166,9 +166,9 @@ const server = createServer(async (req, res) => {
       && req.headers.host?.toLowerCase() !== signingHost.toLowerCase()) return json(res, 421, { error: "Use the configured host for agent access" });
     if (await machineRoutes(req, res, pathname, signingHost, selected, () => auth.account(req), () => stopping)) return;
     if (await confirmRoutes(req, res, pathname, signingHost, confirms, APP_ROOT, selected, DIST, () => stopping)) return;
-    if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, config.appSetup.length ? { setup: async ({ owner, area, deployment, organization }) => {
+    if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, config.appSetup.length ? { setup: async ({ owner, kind, area, deployment, organization }) => {
       if (!config.appSetup.includes(area) || (site && !site.hostedAreas?.includes(area))) throw new Error("This area is not available on this host");
-      return await reserveHosted({ owner, kind: "wallet", area }, { deployment, organization });
+      return await reserveHosted({ owner, kind, area }, { deployment, organization });
     } } : {})) return;
     // Anything under /apps/ or /confirm/ that neither answered: never the file server's pages.
     if (config.headless) return json(res, 404, { error: "Not found" });

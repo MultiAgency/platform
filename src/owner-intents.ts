@@ -316,7 +316,8 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
   const daoId = process.env.TREASURY_ACCOUNT!;
   // The intent is already held: a failed read only drops the one-click filings, leaving filing in Trezu.
   const [policy, nextId] = await Promise.all([daoPolicy(daoId).catch(() => null), nextProposalId(daoId).catch(() => null)]);
-  const description = proposalDescription({ type: generated.type, summary: generated.preview.summary, expiresAt: generated.expires_at, hash: dao.hash });
+  const unattended = request.type === "grant_issue" && /^treasury(:|$)/.test(String((request as { label?: unknown }).label ?? ""));
+  const description = proposalDescription({ type: generated.type, summary: generated.preview.summary, expiresAt: generated.expires_at, hash: dao.hash, unattended });
   return {
     ...base,
     dao: {
@@ -335,10 +336,16 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
  * the payees it adds, so it gets fixed wording and the dashboard shows what it does. Approvals already
  * read generically ("Approve the pending confidential request", #46–#53 on chain).
  */
-export function proposalDescription(intent: { type: string; summary: string; expiresAt: string; hash: string }) {
+/**
+ * What a DAO's signing proposal says. `unattended`: a Treasury grant, which lets the agent swap within the saved strategy
+ * without a vote each time (its autopilot, approved proposals, and the plans of apps the DAO gave `treasury-execute`).
+ */
+export function proposalDescription(intent: { type: string; summary: string; expiresAt: string; hash: string; unattended?: boolean }) {
   const action = intent.type === "policy_update" ? "Change the agent's policy (check it on the dashboard before voting)" : intent.summary;
   return [
     `* Proposal Action: ${action}`,
+    ...(intent.unattended ? ["* Authorizes: swaps within the saved strategy and the DAO's signed policy without a vote each time " +
+      "(the agent's autopilot, approved proposals, and plans of apps the DAO consented to with treasury-execute)"] : []),
     `* Agent: ${process.env.AGENT_ID ?? "a new agent"}`,
     `* Signing window closes: ${intent.expiresAt} (approve before then, or the signature can't be used)`,
     `* Signs: hash ${intent.hash} as the agents' owner (v1.signer, path agent-owner)`,

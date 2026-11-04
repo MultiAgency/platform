@@ -766,6 +766,41 @@ without a lock, so concurrent proposals can pass it slightly; one unreadable pro
 the whole agent (closed, not open). The owner's approving key is checked when the approval is relayed, not again at
 execution.
 
+### DAO owners through apps (offline- and stack-tested)
+
+A DAO-owned agent reaches an app under a consent the DAO signs by its own vote: a passed proposal calling `v1.signer`,
+found on chain by `findSignature`. Every text the DAO votes on is built by the platform (the consent and setup texts,
+`proposalText`, and the provider's owner intents for creation, the grant, freeze and unfreeze). The app gets the
+proposal a member files, never a text or intent to sign (coordination/p5-treasury-dao-consent.md).
+
+What holds, offline-tested in `test/app-dao.test.ts`, where each planted fault fails a test:
+- A request stores or relays only a signature that verifies against the DAO's derived key over its exact hash. The
+  platform picked the nonce, and the signature must be found before the request's `votingUntil`.
+- A DAO's consent carries only `read`, `treasury` and, as its opt-in, `treasury-execute`. Swaps without a vote each
+  time (autopilot, and the app's plans with `treasury-execute`) run only under the grant the DAO voted for the saved
+  strategy, checked under the lock before the claim, as for a wallet owner. The grant's proposal says it authorizes
+  them.
+- On every call, the platform re-reads that the agent is configured with that DAO and that its server reports the DAO's
+  derived account. A proposal vote is relayed once, and only while the consent it was filed under is live.
+- A DAO's setup consent prepares only the agent's creation, with the derived account as owner.
+
+Stack-tested in `test/e2e/app-access.spec.mjs` with simulated DAO votes: setup, creation, consent, the grant, a
+proposal approved and executed once.
+
+Limits:
+- The approval is the platform's check, as for a wallet owner's proposals.
+- Only a DAO whose vote passes within the provider intent's minutes completes creation, the grant, freeze or unfreeze.
+- The platform authorizes the app, not a member. The app gates its own members with the SDK's `accessOf` and `mayCall`.
+- A DAO can't revoke its consent through the platform: only the app deployment and the operator can. A consent lasts up
+  to 366 days. A DAO-signed revocation isn't built.
+- The derived key can't be removed, so the wallet's key-removal revocation has no DAO counterpart, and the operator's
+  `check-keys` sweep leaves DAO consents alone.
+- The app holds the transactions a member files, so it could file its own `add_proposal` with this description but
+  another hash in the `v1.signer` call. The platform ignores any hash but its own, but the members' check is to compare
+  the description's "Signs: … hash" line with the call's `payload_v2`. `proposalAndVote` binds the vote to the filed
+  kind (`act_proposal` passes it).
+- Not deployed or mainnet-observed.
+
 ## Shared machine access candidate
 
 The local shared access implementation is documented in [Agent access](agent-access.md). It delegates
@@ -778,7 +813,7 @@ ceiling does not limit external saved-plan execution.
 This is offline-tested, not deployed or mainnet-observed. Chosen-swap `externalPlan` quotes and saves
 exact ordered swaps, retaining policy/strategy bindings and cost limits; execution uses the existing
 guarded saved-plan path. The Treasury skill/client uses shared authorization with no rebalance fallback.
-There is no verified DAO delegation approval, OAuth/MCP interface, or distributed revocation/fencing. Local
+DAO machine credentials stay refused (DAO app consents are a separate route, above); there is no OAuth/MCP interface, or distributed revocation/fencing. Local
 simulated-provider tests cover client process termination after a first success and lost swap responses:
 no duplicate submissions occur, and unresolved outcomes block new sends. Killing the client does not
 cancel an admitted server execution. These tests do not establish real-provider crash/settlement

@@ -61,7 +61,7 @@ What has run where, by the routes each client calls:
 | --- | --- |
 | `ownerClient`, in the owner's session | Mainnet-observed on the hosted platform: reads, owner actions, held-payout votes, and plan execution through the Treasury autopilot |
 | `ownerClient` with a machine credential | Offline- and stack-tested; not observed on mainnet |
-| `appClient` | Mainnet-observed on platform staging (2026-10-28, 2026-10-30); not in production; wallet-owned agents only |
+| `appClient` | Wallet-owned agents: mainnet-observed on platform staging (2026-10-28, 2026-10-30); not in production. DAO-owned (`daoSetups`, `daoConsents`, `daoVotes`): offline- and stack-tested only |
 | `payeeClient`, in the contributor's session | Mainnet-observed on the hosted invoice entry: invoices and agreement requests (2026-10-12, 2026-10-14) |
 | `payeeClient` with a report connection | Offline- and stack-tested; not deployed |
 

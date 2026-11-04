@@ -258,10 +258,14 @@ export async function consentKeyHolds(consents: AppConsents, consent: ConsentRec
   return false;
 }
 
-/** Checks every live consent's key (operator sweep): catches a removal that no call happened to observe. */
+/**
+ * Checks every live wallet consent's key (operator sweep): catches a removal that no call happened to observe. A DAO's
+ * consent is signed by its derived key, which is never one of the DAO account's keys: its ownership is re-read on every
+ * call instead, so the sweep leaves it alone.
+ */
 export async function sweepConsentKeys(consents: AppConsents, keyState: KeyStateLookup, now = Date.now()) {
   const result = { checked: 0, revoked: [] as string[], unanswered: [] as string[] };
-  for (const consent of consents.list({}).filter(c => !c.revoked && c.expiresAt > now)) {
+  for (const consent of consents.list({}).filter(c => !c.revoked && c.expiresAt > now && c.signer !== "dao")) {
     result.checked++;
     try { if (!await consentKeyHolds(consents, consent, keyState, now)) result.revoked.push(consent.id); }
     catch { result.unanswered.push(consent.id); }
