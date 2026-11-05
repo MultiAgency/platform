@@ -17,7 +17,7 @@ export type AppConsentSubmission = z.input<typeof appConsentSubmission>;
  *   the agent). Resending the same request won't change it.
  * - `refused`: the platform refused the request as made (400 invalid or revoked text, 404, 409 conflict).
  * - `rate_limited` (429): the deployment's request limit; nothing was done. Send the same request again after
- *   `retryAfterSeconds` (from `Retry-After`) when given.
+ *   `retryAfterSeconds` (from `Retry-After`) when given. A 429 without the gateway's JSON (a proxy page) stays `refused`.
  * - `unavailable`: no answer, 5xx (503: an ownership or key check went unanswered, nothing stored or forwarded), or an
  *   unreadable one. Setup, consent submission and revocation are idempotent for the same signed body, so resending it is safe.
  */
@@ -61,7 +61,8 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
     const error = typeof (body as { error?: unknown } | undefined)?.error === "string" ? (body as { error: string }).error : `HTTP ${response.status}`;
     if (response.status === 401) return { ok: false, kind: "session", status: 401, error };
     if (response.status === 403) return { ok: false, kind: "forbidden", status: 403, error };
-    if (response.status === 429) {
+    // Only the gateway's own JSON answer: a proxy's 429 page says nothing about this request, as for agent calls.
+    if (response.status === 429 && typeof (body as { error?: unknown } | undefined)?.error === "string") {
       const after = retryAfterSeconds(response.headers);
       return { ok: false, kind: "rate_limited", status: 429, error, ...(after !== undefined && { retryAfterSeconds: after }) };
     }

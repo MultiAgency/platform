@@ -757,6 +757,9 @@ test("each credential has an hourly request limit, and its 429 says when to try 
   assert.deepEqual(await app.identity("payout"), limited);
   assert.deepEqual(await app.agent("org_1", "payout").call("proposals/create", { requestId: "r", legs: "strategy", expiresAt: new Date(Date.now() + 3_600_000).toISOString() }), limited);
   assert.deepEqual(await app.agent("org_1", "payout").call("overview"), limited);
+  // A proxy's 429 page isn't the gateway's answer: the routes keep their old kind for it.
+  const proxied = appClient({ base: `http://127.0.0.1:${port}`, credential: staging, fetch: async () => new Response("<html>slow down</html>", { status: 429 }) });
+  assert.deepEqual(await proxied.identity("payout"), { ok: false, kind: "refused", status: 429, error: "HTTP 429" });
 });
 
 test("app access state is written only into a directory no one else can read", t => {
