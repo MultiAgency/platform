@@ -224,7 +224,7 @@ the gateway answers 429 before forwarding anything, with `Retry-After` (delay-se
 the hour) and `{ error, retryAfterSeconds }`. From SDK 0.5.2 `appClient` reports that as `kind: "rate_limited"` with
 `retryAfterSeconds`, for its own routes and for agent calls alike, so it's never mistaken for a refusal or an unknown
 outcome; the same request may be sent again once it clears. A 429 that isn't the gateway's JSON answer (a proxy page)
-stays `unavailable` or `unknown`. A limit the operator sets per deployment or per Organization isn't built (#15).
+keeps its earlier kind: `refused` on the app routes, `unavailable` or `unknown` on agent calls. A limit the operator sets per deployment or per Organization isn't built (#15).
 Offline-tested (`test/app-access.test.ts`, `test/contract-owner.test.ts`).
 
 DAO requests are bounded per deployment: at most 64 waiting for a vote and 256 filed a day. A finished one (completed,
