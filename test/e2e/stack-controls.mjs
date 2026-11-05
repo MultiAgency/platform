@@ -119,6 +119,14 @@ export function stackControls(stack, { owner }) {
      * The owner's NEP-413 signature over a text an app asked for: a consent, a setup, or a prepared intent's `payload`.
      * Never the platform's sign-in text, which an app must not ask an owner to sign (docs/app-access.md).
      */
+    /**
+     * The DAO passes the proposal that signs `hash` (a DAO request's NEP-413 hash, as the `v1.signer` call in the member's
+     * transaction names it): the simulated MPC key signs it, as an executed proposal's receipt would return it.
+     */
+    daoVote: ({ hash }) => {
+      if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) throw new Error('Give hash: the 64-hex hash the DAO signs');
+      simulated.daoVote(hash);
+    },
     signOwner: async ({ message, recipient, nonce }) => {
       if (typeof message !== 'string' || typeof recipient !== 'string' || typeof nonce !== 'string') throw new Error('Give message, recipient and nonce');
       if (message === `Sign in to ${host}`) throw new Error('An app never asks the owner to sign the platform sign-in text');

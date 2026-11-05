@@ -28,7 +28,7 @@ export const PUBLIC_KEY = parseKey(TEST_KEY).publicKey.toString();
  */
 export const DAO = 'council.sputnik-dao.near';
 export const DAO_SIGNER = rawKey(PUBLIC_KEY).toString('hex');
-const daoPolicy = { proposal_bond: '100000000000000000000000', default_vote_policy: { weight_kind: 'RoleWeight', quorum: '0', threshold: [1, 2] }, roles: [
+const daoPolicy = { proposal_bond: '100000000000000000000000', proposal_period: '604800000000000', default_vote_policy: { weight_kind: 'RoleWeight', quorum: '0', threshold: [1, 2] }, roles: [
   { name: 'council', kind: { Group: [OWNER] }, permissions: ['*:AddProposal', '*:VoteApprove', '*:VoteReject', '*:VoteRemove', '*:Finalize'], vote_policy: {} },
   { name: 'members', kind: { Group: [SECOND] }, permissions: ['call:VoteApprove', 'call:VoteReject'], vote_policy: {} },
 ] };
