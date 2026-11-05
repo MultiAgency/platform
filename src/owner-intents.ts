@@ -4,7 +4,7 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { type Intent, type OwnerWallet, type SubmitIntentRequest } from "@near-intents-agent-api/sdk";
+import { type Intent, type OwnerWallet, type Policy, type SubmitIntentRequest } from "@near-intents-agent-api/sdk";
 import { api, readStatus } from "./api.js";
 import { completeSigning, type DaoSigning, daoOwner, findSignature, latestBlock, proposalAndVote, proposalTransaction, signingRequest, signTransaction } from "./dao-owner.js";
 import { agentId, ENV_FILE, executes, saveEnv } from "./env.js";
@@ -17,7 +17,7 @@ import { type Strategy, strategyLabelSuffix } from "./strategy-digest.js";
 import { ownerRequests, type PolicyChanges, policyChange } from "./owner-requests.js";
 import type { AgentRole } from "./policy.js";
 import { daoPolicy, nextProposalId } from "./chain.js";
-import { mandateDigest, type ReviewedPolicy } from "./mandate.js";
+import { canonicalPolicy, mandateDigest, type ReviewedPolicy } from "./mandate.js";
 import { isTerminal, settle } from "./ops.js";
 import { checkPaymentApproval, type PaymentApproval } from "./payment-approval.js";
 import { acquireMoneyLock, assertMoneyLock } from "./lock.js";
@@ -323,7 +323,11 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
   const label = request.type === "grant_issue" ? String((request as { label?: unknown }).label ?? "") : undefined;
   let strategy: Strategy | undefined;
   if (label?.startsWith("treasury:")) try { strategy = loadStrategy(); } catch { strategy = undefined; }
-  const description = proposalDescription({ type: generated.type, summary: generated.preview.summary, expiresAt: generated.expires_at, hash: dao.hash, label, strategy });
+  // A revocation's proposal names the grant it ends, read from the provider; an unreadable list names only its id.
+  const revokes = request.type === "grant_revoke" ? { id: request.grant_id,
+    label: (await api.listGrants(agentId()).catch(() => null))?.find(g => g.grant_id === request.grant_id)?.label ?? null } : undefined;
+  const description = proposalDescription({ type: generated.type, summary: generated.preview.summary, expiresAt: generated.expires_at, hash: dao.hash, label, strategy,
+    revokes, policy: policies });
   return {
     ...base,
     dao: {
@@ -344,8 +348,10 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
  * `treasury:<suffix>`) lets the agent swap within the strategy it binds without a vote each time, so its proposal says
  * so and names that strategy's terms, when `strategy` is the one the suffix binds.
  */
-export function proposalDescription(intent: { type: string; summary: string; expiresAt: string; hash: string; label?: string; strategy?: Strategy }) {
-  const action = intent.type === "policy_update" ? "Change the agent's policy (check it on the dashboard before voting)" : intent.summary;
+export function proposalDescription(intent: { type: string; summary: string; expiresAt: string; hash: string; label?: string; strategy?: Strategy;
+  revokes?: { id: string; label: string | null }; policy?: { current: Policy | null; requested: Policy } }) {
+  // A DAO's proposals are public: a policy edit's summary can name payees, so it's never used.
+  const action = intent.type === "policy_update" ? "Change the agent's policy" : intent.summary;
   const suffix = intent.type === "grant_issue" && intent.label?.startsWith("treasury:") ? intent.label.slice("treasury:".length) : undefined;
   const terms = suffix === undefined ? null : !intent.strategy ? "its terms couldn't be read when this was filed; read them on the agent before voting"
     : strategyLabelSuffix(intent.strategy) === suffix ? strategyTerms(intent.strategy)
@@ -356,11 +362,29 @@ export function proposalDescription(intent: { type: string; summary: string; exp
       "* Authorizes: the agent's autopilot, and plans of apps the DAO consented to with treasury-execute, to swap without " +
         "a vote each time, within the strategy below and the DAO's signed policy. The DAO's approved Treasury proposals also execute under it",
       `* Strategy ${suffix}: ${terms}`] : []),
+    ...(intent.revokes ? [intent.revokes.label === null
+      ? `* Revokes: grant ${intent.revokes.id}, not found among the agent's grants when this was filed; check it on the agent before voting`
+      : `* Revokes: grant ${intent.revokes.id} (${intent.revokes.label})`,
+      ...(intent.revokes.label?.startsWith("treasury") ? ["* Ends: swaps without a vote under this grant (the autopilot, and plans of apps with treasury-execute)"] : [])] : []),
+    ...(intent.type === "policy_update" && intent.policy ? [`* Changes: ${policyChanges(intent.policy.current, intent.policy.requested)}`] : []),
     `* Agent: ${process.env.AGENT_ID ?? "a new agent"}`,
     `* Signing window closes: ${intent.expiresAt} (approve before then, or the signature can't be used)`,
     `* Signs: hash ${intent.hash} as the agents' owner (v1.signer, path agent-owner)`,
     "* Notes: Filed by the MultiAgency platform. Before voting, check that the proposal's v1.signer call signs exactly this hash (payload_v2.Eddsa).",
   ].join(" <br>");
+}
+
+/**
+ * The policy fields the edit changes, by name only: a DAO's proposals are public, and values can name payees or the
+ * DAO's budget. Members see each field before and after where only they can: `owner/prepare` answers both policies.
+ */
+function policyChanges(current: Policy | null, requested: Policy) {
+  if (!current) return "the policy in force couldn't be read when this was filed; compare it on the agent before voting";
+  const before = JSON.parse(canonicalPolicy(current)) as Record<string, unknown>, after = JSON.parse(canonicalPolicy(requested)) as Record<string, unknown>;
+  const fields = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort()
+    .filter(field => JSON.stringify(before[field] ?? null) !== JSON.stringify(after[field] ?? null));
+  return fields.length ? `${fields.join(", ")} (values aren't published here: compare each before and after where your app shows it to members)`
+    : "none: the requested policy equals the one in force";
 }
 
 const assetNames = new Map(Object.entries(ASSETS).map(([name, id]) => [id as string, name]));

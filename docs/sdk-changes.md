@@ -6,6 +6,16 @@ version, so a package staged or packed from changed sources never carries a rele
 commit dates the heading, before its candidate runs; staging copies this file as it is. Under 0.x, any
 public-interface change bumps at least the minor version.
 
+## 0.5.2
+
+- **More owner actions a DAO votes on through an app** (behaviour, the user's decision 2026-11-05): `DAO_APP_ACTIONS`
+  gains `grant_revoke` and `policy_update`. A policy edit may change only `destinations`, `withdrawals` and `budget`
+  (`DAO_POLICY_FIELDS`, added), the fields the provider signs as a readable message; an on-chain edit carries the policy
+  encrypted, so it stays refused. `AppDaoAction` gains both. A DAO's proposals are public, so a policy edit's proposal
+  names the changed fields only, never values; members compare `policy.current` and `policy.requested` from
+  `owner/prepare` in the app. A revocation's proposal names the grant and its label. Each is a provider owner intent
+  with about 290 s to pass (#20). Offline-tested only.
+
 ## 0.5.1 (2026-11-04)
 
 Additive procedures for owner UIs (platform#17), funding through the `treasury` scope, plus two fixes: an over-cap

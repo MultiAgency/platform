@@ -165,8 +165,13 @@ account. The DAO's grant vote is what authorizes unattended swaps (autopilot, an
 plans), within the strategy it binds and the DAO's signed policy; the grant's proposal says so. The platform authorizes the app, not a member: the app gates its own members with the
 SDK's `accessOf` and `mayCall`, from the DAO's policy. Under it the app asks for the DAO's
 votes: on its Treasury proposals (`POST /apps/v1/dao-votes`, relayed to the agent once the signature is found), and on
-the `treasury` grant, freeze and unfreeze (`owner/prepare` with `signer: "dao"`, which answers the proposal to file;
-the agent submits the signature). A DAO sets up a hosted Treasury agent by vote too (`POST /apps/v1/dao-setups`,
+the `treasury` grant, revoking a grant, a policy edit to `destinations`, `withdrawals` or `budget`, freeze and unfreeze
+(`owner/prepare` with `signer: "dao"`, which answers the proposal to file; the agent submits the signature). An edit to
+any other policy field is refused: it's an on-chain edit whose policy is encrypted, so voters couldn't check it. Because
+a DAO's proposals are public, a policy edit's proposal names only the fields it changes, never their values (payees, the
+DAO's budget); `owner/prepare` answers the policy before and after (`policy.current`, `policy.requested`) for the app
+to show its members. A revocation's proposal names the grant and its label. Revoking and policy edits through an app
+are offline-tested only (from the next SDK release). A DAO sets up a hosted Treasury agent by vote too (`POST /apps/v1/dao-setups`,
 then `agent_create` with `signer: "dao"` under its setup consent, a second vote within the intent's minutes). A
 host that doesn't set up Treasury agents refuses it before filing anything, so no vote is spent on it.
 **A DAO's own stop, with no app:** anyone opens `/confirm/dao/stop/<dao>/<agent>` (GET only; a pair this host doesn't

@@ -336,21 +336,28 @@ test("a DAO vote relays nothing for a proposal that isn't open, a consent that e
   assert.equal(forwarded.length, stood, "nothing relayed");
 });
 
-test("under its consent a DAO is asked to vote only on a Treasury grant, freeze or unfreeze, and the app gets only the proposal", async t => {
+test("under its consent a DAO is asked to vote only on a Treasury grant, its revocation, an off-chain policy edit, freeze or unfreeze, and the app gets only the proposal", async t => {
   const { port, state, forwarded, staging, rpc, consented } = await harness(t);
   await consented();
   const prepare = (action: object, signer = "dao") => call(port, rpc("owner/prepare"), "POST", staging, { json: { action, signer } });
   const daoReply = { correlationId: "c-1", preview: { summary: "Freeze the agent" }, expiresAt: later(0.005), digest: null,
     dao: { owner: "x", transaction: { receiverId: "v1.signer", actions: [] }, proposal: null, proposalAndVote: null } };
   state.replies["/rpc/owner/prepare"] = { status: 200, json: daoReply };
-  for (const action of [{ type: "agent_freeze" }, { type: "agent_unfreeze" }, { type: "grant_issue", label: "treasury" }]) {
+  const reviewed = { revision: 1, digest: `sha256:${"a".repeat(64)}` };
+  for (const action of [{ type: "agent_freeze" }, { type: "agent_unfreeze" }, { type: "grant_issue", label: "treasury" }, { type: "grant_revoke", grantId: "g-1" },
+    { type: "policy_update", expectedPolicy: reviewed, changes: { budget: { daily_usd: "30", weekly_usd: "75", monthly_usd: "150" } } },
+    { type: "policy_update", expectedPolicy: reviewed, changes: { destinations: [{ address: "payee.near", confidential: true }] } }]) {
     const prepared = await prepare(action);
     assert.equal(prepared.status, 200, `${action.type}: ${JSON.stringify(prepared.body)}`);
     assert.equal(prepared.body.json.dao.transaction.receiverId, "v1.signer");
   }
   const before = forwarded.length;
   for (const [action, signer] of [[{ type: "grant_issue", label: "payout" }, "dao"], [{ type: "agent_create", owner: { type: "near", account_id: "x", public_key: "ed25519:x" } }, "dao"],
-    [{ type: "policy_update", changes: {} }, "dao"], [{ type: "agent_freeze" }, "wallet"]] as const)
+    [{ type: "policy_update", changes: {} }, "dao"], [{ type: "agent_freeze" }, "wallet"],
+    // Only off-chain edits (destinations, withdrawals, budget): an on-chain edit's policy is encrypted, so voters couldn't check it.
+    [{ type: "policy_update", expectedPolicy: reviewed, changes: {} }, "dao"],
+    [{ type: "policy_update", expectedPolicy: reviewed, changes: { limits: { per_transaction: {} } } }, "dao"],
+    [{ type: "policy_update", expectedPolicy: reviewed, changes: { budget: { daily_usd: "30", weekly_usd: "75", monthly_usd: "150" }, assets: "any" } }, "dao"]] as const)
     assert.equal((await prepare(action, signer)).status, 403, `${(action as { type: string }).type} as ${signer}`);
   assert.equal(forwarded.length, before, "nothing refused was forwarded");
 
@@ -499,6 +506,24 @@ test("a DAO that votes treasury-execute into its consent lets the app run plans;
   assert.match(proposalDescription({ ...base, label: `treasury:${suffix}` }), /its terms couldn't be read when this was filed/);
   assert.doesNotMatch(proposalDescription({ ...base, label: "invoices" }), /Authorizes:/, "only a Treasury grant says it");
   assert.doesNotMatch(proposalDescription({ ...base, type: "agent_freeze", label: `treasury:${suffix}` }), /Authorizes:/);
+
+  // A revocation names the grant it ends, and what stops with a Treasury grant.
+  const revoke = { ...base, type: "grant_revoke", summary: "Revoke a grant" };
+  const revoked = proposalDescription({ ...revoke, revokes: { id: "g-1", label: `treasury:${suffix}` } });
+  assert.match(revoked, new RegExp(`Revokes: grant g-1 \\(treasury:${suffix}\\)`));
+  assert.match(revoked, /Ends: swaps without a vote under this grant/);
+  assert.doesNotMatch(revoked, /Authorizes:/);
+  assert.match(proposalDescription({ ...revoke, revokes: { id: "g-2", label: null } }), /Revokes: grant g-2, not found among the agent's grants when this was filed/);
+
+  // A policy edit names the fields it changes, never their values: the proposal is public (payees, the DAO's budget).
+  const { treasuryPolicy } = await import("../src/policy.js");
+  const raised = { ...treasuryPolicy, budget: { ...treasuryPolicy.budget!, daily_usd: "30" },
+    destinations: { ...treasuryPolicy.destinations, list: [{ action: "transfer" as const, address: "carol.near", confidential: true }] } };
+  const edit = proposalDescription({ ...base, type: "policy_update", summary: "Allow transfers to carol.near", policy: { current: treasuryPolicy, requested: raised } });
+  assert.match(edit, /Changes: budget, destinations \(values aren't published here/, edit);
+  assert.doesNotMatch(edit, /carol\.near|"30"|daily_usd|dashboard|assets/, "no payee, no amount, no page the DAO can't see, nothing unchanged");
+  assert.match(proposalDescription({ ...base, type: "policy_update", summary: "Update the policy", policy: { current: null, requested: raised } }),
+    /Changes: the policy in force couldn't be read when this was filed/);
 });
 
 /** A plain GET of a public page: status, headers and body text. */

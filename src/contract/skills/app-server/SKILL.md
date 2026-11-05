@@ -178,7 +178,9 @@ same shape covers the rest:
   only, and only on a host whose setup includes Treasury (the deployed platform host's doesn't yet: 403). `state` answers `reserved` with the agent and a setup consent. Then `owner/prepare` with
   `{ type: "agent_create", role: "treasury" }` and `signer: "dao"`. Then file the DAO's consent naming the new `agentId`.
 - **Owner actions:** under a `treasury` consent, `owner/prepare` with `signer: "dao"` prepares the `treasury` grant,
-  freeze or unfreeze. A member files the answer's `dao.proposal` (or `dao.proposalAndVote`); `dao.transaction` is the
+  `grant_revoke`, a `policy_update` that changes only `destinations`, `withdrawals` or `budget` (`DAO_POLICY_FIELDS`;
+  anything else is refused), freeze or unfreeze. A policy edit's public proposal names only the fields it changes: show
+  members `policy.current` and `policy.requested` from the answer before they vote. A member files the answer's `dao.proposal` (or `dao.proposalAndVote`); `dao.transaction` is the
   `v1.signer` call inside that proposal, never one a member signs. The agent finds and submits the DAO's signature
   itself once the vote passes; follow `owner/status`.
 - **Treasury proposals:** see treasury-app.

@@ -368,7 +368,8 @@ grant binding the plan's strategy). A **DAO consent** is the same text signed by
 key, through a passed `v1.signer` proposal the platform files); it carries only `read`, `treasury` and, as the DAO's
 opt-in, `treasury-execute`; the DAO's grant vote is what authorizes unattended swaps; and its agent's
 ownership by the DAO's derived account is re-read on every call. Under it the platform files the DAO's votes on the
-app's Treasury proposals and on the Treasury grant, freeze and unfreeze, and a DAO sets up and creates its hosted
+app's Treasury proposals and on the Treasury grant, its revocation, an off-chain policy edit (destinations, withdrawals,
+budget), freeze and unfreeze, and a DAO sets up and creates its hosted
 Treasury agent by vote; the app never gets a text to sign. A **DAO stop** is the DAO's own vote, filed from a public
 page with no app, that ends every consent for its agent given before the stop is applied (and every consent request
 filed by then) and turns its autopilot off; consents the DAO gives after it applied stay live. The DAO parts are
