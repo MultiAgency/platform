@@ -28,6 +28,7 @@ if (treasury && daoTreasury) throw new Error('Use --treasury or --dao-treasury, 
 // `--app <deployment>`: an app deployment's server reaches /apps/v1 with a service credential issued at startup, and may
 // set up its Organizations' own hosted agents. The owner's signatures come from the `signOwner` control.
 const app = values('--app').at(-1);
+if (daoTreasury && !app) throw new Error('--dao-treasury needs --app: only an app reaches a DAO-owned agent');
 if (frontend && payablesDist) throw new Error('Use --frontend or --payables-release, not both');
 const directory = join(process.env.PROTO_E2E_ARTIFACTS, 'stack'), controls = join(directory, 'controls');
 mkdirSync(controls, { recursive: true });
@@ -72,8 +73,9 @@ const state = () => ({
   ownerFrontend: payablesDist ? { product: 'payables', release: resolve(payablesDist) } : frontend ? { dist: resolve(frontend) } : 'proto web',
   dialogs, parentAgent: simulated.id, createdAgents: simulated.created(), records: stack.records(), builder: builder ?? null,
   payoutPolicy: simulated.payoutPolicy(),
+  // A DAO has no owner session, so a DAO-owned agent has no access page or machine credentials.
   treasury: stack.portfolio ? { agent: 'portfolio', agentId: stack.portfolio.id, owner: daoTreasury ? DAO : owner, signer: daoTreasury ? 'dao' : 'wallet',
-    access: `${stack.dashboard}/a/portfolio/access`, machineBase: `${stack.dashboard}/machine/v1/a/portfolio` } : null,
+    access: daoTreasury ? null : `${stack.dashboard}/a/portfolio/access`, machineBase: daoTreasury ? null : `${stack.dashboard}/machine/v1/a/portfolio` } : null,
   // The DAO's Group members: the council may file and vote, the member only vote.
   dao: daoTreasury ? { account: DAO, council: OWNER, member: SECOND } : null,
   // The simulated chain, as the stack's services read it (`NEAR_RPC_URL`): an app's server makes its own chain reads here.

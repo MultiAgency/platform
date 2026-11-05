@@ -231,14 +231,14 @@ for the payout agent's starting balance, `--treasury` to add the Treasury agent 
 100 simulated USDC, its own simulated provider, quoting a swap between any two listed tokens from the `/v1/tokens` prices;
 the owner issues machine credentials at `/a/portfolio/access` or with the `machineCredential` control), `--dao-treasury`
 instead of `--treasury` for the same agent owned by the simulated DAO (apps reach it only under the DAO's consent, and its
-owner signatures are DAO votes the `daoVote` control passes; use with `--app`),
+owner signatures are DAO votes the `daoVote` control passes; it needs `--app`),
 `--app <deployment>` for an app deployment's server on `/apps/v1` (a service credential issued at startup into
 `stack/app-credential`, mode 0600, never into `state.json`; self-service setup of the deployment's own Payables agents),
 `--headed` or `--no-browser`) builds the same isolated stack for app-owned workflow
 recipes and filming, and keeps it running. `stack/state.json` lists the application URLs, CDP endpoint,
 owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`: the stack clicks a button named exactly
 "Connect wallet" and, if near-connect asks which wallet to use, picks the local test wallet), with `--treasury` the portfolio's access page and
-machine base (and with `--dao-treasury` the DAO's account and Group members, the agent's owner and `signer: "dao"`), with `--app` the deployment, base and credential file, the simulated chain's RPC (`chain.rpc`), the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
+machine base (with `--dao-treasury` both `null`, since a DAO has no owner session, plus the DAO's account and Group members, the agent's owner and `signer: "dao"`), with `--app` the deployment, base and credential file, the simulated chain's RPC (`chain.rpc`), the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
 refreshed every 250 ms. Write `stack/controls/<name>.json` whole (write another name, then rename) with a `command` of `fund`, `fundPayout`, `settle`,
 `dropTransferResponse`, `dropSignatureResponse`, `revealOwnerOutcome`, `setUnavailable` (`value`; optional `agent`:
 `payout`, the default, or `portfolio`), `dropSwapResponse` (`portfolio` applies its next swap, or the `after`-th, and
