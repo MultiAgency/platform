@@ -34,8 +34,11 @@ directory, hosted agents and consents are kept, and the host is unchanged, so si
    The build log should show the Dockerfile's steps, and the upload is the package's size (about 0.9 MB for 0.5.0). To check before DNS, set
    `DASHBOARD_HOST` to the Railway domain, then point a CNAME for `api.dev.multiagency.ai` (Namecheap) at the domain
    `railway domain status` shows and remove `DASHBOARD_HOST`.
-4. Read-only checks: `/health` 200; `/apps/v1/agents/x` without a credential 401, with a browser `Origin` 403, on another
-   host 421; `/`, `/gw/challenge` and `/a/x/access` 404 (offline-tested in `test/platform-host.test.ts`).
+4. Read-only checks: `/health` 200; `/apps/v1/agents/x` without a credential 401, with a browser `Origin` 403;
+   `/`, `/gw/challenge` and `/a/x/access` 404. Another host gets 421 from the gateway (offline-tested in
+   `test/platform-host.test.ts`), but through Railway's edge it can't be checked: a request for a host not attached to
+   the service gets Railway's own 404 "Application not found" (`x-railway-fallback: true`, seen 2026-11-05) and never
+   reaches the gateway.
 5. On the staging service, the operator issues the dashboard's credential from the gateway's own state directory (it
    writes `.app-access/` there, beside the gateway): `cd /data/state && /app/node_modules/.bin/tsx
    /app/src/app-credential.ts issue multiagency-dashboard api.dev.multiagency.ai 90 "MultiAgency dashboard"`. The token
@@ -189,11 +192,12 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 - what the provider answers for a DAO-owned hosted agent
 
 **Before starting**
-- **Staging runs 0.5.0's `platform` package.** Since 2026-11-04T21:46Z: candidate `0263df8e`, commit `6ba0831`,
-  Railway deployment `bc635cb7`, image `sha256:5994c8f6…`, with `deploy/platform-staging.json`, whose `appSetup` lists
-  `treasury`.
+- **Staging runs 0.5.1's `platform` package.** Since about 2026-11-05T02:53Z: candidate `2b941c69`, commit `2223d11`,
+  Railway deployment `f417fc3a`, image `sha256:9fa854c9…`, with `deploy/platform-staging.json`, whose `appSetup` lists
+  `treasury`. Before that, 0.5.0's from 2026-11-04T21:46Z: candidate `0263df8e`, commit `6ba0831`, deployment
+  `bc635cb7`, image `sha256:5994c8f6…`.
 
-  Read-only checks right after:
+  Read-only checks right after each deploy (both passed):
   - `/health` gives 200.
   - `/apps/v1/agents/x` gives 401 without a credential, and 403 with a browser `Origin`.
   - `/`, `/gw/challenge` and `/a/x/access` give 404.
