@@ -245,14 +245,15 @@ Each line is a gap; the linked page says how the rest is known. The
   real-stack E2E suite. See
   [consumer compatibility](docs/shared-frontend-integration.md#consumer-source-contract-preflight).
 - App access (`/apps/v1`) isn't in production. Mainnet-observed on staging: confidential USDC payouts (2026-10-28) and
-  withdrawals of wNEAR or USDC to agreed NEAR accounts (2026-10-30) ([mainnet log](docs/mainnet-log.md)). Wallet-owned
-  agents only on staging; a held withdrawal can be rejected, not approved, so under the payout template it is paid only once the
+  withdrawals of wNEAR or USDC to agreed NEAR accounts (2026-10-30), and DAO-owned agents (below) ([mainnet log](docs/mainnet-log.md)).
+  A held withdrawal can be rejected, not approved, so under the payout template it is paid only once the
   owner turns approval off; at most 32 hosted agents per host. A dishonest app can still get a blind NEP-366 signature
   by having the owner sign the confirm link's text on its own page; a held payout's vote text names no payee or amount,
   so the app's display is the only place the owner sees them; an owner who signs the platform's sign-in text on an
   app's page gives it a full session; a service credential is a bearer. See [app access](docs/app-access.md).
-- Treasury proposals (`treasury`, `treasury-execute`) are offline- and stack-tested only, and the platform host
-  doesn't set up Treasury agents yet. A proposal's approval is the platform's check, not the provider's: whoever holds
+- Treasury proposals (`treasury`, `treasury-execute`) are offline- and stack-tested for wallet owners; for a DAO owner,
+  one proposal approved by vote and executed is mainnet-observed on staging (2026-11-05). The production platform
+  configuration (`deploy/platform.json`) doesn't set up Treasury agents yet; staging's does. A proposal's approval is the platform's check, not the provider's: whoever holds
   the treasury grant can swap within the policy without it. Held swaps aren't used: what their vote commits to is
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
 - DAO-owned agents through apps: setup, creation, consent, the grant and the DAO's own stop are mainnet-observed on

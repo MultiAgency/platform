@@ -27,18 +27,21 @@ its exact terms later (hours or days), by signing a text in their own wallet; th
 which runs once, under the owner's signed policy. No production host serves this yet; build against the SDK
 repository's local stack.
 
-Two consent scopes, each named in the text the owner signs:
-- `read` (beside the scopes below) for the owner UI's frame: `account` gives the agent's wallet account and the grant
-  the executor holds (`grant`, plus `stagedGrant` while a new one waits to be promoted); `reconcileBooks` gives each
-  balance against its independent record. Follow unresolved operations with `unresolved`; the platform reconciles them
-  itself, and an app never calls `recover`.
-- `treasury` also covers, from 0.5.1: "Run now" (`autopilot/tick`, swapping only under the owner's grant for the saved
-  strategy and within its per-run ceiling); for a wallet owner, the linked treasury account (`treasury/link`, `unlink`,
-  `setConfidential`, refused for a DAO-owned agent); and funding (`deposit`, then the SDK's `fundingTransaction` for the
-  transfer the owner or the DAO signs).
-- `treasury`: Treasury reads (`strategy/get`, `autopilot/get`, `autopilot/evidence`, `autopilot/log`, `treasury/get`),
-  strategy settings (`strategy/save`, which act only once the owner signs a grant binding them), `autopilot/enable` and
-  `autopilot/stop`, `sweep`, `deposit` (a one-time address that credits the agent, to fund it), and every `proposals/*` procedure.
+Three consent scopes, each named in the text the owner signs:
+- `read`, for the owner UI's frame: `account` gives the agent's wallet account and the grant the executor holds
+  (`grant`, plus `stagedGrant` while a new one waits to be promoted); `reconcileBooks` gives each balance against its
+  independent record. Follow unresolved operations with `unresolved`; the platform reconciles them itself, and an app
+  never calls `recover`.
+- `treasury`:
+  - Treasury reads: `strategy/get`, `autopilot/get`, `autopilot/evidence`, `autopilot/log`, `treasury/get`.
+  - Strategy settings (`strategy/save`), which act only once the owner signs a grant binding them.
+  - Autopilot on and off (`autopilot/enable`, `autopilot/stop`), and "Run now" (`autopilot/tick`), which swaps only
+    under the owner's grant for the saved strategy and within its per-run ceiling.
+  - Funding: `sweep`, and `deposit` (a one-time address that credits the agent), then the SDK's `fundingTransaction`
+    for the transfer the owner or the DAO signs.
+  - For a wallet owner, the linked treasury account (`treasury/link`, `unlink`, `setConfidential`); refused for a
+    DAO-owned agent.
+  - Every `proposals/*` procedure.
 - `treasury-execute`, only beside `treasury`: `rebalance`, `externalPlan` and `executePlan`, five-minute plans executed
   within the policy without a signature per swap, and only while the owner's live grant binds the strategy they were
   planned under. `sweep`, `rebalance` and `executePlan` are streams: read them with `app.agent(...).stream(path, input)`.

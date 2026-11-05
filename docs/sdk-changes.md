@@ -3,34 +3,43 @@
 Every SDK change appends a note under the next version's heading when it is made: what changed for the apps, and any
 wire change all apps must update for together. The first change after a release moves `package-version.ts` to the next
 version, so a package staged or packed from changed sources never carries a released version's number. The release
-commit dates the heading, before its candidate runs; staging copies this file as it is. Under 0.x, any
-public-interface change bumps at least the minor version.
+commit dates the heading, before its candidate runs; staging copies this file as it is.
+
+Versioning under 0.x: removing or renaming anything, or narrowing what a call accepts, bumps the minor version.
+Additions ship as patches: new procedures, exports and accepted inputs, and new result kinds, including one that
+reclassifies a case a client used to report under another kind. An entry that can break a consumer's exhaustive
+`switch` on `kind` is marked **Breaking for exhaustive switches**; pin an exact version if you rely on one. This is
+looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
+platform-only fixes are listed separately.
 
 ## 0.5.2 (2026-11-05)
 
-Platform fixes ship with it but outside the package: revoked app consents no longer count toward a deployment's limit
-(#16), and proposals at market prices are stored (8ce51c2).
-
-- **More owner actions a DAO votes on through an app** (behaviour, the user's decision 2026-11-05): `DAO_APP_ACTIONS`
-  gains `grant_revoke` and `policy_update`, off-chain and on-chain edits alike (the user's decision: parity with wallet
-  owners, who also sign an on-chain edit's encrypted policy on the provider's preview). An edit that changes nothing is
-  refused. `AppDaoAction` gains both. A DAO's proposals are public, so a policy edit's proposal
+- **More owner actions a DAO votes on through an app** (addition): `DAO_APP_ACTIONS` gains `grant_revoke` and
+  `policy_update`, off-chain and on-chain edits alike, for parity with wallet owners, who also sign an on-chain edit's
+  encrypted policy on the provider's preview. An edit that changes nothing is refused. `AppDaoAction` gains both. A DAO's proposals are public, so a policy edit's proposal
   names the changed fields only, never values; members compare `policy.current` and `policy.requested` from
   `owner/prepare` in the app. A revocation's proposal names the grant and its label. Each is a provider owner intent
-  with about 290 s to pass, or 600 s for an on-chain edit (#20). Offline-tested only.
-- **A 429 is `rate_limited`, with `retryAfterSeconds`** (behaviour, #15): the gateway's request-limit answer now carries
+  with about 290 s to pass, or 600 s for an on-chain edit, so only a DAO whose vote passes that fast completes it.
+  Offline-tested only.
+- **A 429 is `rate_limited`, with `retryAfterSeconds`** (new result kind; **Breaking for exhaustive switches**): the
+  gateway's request-limit answer now carries
   `Retry-After` and `{ error, retryAfterSeconds }`. `appClient`'s routes reported it as `refused` and agent calls through
   `ownerClient` as `unavailable` or, for a mutation, `unknown`, though nothing was forwarded. Both now answer
   `{ kind: "rate_limited", status: 429, error, retryAfterSeconds? }`: send the same call again once it clears. A 429 that
   isn't the gateway's JSON (a proxy page) keeps its old kind (`refused` on the routes; `unavailable` or `unknown` on agent
-  calls). A consumer that switches on `kind` exhaustively gains a case. The limit itself stays 1,200 an hour per credential; an operator-set one isn't built.
+  calls). The limit itself stays 1,200 requests an hour per app credential.
+- **Docs:** getting-started states when sending again is safe (the same identity is, a new one isn't), including
+  `proposals/approve`, `proposals/execute` and filing DAO requests, and routes app servers to app-server and
+  treasury-app.
+
+Platform fixes in the same release, outside the package: revoked app consents no longer count toward a deployment's
+limit, and proposals valued at market prices are stored (they failed to save before).
 
 ## 0.5.1 (2026-11-04)
 
 Additive procedures for owner UIs (platform#17), funding through the `treasury` scope, plus two fixes: an over-cap
-payment is refused locally where it used to block the agent's sends, and policy outputs type `native`. The changelog's
-rule would make this a minor version, since procedures are added and an exported constant changed. The user chose a
-patch: an app pinned to `^0.5.x` keeps working.
+payment is refused locally where it used to block the agent's sends, and policy outputs type `native`. All additions,
+so a patch.
 - **The `treasury` scope reaches `deposit`** (behaviour): under a `treasury` consent, a DAO's included, `deposit`
   answers a one-time address that credits only the agent's own confidential balance, so an app can fund the Treasury
   agent it reaches. A DAO's consent can't carry `payout`, so before this an app had no way to fund a DAO-owned agent
@@ -44,12 +53,11 @@ patch: an app pinned to `^0.5.x` keeps working.
     agent runs every 10 seconds, once the grant's owner action settles. `setup` stays owner-session only.
 - **`reconcileBooks`** (added to `read`): each balance against its independent record, the chain for public and the
   provider's executions for confidential. It sends nothing.
-- **`autopilot/tick`** (added to `treasury`, the user's decision): "Run now", one autopilot pass under its usual
+- **`autopilot/tick`** (added to `treasury`): "Run now", one autopilot pass under its usual
   guard (one tick at a time, shared with the schedule). It swaps only under a grant that binds the saved strategy, and
   within that strategy's per-run ceiling, for a DAO's voted grant as for a wallet's. Its evidence start line records the
   app (`actor`, optional, so readers on 0.5.0 and earlier strip it).
-- **`treasury/link`, `treasury/unlink`, `treasury/setConfidential`** (added to `treasury` for wallet owners, the
-  user's decision): the agent's linked treasury account. Refused under a DAO's consent (`DAO_APP_REFUSED`,
+- **`treasury/link`, `treasury/unlink`, `treasury/setConfidential`** (added to `treasury` for wallet owners): the agent's linked treasury account. Refused under a DAO's consent (`DAO_APP_REFUSED`,
   `daoScopesCover`): a DAO-owned agent's link is the DAO, fixed at setup, and the agent itself refuses a hosted DAO
   agent's relink (`checkHostedTreasury`).
 - **`fundingTransaction(asset, address, amount)`** (added to the SDK, moved unchanged from the platform): the transfer

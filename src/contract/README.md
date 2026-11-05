@@ -61,7 +61,7 @@ What has run where, by the routes each client calls:
 | --- | --- |
 | `ownerClient`, in the owner's session | Mainnet-observed on the hosted platform: reads, owner actions, held-payout votes, and plan execution through the Treasury autopilot |
 | `ownerClient` with a machine credential | Offline- and stack-tested; not observed on mainnet |
-| `appClient` | Wallet-owned agents: mainnet-observed on platform staging (2026-10-28, 2026-10-30); not in production. DAO-owned (`daoSetups`, `daoConsents`, `daoVotes`): setup, consent, the grant and the DAO's stop mainnet-observed on platform staging (2026-11-04); proposal votes stack-tested only |
+| `appClient` | Wallet-owned agents: mainnet-observed on platform staging (2026-10-28, 2026-10-30); not in production. DAO-owned (`daoSetups`, `daoConsents`, `daoVotes`): setup, consent, the grant and the DAO's stop mainnet-observed on platform staging (2026-11-04); funding by the DAO's vote and a proposal it approved, then executed, mainnet-observed there (2026-11-05); revoking and policy edits offline-tested only |
 | `payeeClient`, in the contributor's session | Mainnet-observed on the hosted invoice entry: invoices and agreement requests (2026-10-12, 2026-10-14) |
 | `payeeClient` with a report connection | Offline- and stack-tested; not deployed |
 
@@ -138,7 +138,7 @@ The SDK never automatically resubmits an action. Some owner procedures have no c
 
 ## Continue with the bundled guidance
 
-The package contains `skills/getting-started/SKILL.md`, `skills/payee-workflows/SKILL.md`, `skills/owner-workflows/SKILL.md` and `skills/app-server/SKILL.md`. These files describe the clients in the installed package and can be read directly or through TanStack Intent. `CHANGES.md` records consumer-impacting changes.
+The package contains `skills/getting-started/SKILL.md`, `skills/payee-workflows/SKILL.md`, `skills/owner-workflows/SKILL.md`, `skills/app-server/SKILL.md` and `skills/treasury-app/SKILL.md`. These files describe the clients in the installed package and can be read directly or through TanStack Intent. `CHANGES.md` records consumer-impacting changes.
 
 Use `@multiagency/sdk/schemas/*` for the published JSON schemas. The Node-only `@multiagency/sdk/release-server` serves immutable frontend artifacts; it does not authenticate callers or run a financial executor.
 

@@ -2,11 +2,12 @@
 name: getting-started
 description: >
   Use when deciding how an app or external agent should work with MultiAgency agents through @multiagency/sdk: which client
-  to use (owner or payee), how each kind of identity signs in and what the server enforces for it, how results report
-  refused, unavailable and unknown outcomes, and what this package version supports. For owner tasks use owner-workflows;
-  for payee tasks use payee-workflows.
+  to use (owner, app server or payee), how each kind of identity signs in and what the server enforces for it, how results
+  report refused, rate-limited, unavailable and unknown outcomes, when sending again is safe, and what this package
+  version supports. For owner tasks use owner-workflows; for an app's server use app-server, and treasury-app for Treasury
+  proposals; for payee tasks use payee-workflows.
 metadata:
-  purpose: 'Orients an app or agent author: the two clients, the four identities and their server-side limits, recovery kinds, and the supported surface of this package version.'
+  purpose: 'Orients an app or agent author: the three clients, the identities and their server-side limits, result kinds and when to send again, and the supported surface of this package version.'
   type: lifecycle
   library: '@multiagency/sdk'
   library_version: '0.5.2'
@@ -26,7 +27,7 @@ by the gateway and the provider, never by the client or by this guidance.
    `appClient` (same entry, an app's server) or `payeeClient` (entry `@multiagency/sdk/payee`, zod only).
 2. Get that identity's session the supported way. Never handle a wallet's private key or copy browser cookies into an
    agent. Result: calls return data; a `session` (401) result means sign in again.
-3. Do the task with owner-workflows, app-server or payee-workflows.
+3. Do the task with owner-workflows, app-server (and treasury-app for Treasury proposals) or payee-workflows.
 4. Keep every identity you send (`correlationId`, `commandId`, request `id`, `planId`) until you have read its outcome.
    Some owner actions (`pay`, `sweep`, `autopilot/tick`) carry no identity; owner-workflows says how to recover them.
 
@@ -55,10 +56,23 @@ it back unchanged, and never compute your own. A policy or strategy that changed
 | `session` | 401: no valid session | Yes | Sign in again (agent connection: start a new one) |
 | `forbidden` | 403: this identity may not do this | Yes | Do not retry; it is a permission, not an outage |
 | `refused` | Refused before anything was sent (optional `code`; owner results also carry the HTTP `status` and oRPC `rpcCode`) | Yes | Correct the input or state, then act again |
+| `rate_limited` | 429: the gateway's request limit, before forwarding (`ownerClient`, `appClient`; `retryAfterSeconds` when given) | Yes | Send the same call again after `retryAfterSeconds`; it says nothing about access. `payeeClient` reports its limit as `refused` with code `rate_limited` |
 | `busy`, `unresolved` | Owner money actions: another action holds the lock, or an earlier one has no proven outcome | Yes | Follow existing operations, then try again |
 | `provider` | After an owner action, the provider's answer proves it refused; after a read, the provider read failed | Yes, for an action | Check the recorded outcome before acting again |
 | `unavailable` | A read failed or lost its answer | n/a (a read) | Reading again is safe |
-| `unknown` | An action was sent and its outcome is not known (`identity` is the input you sent) | Not known | Never resend. Read the record by the kept identity, or follow owner-workflows when the action has none |
+| `unknown` | An action was sent and its outcome is not known (`identity` is the input you sent) | Not known | Never send it under a new identity. Read the record by the kept identity, or send the same identity again where the procedure says that's safe (below) |
+
+**When sending again is safe.** The rule is: the same identity is safe, a new one is not. A call carrying the same
+`requestId`, `commandId`, request `id` or signed body as before answers the first one's record, so it can't act twice:
+`payouts/request` and `proposals/create` (same `requestId` and terms), `proposals/approve` (the same signature),
+`proposals/execute` (an approved proposal runs once, under the money lock; called again it answers the proposal's current
+state), and consent and setup submission (the same signed text). A new `requestId` after `unknown` may act twice. Two
+exceptions:
+- Owner actions without an identity (`pay`, `sweep`, `autopilot/tick`): never send again after `unknown`; owner-workflows
+  says how to recover them.
+- Filing a DAO request (`daoConsents.file`, `daoSetups.file`, `daoVotes.file`) after a lost answer: filing again makes a
+  new request. That's safe on chain, because the lost one's proposal never reached a member to sign, but the lost one
+  counts toward the deployment's waiting requests until it expires.
 
 `unavailable` and `unknown` may carry `httpStatus` when the answer was a plain HTTP error rather than an encoded one (a
 proxy page, or a 404 for a procedure the host doesn't have). It is a diagnostic: it doesn't prove that nothing ran. A
