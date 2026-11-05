@@ -229,14 +229,16 @@ Payables build at `/a/payout/`, `--builder <account>` for an account on chain th
 owner adds it with a signed `policy_update`, which the simulator applies and versions), `--payout-funding <raw USDC>`
 for the payout agent's starting balance, `--treasury` to add the Treasury agent `portfolio` (owned by the owner,
 100 simulated USDC, its own simulated provider, quoting a swap between any two listed tokens from the `/v1/tokens` prices;
-the owner issues machine credentials at `/a/portfolio/access` or with the `machineCredential` control),
+the owner issues machine credentials at `/a/portfolio/access` or with the `machineCredential` control), `--dao-treasury`
+instead of `--treasury` for the same agent owned by the simulated DAO (apps reach it only under the DAO's consent, and its
+owner signatures are DAO votes the `daoVote` control passes; use with `--app`),
 `--app <deployment>` for an app deployment's server on `/apps/v1` (a service credential issued at startup into
 `stack/app-credential`, mode 0600, never into `state.json`; self-service setup of the deployment's own Payables agents),
 `--headed` or `--no-browser`) builds the same isolated stack for app-owned workflow
 recipes and filming, and keeps it running. `stack/state.json` lists the application URLs, CDP endpoint,
 owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`: the stack clicks a button named exactly
 "Connect wallet" and, if near-connect asks which wallet to use, picks the local test wallet), with `--treasury` the portfolio's access page and
-machine base, with `--app` the deployment, base and credential file, the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
+machine base (and with `--dao-treasury` the DAO's account and Group members, the agent's owner and `signer: "dao"`), with `--app` the deployment, base and credential file, the simulated chain's RPC (`chain.rpc`), the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
 refreshed every 250 ms. Write `stack/controls/<name>.json` whole (write another name, then rename) with a `command` of `fund`, `fundPayout`, `settle`,
 `dropTransferResponse`, `dropSignatureResponse`, `revealOwnerOutcome`, `setUnavailable` (`value`; optional `agent`:
 `payout`, the default, or `portfolio`), `dropSwapResponse` (`portfolio` applies its next swap, or the `after`-th, and
@@ -247,7 +249,8 @@ saves `portfolio`'s strategy through `strategy/save`, which turns autopilot off;
 `authorizeStrategy` (the owner signs, with the fixture key and through its own route, a grant bound to the saved
 strategy, which an app's or a machine credential's plans need; answers the digest it binds), `signOwner`
 (`message`, `recipient`, `nonce`: the owner's NEP-413 signature from the fixture key, standing in for the wallet an app
-asks; never the platform sign-in text) or `machineCredential` (`scopes`, optional `label` and `ttlSeconds`: the owner
+asks; never the platform sign-in text), `daoVote` (`hash`: the DAO passes the proposal that signs that 64-hex hash, as a member's
+transaction names it in its `v1.signer` call) or `machineCredential` (`scopes`, optional `label` and `ttlSeconds`: the owner
 signs in with the fixture key and issues a `portfolio` credential); its result appears as `<name>.result.json`,
 `{ ok, value }` or `{ ok: false, error }`. Create `stack/stop` to stop. Every service the stack starts (gateway, agent
 servers, hosted agents, release servers) also ends on its own when the process that started it dies without stopping it,
