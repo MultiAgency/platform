@@ -1,4 +1,4 @@
-import { authorityFixture, balanceView, fixtureGrant, policyView, timedPrices } from "./fixtures/authority.js";
+import { authorityFixture, balanceView, fixtureGrant, marketTokens, policyView, quoteAt, timedPrices, wholeTokens } from "./fixtures/authority.js";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,7 +19,9 @@ import { walletIntent, walletSignature, walletSigner } from "./fixtures/wallet-s
 import { freshDirectory, offline } from "./fixtures/harness.js";
 
 // Offline: an in-memory book behind the API, so each tick runs the real sweep, rebalance, plan
-// checks, lock and ops log. Every asset has 0 decimals and a $1 price, and quotes cost nothing.
+// checks, lock and ops log. By default every asset has 0 decimals and a $1 price; quotes follow the listed prices and
+// cost nothing.
+let tokens: ReturnType<typeof wholeTokens>;
 let book: Record<string, { public: bigint; confidential: bigint }>;
 let frozen: boolean;
 let sends: string[];
@@ -33,6 +35,7 @@ beforeEach(() => {
   // 100 USDC and nothing else: 50 below target in wNEAR and ETH together.
   book = Object.fromEntries(Object.values(ASSETS).map((asset) => [asset, { public: 0n, confidential: 0n }]));
   book[ASSETS.USDC]!.confidential = 100n;
+  tokens = wholeTokens();
   frozen = false;
   sends = [];
   statusOf = () => "SUCCESS";
@@ -43,7 +46,7 @@ beforeEach(() => {
   mock.method(api, "getWallet", authority.getWallet);
   mock.method(api, "getHistory", authority.getHistory);
   mock.method(api, "getPolicy", async () => policyView({ ...treasuryPolicy, frozen, budget: { daily_usd: "1000", weekly_usd: "1000", monthly_usd: "1000" } }, 1));
-  mock.method(api, "getTokens", async () => timedPrices(Object.entries(ASSETS).map(([symbol, asset_id]) => ({ symbol, asset_id, decimals: 0, price: 1 }))));
+  mock.method(api, "getTokens", async () => timedPrices(tokens));
   mock.method(api, "getBalances", async (_id: string, { source }: { source: "public" | "confidential" }) => balanceView(source,
     Object.entries(book).map(([asset_id, balances]) => ({ asset_id, balance_raw: String(balances[source]) }))));
   mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, status: statusOf(correlation_id) }));
@@ -56,10 +59,10 @@ beforeEach(() => {
       return { correlation_id: `op_${sends.length}` };
     },
     swap: async (_id: string, request: { dry?: boolean; origin_asset: string; destination_asset: string; amount: string }) => {
-      if (request.dry) return { quote: { amount_out: request.amount, min_amount_out: request.amount } };
+      if (request.dry) return { quote: quoteAt(tokens, request) };
       sends.push(`swap ${request.origin_asset} → ${request.destination_asset}`);
       book[request.origin_asset]!.confidential -= BigInt(request.amount);
-      book[request.destination_asset]!.confidential += BigInt(request.amount);
+      book[request.destination_asset]!.confidential += BigInt(quoteAt(tokens, request).amount_out);
       return { correlation_id: `op_${sends.length}` };
     },
   }));
@@ -92,6 +95,32 @@ test("a rebalance within the limit executes, and the tick says what it did", asy
   assert.match(report, /step 1: SUCCESS, step 2: SUCCESS/);
   assert.equal(readInbox()[0]?.level, "run");
   assert.deepEqual(open(), []);
+});
+
+test("at market prices and real decimals, a rebalance within the limit executes toward the targets", async () => {
+  // 100 USDC at $0.9997: $99.97, half of it ($49.985) below target in wNEAR and ETH together.
+  tokens = marketTokens();
+  book[ASSETS.USDC]!.confidential = 100_000_000n;
+  limit(100);
+  const report = await tick("schedule");
+  assert.deepEqual(sends.toSorted(), [`swap ${ASSETS.USDC} → ${ASSETS.ETH}`, `swap ${ASSETS.USDC} → ${ASSETS.wNEAR}`]);
+  assert.match(report, /step 1: SUCCESS, step 2: SUCCESS/);
+  assert.deepEqual(open(), []);
+  // 25 USDC into each, at 0.9997/2.37 wNEAR and 0.9997/3120.55 ETH per USDC, rounded down in raw units.
+  assert.equal(book[ASSETS.USDC]!.confidential, 50_000_000n);
+  assert.equal(book[ASSETS.wNEAR]!.confidential, 10_545358649789029535864978n);
+  assert.equal(book[ASSETS.ETH]!.confidential, 8009004822867763n);
+});
+
+test("at market prices, a rebalance above the limit sends nothing and asks the owner for its fractional value", async () => {
+  tokens = marketTokens();
+  book[ASSETS.USDC]!.confidential = 100_000_000n;
+  limit(10);
+  const report = await tick("schedule");
+  assert.deepEqual(sends, []);
+  // 50 USDC at $0.9997 is $49.985, shown to the cent.
+  assert.match(report, /rebalance of \$49\.98 left for the owner/);
+  assert.match(open()[0]!.text, /\$49\.98 is above the \$10\.00 auto-execute limit/);
 });
 
 test("a rebalance above the limit sends nothing and asks the owner", async () => {
@@ -399,9 +428,9 @@ test("accepted submission progress does not resolve a lost status read or permit
 
 /** The provider's dry run for every swap: the live swap would be refused with `code` (provider docs: dry runs warn with the live codes). */
 const warnedQuotes = (code: string) => mock.method(api, "forGrant", () => ({
-  swap: async (_id: string, request: { dry?: boolean; amount: string }) => {
+  swap: async (_id: string, request: { dry?: boolean; origin_asset: string; destination_asset: string; amount: string }) => {
     assert.equal(request.dry, true, "a warned leg must never send");
-    return { quote: { amount_out: request.amount, min_amount_out: request.amount }, warnings: [{ code, detail: "detail-not-for-the-owner" }] };
+    return { quote: quoteAt(tokens, request), warnings: [{ code, detail: "detail-not-for-the-owner" }] };
   },
 }));
 
@@ -444,12 +473,12 @@ test("a warned leg drops out like a costly one: the rest of the rebalance still 
   limit(100);
   mock.method(api, "forGrant", () => ({
     swap: async (_id: string, request: { dry?: boolean; origin_asset: string; destination_asset: string; amount: string }) => {
-      if (request.dry) return { quote: { amount_out: request.amount, min_amount_out: request.amount },
+      if (request.dry) return { quote: quoteAt(tokens, request),
         warnings: request.destination_asset === ASSETS.ETH ? [{ code: "policy_asset_denied", detail: "d" }] : [] };
       assert.notEqual(request.destination_asset, ASSETS.ETH, "the warned leg must never send");
       sends.push(`swap ${request.origin_asset} → ${request.destination_asset}`);
       book[request.origin_asset]!.confidential -= BigInt(request.amount);
-      book[request.destination_asset]!.confidential += BigInt(request.amount);
+      book[request.destination_asset]!.confidential += BigInt(quoteAt(tokens, request).amount_out);
       return { correlation_id: `op_${sends.length}` };
     },
   }));

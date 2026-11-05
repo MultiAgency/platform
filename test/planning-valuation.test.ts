@@ -8,7 +8,7 @@ import { ASSETS, treasuryPolicy } from "../src/policy.js";
 import { claimSubmission, readOps, record, submittedSwapValues, type Method } from "../src/ops.js";
 import { loadStrategy, saveStrategy } from "../src/strategy.js";
 import { withinRunCeiling } from "../src/strategy-value.js";
-import { authorityFixture, balanceView, policyView, timedPrices } from "./fixtures/authority.js";
+import { authorityFixture, balanceView, marketTokens, policyView, quoteAt, timedPrices } from "./fixtures/authority.js";
 import { freshDirectory, offline } from "./fixtures/harness.js";
 
 const input = ASSETS.USDC, output = ASSETS.wNEAR;
@@ -18,12 +18,19 @@ let price: number;
 let priceReads: number;
 let afterSend: () => void;
 let prices: () => ReturnType<typeof timedPrices<{ asset_id: string; symbol: string; decimals: number; price: number }>>;
+type SwapRequest = { origin_asset: string; destination_asset: string; amount: string };
+/**
+ * The provider's quote. The whole-number tests move only the input's valuation price, so by default a quote is 1:1 in
+ * raw units; the market-price tests quote at the listed prices.
+ */
+let quote: (request: SwapRequest) => { amount_out: string; min_amount_out: string };
 freshDirectory("planning-valuation");
 beforeEach(() => {
   offline();
   process.env.AGENT_GRANT_TOKEN = "ngt_test";
   balances = Object.fromEntries(Object.values(ASSETS).map(asset => [asset, { public: 0n, confidential: 20n }]));
   sends = []; price = 1; priceReads = 0; afterSend = () => {};
+  quote = request => ({ amount_out: request.amount, min_amount_out: request.amount });
   prices = () => timedPrices(Object.entries(ASSETS).map(([symbol, asset_id]) => ({
     symbol, asset_id, decimals: 0, price: asset_id === input ? price : 1,
   })));
@@ -44,11 +51,11 @@ beforeEach(() => {
       afterSend();
       return { correlation_id: String(sends.length) };
     },
-    swap: async (_id: string, request: { dry?: boolean; origin_asset: string; destination_asset: string; amount: string }) => {
-      if (request.dry) return { quote: { amount_out: request.amount, min_amount_out: request.amount } };
+    swap: async (_id: string, request: SwapRequest & { dry?: boolean }) => {
+      if (request.dry) return { quote: quote(request) };
       sends.push("swap");
       balances[request.origin_asset]!.confidential -= BigInt(request.amount);
-      balances[request.destination_asset]!.confidential += BigInt(request.amount);
+      balances[request.destination_asset]!.confidential += BigInt(quote(request).amount_out);
       afterSend();
       return { correlation_id: String(sends.length) };
     },
@@ -83,6 +90,23 @@ test("a later swap cannot take submission-time run value above the autopilot cei
   assert.deepEqual(readOps().map(op => ({ usd: op.usdIn, refusal: op.refused ?? null })), [
     { usd: 5, refusal: null }, { usd: 5.05, refusal: "autopilot_limit_exceeded" },
   ]);
+});
+
+test("at market prices and real decimals, the autopilot ceiling counts each swap's fractional USD value", async () => {
+  // 5 USDC at $0.9997 is $4.9985: two fit under the $10 ceiling with a fraction to spare, a third does not.
+  prices = () => timedPrices(marketTokens());
+  quote = request => quoteAt(prices(), request);
+  for (const token of marketTokens()) balances[token.asset_id] = { public: 0n, confidential: 20n * 10n ** BigInt(token.decimals) };
+  const amount = "5000000", { amount_out } = quote({ origin_asset: input, destination_asset: output, amount });
+  const leg: PlannedAction = { type: "swap", from: input, to: output, amount, amountOut: amount_out, minAmountOut: amount_out, costBps: 0 };
+  const events = await run([leg, leg, leg]);
+  assert.deepEqual(sends, ["swap", "swap"]);
+  assert.equal(events.at(-1)?.type, "rejected");
+  assert.deepEqual(readOps().map(op => ({ usd: op.usdIn, refusal: op.refused ?? null })), [
+    { usd: 4.9985, refusal: null }, { usd: 4.9985, refusal: null }, { usd: 4.9985, refusal: "autopilot_limit_exceeded" },
+  ]);
+  // Each swap credits 5 × 0.9997 / 2.37 wNEAR, rounded down in raw units.
+  assert.equal(balances[output]!.confidential, 20n * 10n ** 24n + 2n * 2_109071729957805907172995n);
 });
 
 test("automatic execution refuses decimal excess that floating addition rounds down to the ceiling", async () => {

@@ -1,4 +1,5 @@
 import { grantCommitment, type Policy } from "@near-intents-agent-api/sdk";
+import assert from "node:assert/strict";
 import { ASSETS } from "../../src/policy.js";
 import { recipientChain } from "../../src/recipients.js";
 import { loadStrategy } from "../../src/strategy.js";
@@ -32,6 +33,33 @@ export function authorityFixture(purpose: "treasury" | "payout" = "payout") {
 export const balanceView = <T>(source: string, balances: T[]) => ({ near_account_id: fixtureWallet.near_account_id, source, balances });
 export const timedPrices = <T extends object>(tokens: T[], now = Date.now()): Array<Omit<{ price_updated_at: string; price_expires_at: string }, keyof T> & T> => tokens.map((t) => ({
   price_updated_at: new Date(now).toISOString(), price_expires_at: new Date(now + 600_000).toISOString(), ...t }));
+/** Every platform asset at $1 with 0 decimals: raw amounts read as dollars, the suites' readable cases. */
+export const wholeTokens = () => Object.entries(ASSETS).map(([symbol, asset_id]) => ({ symbol, asset_id, decimals: 0, price: 1 }));
+/** Every platform asset at a market-like price with its real decimals, so USD values and quotes carry fractions. */
+export const marketTokens = () => [
+  { symbol: "USDC", asset_id: ASSETS.USDC, decimals: 6, price: 0.9997 },
+  { symbol: "wNEAR", asset_id: ASSETS.wNEAR, decimals: 24, price: 2.37 },
+  { symbol: "ETH", asset_id: ASSETS.ETH, decimals: 18, price: 3120.55 },
+];
+/** A listed price as an exact fraction: 0.9997 is 9997/10000, so a quote never inherits floating-point error. */
+const fraction = (price: number) => {
+  const [whole, decimals = ""] = String(price).split(".");
+  if (!/^\d+$/.test(whole!) || !/^\d*$/.test(decimals) || price <= 0) throw new Error(`price ${price} isn't a positive decimal`);
+  return { numerator: BigInt(whole! + decimals), denominator: 10n ** BigInt(decimals.length) };
+};
+type Listed = { asset_id: string; decimals: number; price: number };
+/**
+ * A dry swap quote consistent with `tokens`: out = in × priceIn / priceOut in raw units of each token's decimals,
+ * rounded down, at no cost. At $1 and 0 decimals for every token it is 1:1.
+ */
+export function quoteAt(tokens: Listed[], request: { origin_asset: string; destination_asset: string; amount: string }) {
+  const find = (asset: string) => tokens.find((t) => t.asset_id === asset) ?? assert.fail(`${asset} isn't listed`);
+  const from = find(request.origin_asset), to = find(request.destination_asset);
+  const priceIn = fraction(from.price), priceOut = fraction(to.price);
+  const out = BigInt(request.amount) * priceIn.numerator * priceOut.denominator * 10n ** BigInt(to.decimals)
+    / (priceIn.denominator * priceOut.numerator * 10n ** BigInt(from.decimals));
+  return { amount_out: out.toString(), min_amount_out: out.toString() };
+}
 /** The provider reports a policy budget in its own format: "25" as "25.00". */
 const usd = (value: string | null) => value === null ? null : Number(value).toFixed(2);
 export function policyView(policy: Policy, revision = 1) {

@@ -156,7 +156,8 @@ test('an app proposes Treasury swaps, the owner approves the exact text, and eac
 
     const first = ask('p-1'), proposal = value(await agent.call('proposals/create', first));
     expect(proposal).toMatchObject({ state: 'proposed', deployment: 'dao-local', organization: 'org_1', agentId: treasury.agentId });
-    expect(proposal.legs).toEqual([{ from: USDC, to: WNEAR, amount: '1000000', minAmountOut: '499500000000000000000000' }]);
+    // 1 USDC at $0.9997 for wNEAR at $2.37, less the simulated quote's 0.1% floor margin, in raw units.
+    expect(proposal.legs).toEqual([{ from: USDC, to: WNEAR, amount: '1000000', minAmountOut: '421392531645569620253164' }]);
     expect(value(await agent.call('proposals/create', first)).id, 'asked again, the same proposal').toBe(proposal.id);
     expect(await agent.call('proposals/execute', { id: proposal.id }), 'not approved').toMatchObject({ ok: false, kind: 'refused', code: 'not_approved' });
     expect(await agent.call('executePlan', { planId: '00000000-0000-0000-0000-000000000000' }), 'treasury alone executes no plan')
@@ -164,10 +165,10 @@ test('an app proposes Treasury swaps, the owner approves the exact text, and eac
     expect((await approve(proposal)).state).toBe('approved');
 
     // wNEAR's price rises: the swap would return less than the signed floor, so nothing is claimed or sent.
-    expect(await control('setPrice', { asset: WNEAR, price: 3 })).toEqual({ ok: true });
+    expect(await control('setPrice', { asset: WNEAR, price: 2.4 })).toEqual({ ok: true });
     expect(await agent.call('proposals/execute', { id: proposal.id })).toMatchObject({ ok: false, kind: 'refused', code: 'not_executable' });
     expect(value(await agent.call('proposals/get', { id: proposal.id })).state, 'still approved').toBe('approved');
-    expect(await control('setPrice', { asset: WNEAR, price: 2 })).toEqual({ ok: true });
+    expect(await control('setPrice', { asset: WNEAR, price: 2.37 })).toEqual({ ok: true });
     const done = value(await agent.call('proposals/execute', { id: proposal.id }));
     expect(done).toMatchObject({ state: 'executed', operations: [expect.objectContaining({ method: 'swap', status: 'SUCCESS' })] });
     expect(value(await agent.call('proposals/execute', { id: proposal.id })).state, 'asked again, nothing is sent').toBe('executed');
@@ -261,7 +262,7 @@ test('the stack controls the Treasury agent: targets, a public balance, every pa
     expect(executed.failure).toBeUndefined();
     expect(executed.events.map(e => [e.action.to, e.status]).sort()).toEqual([[ETH, 'SUCCESS'], [WNEAR, 'SUCCESS']].sort());
     expect(value(await machine.call('externalPlan', { swaps: [{ from: ETH, to: WNEAR, amount: '1000000000000000' }] })).actions[0],
-      'any listed pair is quoted').toMatchObject({ from: ETH, to: WNEAR, amountOut: '1000000000000000000000000' });
+      'any listed pair is quoted').toMatchObject({ from: ETH, to: WNEAR, amountOut: '1316687763713080168776371' });
 
     // An outage on portfolio's provider only.
     expect(await control('setUnavailable', { agent: 'nobody', value: true })).toMatchObject({ ok: false });

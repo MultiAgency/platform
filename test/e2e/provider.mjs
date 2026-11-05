@@ -8,14 +8,27 @@ import { rawKey } from '../../src/nep413.ts';
 // Generated for each local environment. Never load application credentials or funded keys.
 export const USDC = 'nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
 export const OWNER = 'owner.near', PAYEE = 'payee.near';
-/** The listed tokens (`/v1/tokens`); a Treasury swap between any two of them is quoted from these prices. */
+/**
+ * The listed tokens (`/v1/tokens`) at market-like prices, none of them whole, so every USD value carries a fraction; a
+ * Treasury swap between any two of them is quoted from these prices.
+ */
 const TOKENS = [
-  { asset_id: USDC, symbol: 'USDC', decimals: 6, price: 1 },
-  { asset_id: 'nep141:wrap.near', symbol: 'wNEAR', decimals: 24, price: 2 },
-  { asset_id: 'nep141:eth.omft.near', symbol: 'ETH', decimals: 18, price: 2000 },
+  { asset_id: USDC, symbol: 'USDC', decimals: 6, price: 0.9997 },
+  { asset_id: 'nep141:wrap.near', symbol: 'wNEAR', decimals: 24, price: 2.37 },
+  { asset_id: 'nep141:eth.omft.near', symbol: 'ETH', decimals: 18, price: 3120.55 },
 ];
-/** `amount` of `from` in `to` at the listed prices, rounded down (whole-number prices keep it exact in BigInt). */
-const convert = (from, to, amount) => amount * BigInt(from.price) * 10n ** BigInt(to.decimals) / (BigInt(to.price) * 10n ** BigInt(from.decimals));
+/** A listed price as an exact fraction (0.9997 is 9997/10000), or undefined for anything but a positive decimal. */
+const fraction = price => {
+  const [, whole, decimals = ''] = /^(\d+)(?:\.(\d+))?$/.exec(String(price)) ?? [];
+  if (whole === undefined || !(price > 0)) return undefined;
+  return { numerator: BigInt(whole + decimals), denominator: 10n ** BigInt(decimals.length) };
+};
+/** `amount` of `from` in `to` at the listed prices, rounded down, exact in BigInt. */
+const convert = (from, to, amount) => {
+  const priceIn = fraction(from.price), priceOut = fraction(to.price);
+  return amount * priceIn.numerator * priceOut.denominator * 10n ** BigInt(to.decimals)
+    / (priceIn.denominator * priceOut.numerator * 10n ** BigInt(from.decimals));
+};
 /** An account with no agent of its own: it signs in only where a host allows self-service sessions. */
 export const SECOND = 'second.near';
 /** A builder: on chain, not yet an agreed payee until the owner adds it through a policy update. */
@@ -364,10 +377,10 @@ export async function provider(directory, { treasury = false, account = OWNER, p
     /** Provider requests refused by a declared outage: the witness that a call reached the provider. */
     outageRefusals: () => outageRefusals,
     dropSwapResponse(after = 1) { dropSwapAt = swaps.length + after; },
-    /** A listed token's whole-dollar price, as `/v1/tokens` reports it and every quote converts by: a price move. */
+    /** A listed token's USD price, as `/v1/tokens` reports it and every quote converts by: a price move. */
     setPrice(asset, price) {
       const token = TOKENS.find(t => t.asset_id === asset);
-      if (!token || !Number.isInteger(price) || price < 1) throw new Error('Give a listed asset and a whole-dollar price of at least 1');
+      if (!token || typeof price !== 'number' || !fraction(price)) throw new Error('Give a listed asset and a positive decimal price');
       token.price = price;
     },
     pauseObservationAfterFirstSwap() {

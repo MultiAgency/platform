@@ -80,7 +80,7 @@ export function stackControls(stack, { owner }) {
       if (!Number.isInteger(after) || after < 1) throw new Error('after is a positive whole number');
       portfolio().dropSwapResponse(after);
     },
-    /** A listed token's price moves (whole dollars): every later quote and valuation uses it. */
+    /** A listed token's USD price moves (a positive decimal): every later quote and valuation uses it. */
     setPrice: ({ asset, price }) => portfolio().setPrice(asset, price),
     /** Funds arriving on `portfolio`'s public balance outside a confidential deposit (raw units): what a sweep shields. */
     fundPublic: ({ asset, amount }) => portfolio().fundPublic(asset, amount),

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
-import { authorityFixture, balanceView, policyView, timedPrices } from "./fixtures/authority.js";
+import { authorityFixture, balanceView, marketTokens, policyView, quoteAt, timedPrices, wholeTokens } from "./fixtures/authority.js";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, mock, test } from "node:test";
 import { api } from "../src/api.js";
@@ -11,6 +11,7 @@ import { opsLog, readOps } from "../src/ops.js";
 import { freshDirectory, offline } from "./fixtures/harness.js";
 
 const a = ASSETS.USDC, b = ASSETS.wNEAR;
+let tokens: ReturnType<typeof wholeTokens>;
 let book: Record<string, { public: bigint; confidential: bigint }>;
 let revision: number;
 let sends: string[];
@@ -20,6 +21,7 @@ freshDirectory("plan-recovery");
 beforeEach(() => {
   process.env.AGENT_GRANT_TOKEN = "ngt_test";
   book = Object.fromEntries(Object.values(ASSETS).map((asset) => [asset, { public: 10n, confidential: 10n }]));
+  tokens = wholeTokens();
   revision = 1; sends = []; afterSend = () => {}; time = Date.now();
   offline();
   const authority = authorityFixture("treasury");
@@ -28,7 +30,7 @@ beforeEach(() => {
   mock.method(api, "getHistory", authority.getHistory);
   mock.method(api, "listGrants", authority.listGrants);
   mock.method(api, "getPolicy", async () => policyView(treasuryPolicy, revision));
-  mock.method(api, "getTokens", async () => timedPrices(Object.entries(ASSETS).map(([symbol, asset_id]) => ({ symbol, asset_id, decimals: 0, price: 1 })), time));
+  mock.method(api, "getTokens", async () => timedPrices(tokens, time));
   mock.method(api, "getBalances", async (_id: string, { source }: { source: "public" | "confidential" }) =>
     balanceView(source, Object.entries(book).map(([asset_id, balances]) => ({ asset_id, balance_raw: String(balances[source]) }))));
   mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, status: "SUCCESS" }));
@@ -41,10 +43,10 @@ beforeEach(() => {
       return { correlation_id: String(sends.length) };
     },
     swap: async (_id: string, request: { dry?: boolean; origin_asset: string; destination_asset: string; amount: string }) => {
-      if (request.dry) return { quote: { amount_out: request.amount, min_amount_out: request.amount } };
+      if (request.dry) return { quote: quoteAt(tokens, request) };
       sends.push("swap");
       book[request.origin_asset]!.confidential -= BigInt(request.amount);
-      book[request.destination_asset]!.confidential += BigInt(request.amount);
+      book[request.destination_asset]!.confidential += BigInt(quoteAt(tokens, request).amount_out);
       afterSend();
       return { correlation_id: String(sends.length) };
     },
@@ -99,6 +101,35 @@ test("a feasible sequence executes once and updates the book between actions", a
   const events = await run([{ type: "shield", asset: a, amount: "5" }, swap()]);
   assert.deepEqual(sends, ["shield", "swap"]);
   assert.equal(events.length, 2);
+});
+
+/** Market prices with real decimals: 10 of each token, public and confidential, in raw units. */
+const atMarket = () => {
+  tokens = marketTokens();
+  for (const token of tokens) book[token.asset_id] = { public: 10n * 10n ** BigInt(token.decimals), confidential: 10n * 10n ** BigInt(token.decimals) };
+};
+/** 15 USDC into wNEAR at the listed prices, its floor `floorBps` below the quote. */
+const marketSwap = (floorBps = 0): PlannedAction => {
+  const amount = "15000000", { amount_out } = quoteAt(tokens, { origin_asset: a, destination_asset: b, amount });
+  return { type: "swap", from: a, to: b, amount, amountOut: amount_out, minAmountOut: (BigInt(amount_out) * BigInt(10_000 - floorBps) / 10_000n).toString(), costBps: 0 };
+};
+test("at market prices and real decimals, a feasible sequence executes once and updates the book between actions", async () => {
+  atMarket();
+  const events = await run([{ type: "shield", asset: a, amount: "5000000" }, marketSwap()]);
+  assert.deepEqual(sends, ["shield", "swap"]);
+  assert.equal(events.length, 2);
+  // 15 USDC at 0.9997/2.37 wNEAR per USDC, rounded down in raw units.
+  assert.equal(book[b]!.confidential, 10n * 10n ** 24n + 6_327215189873417721518987n);
+});
+test("at market prices, the output floor is held to the strategy's cost ceiling in fractional USD", async () => {
+  atMarket();
+  const ceiling = loadStrategy().maxCostBps;
+  assert.equal((await run([marketSwap(ceiling + 50)])).at(-1)?.type, "rejected", "a floor past the ceiling stops before shielding");
+  assert.deepEqual(sends, []);
+  assert.deepEqual(readOps().map((op) => op.refused), ["swap_cost_exceeded"]);
+  const events = await run([marketSwap(ceiling - 50)]);
+  assert.deepEqual(sends, ["shield", "swap"], "a floor inside the ceiling executes");
+  assert.equal(events.at(-1)?.type, "action");
 });
 
 test("policy drift during asynchronous send preflight produces zero sends", async () => {

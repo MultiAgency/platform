@@ -5,7 +5,7 @@ import { afterEach, beforeEach, mock, test } from "node:test";
 import { RPCSerializer } from "@orpc/client";
 import { call, ORPCError } from "@orpc/server";
 import { generateKey, Near, type PrivateKey } from "near-kit";
-import { authorityFixture, balanceView, fixtureGrant, policyView, timedPrices } from "./fixtures/authority.js";
+import { authorityFixture, balanceView, fixtureGrant, marketTokens, policyView, quoteAt, timedPrices, wholeTokens } from "./fixtures/authority.js";
 import { freshDirectory, offline } from "./fixtures/harness.js";
 import { api } from "../src/api.js";
 import { appScopesCover } from "../src/contract/app-access.js";
@@ -29,6 +29,8 @@ const renewed = { ...app, consent: "d".repeat(64), consents: ["c".repeat(64), "d
 /** The same app after its first consent ended. */
 const ended = { ...app, consent: "d".repeat(64), consents: ["d".repeat(64)] };
 const usdc = ASSETS.USDC, wnear = ASSETS.wNEAR;
+/** The listed tokens; by default $1 with 0 decimals. A quote follows their prices, times `rate` percent: a market move. */
+let tokens: Array<{ symbol: string; asset_id: string; decimals: number; price: number }>;
 let book: Record<string, { public: bigint; confidential: bigint }>;
 let revision: number, rate: number, warnings: string[], sends: string[], status: () => Promise<{ correlation_id: string; status: string }> | never;
 let label: string | undefined;
@@ -37,6 +39,7 @@ freshDirectory("proposals");
 beforeEach(() => {
   process.env.AGENT_GRANT_TOKEN = "ngt_test";
   book = Object.fromEntries(Object.values(ASSETS).map(asset => [asset, { public: 0n, confidential: 100n }]));
+  tokens = wholeTokens();
   revision = 1; rate = 100; warnings = []; sends = []; label = undefined;
   offline();
   const authority = authorityFixture("treasury");
@@ -45,14 +48,14 @@ beforeEach(() => {
   mock.method(api, "getHistory", authority.getHistory);
   mock.method(api, "listGrants", async () => [fixtureGrant(label)]);
   mock.method(api, "getPolicy", async () => policyView(treasuryPolicy, revision));
-  mock.method(api, "getTokens", async () => timedPrices(Object.entries(ASSETS).map(([symbol, asset_id]) => ({ symbol, asset_id, decimals: 0, price: 1 }))));
+  mock.method(api, "getTokens", async () => timedPrices(tokens));
   mock.method(api, "getBalances", async (_id: string, { source }: { source: "public" | "confidential" }) =>
     balanceView(source, Object.entries(book).map(([asset_id, balances]) => ({ asset_id, balance_raw: String(balances[source]) }))));
   status = async () => ({ correlation_id: "1", status: "SUCCESS" });
   mock.method(api, "getStatus", async () => status());
   mock.method(api, "forGrant", () => ({
     swap: async (_id: string, request: { dry?: boolean; origin_asset: string; destination_asset: string; amount: string }) => {
-      const out = String(BigInt(request.amount) * BigInt(rate) / 100n);
+      const out = String(BigInt(quoteAt(tokens, request).amount_out) * BigInt(rate) / 100n);
       if (request.dry) return { quote: { amount_out: out, min_amount_out: out }, warnings: warnings.map(code => ({ code, detail: "d" })) };
       sends.push("swap");
       book[request.origin_asset]!.confidential -= BigInt(request.amount);
@@ -91,10 +94,34 @@ test("a proposal stores the quoted terms and moves nothing; the same request ans
 
 // Seen on platform staging, 2026-11-05: at a market price a leg's USD value isn't a whole number (0.5 USDC at $0.999701).
 test("a proposal valued at a market price is stored, and its hash is reproducible", async () => {
-  mock.method(api, "getTokens", async () => timedPrices(Object.entries(ASSETS).map(([symbol, asset_id]) => ({ symbol, asset_id, decimals: 0, price: 0.999701 }))));
+  tokens = tokens.map(token => ({ ...token, price: 0.999701 }));
   const proposal = await propose();
   assert.equal(proposal.quoted[0]!.usdIn, 15 * 0.999701);
   assert.equal(getProposal(app, { id: proposal.id }).sha256, proposal.sha256);
+});
+
+test("at market prices and real decimals, a proposal holds its quoted floor through a price move and executes once", async () => {
+  tokens = marketTokens();
+  for (const token of tokens) book[token.asset_id] = { public: 0n, confidential: 100n * 10n ** BigInt(token.decimals) };
+  const proposal = await propose("m1", { legs: [{ from: usdc, to: wnear, amount: "15000000" }] });
+  // 15 USDC at $0.9997 is $14.9955; at 0.9997/2.37 wNEAR per USDC the quote is the floor, rounded down in raw units.
+  const floor = "6327215189873417721518987";
+  assert.deepEqual(proposal.legs, [{ from: usdc, to: wnear, amount: "15000000", minAmountOut: floor }]);
+  assert.deepEqual(proposal.quoted, [{ amountOut: floor, costBps: 0, usdIn: 14.9955 }]);
+  assert.match(proposalText(proposal, "approve"), /1\. Swap 15 USDC \(15000000\) for at least 6\.327215189873417721518987 wNEAR \(6327215189873417721518987\)/);
+  assert.equal(getProposal(app, { id: proposal.id }).sha256, proposal.sha256);
+  await approve(proposal);
+  // The live quote falls 1%: inside the cost limit, but below the signed floor, so nothing is claimed or sent.
+  rate = 99;
+  await assert.rejects(executeProposal(app, { id: proposal.id }), (error: unknown) => refusedWith("not_executable")(error) && /floor/.test((error as Error).message));
+  assert.deepEqual(sends, []); assert.deepEqual(readOps(), []);
+  rate = 100;
+  assert.equal((await executeProposal(app, { id: proposal.id })).state, "executed");
+  assert.deepEqual(sends, ["swap"]);
+  assert.equal((readOps()[0]!.request as { min_amount_out: string }).min_amount_out, floor);
+  assert.equal(book[wnear]!.confidential, 100n * 10n ** 24n + BigInt(floor));
+  assert.equal((await executeProposal(app, { id: proposal.id })).state, "executed");
+  assert.deepEqual(sends, ["swap"], "asked again, nothing is sent");
 });
 
 test("only an app through the gateway proposes; the expiry is bounded; the owner's text names the exact terms", async () => {
