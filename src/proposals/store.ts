@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { canonical } from "../mandate.js";
+import { canonicalRecord } from "../mandate.js";
 import { isHeld, isResolved, readOps } from "../ops.js";
 import { createOnce, mkdirSynced } from "../synced.js";
 import { proposalText, type ProposalState, type ProposalView } from "../contract/treasury-proposals.js";
@@ -53,7 +53,7 @@ export type Closed = z.infer<typeof Closed>;
 const Final = z.union([Closed, z.strictObject({ state: z.literal("claimed"), planId: z.string(), at: z.string() })]);
 
 const file = (id: string, suffix: string) => join(DIR, `${id}${suffix}`);
-const sha = (proposal: ProposalRecord) => createHash("sha256").update(canonical(proposal)).digest("hex");
+const sha = (proposal: ProposalRecord) => createHash("sha256").update(canonicalRecord(proposal)).digest("hex");
 const readJson = <T extends z.ZodType>(path: string, schema: T): z.output<T> | null =>
   existsSync(path) ? schema.parse(JSON.parse(readFileSync(path, "utf8"))) : null;
 

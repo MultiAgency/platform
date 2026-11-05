@@ -15,16 +15,32 @@ export type ReviewedPolicy = { revision: number; digest: string };
  * for policies this is RFC 8785 (JCS) output: anyone can recompute the digest from the policy JSON.
  */
 
-export const canonical = (value: unknown): string => {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object")
-    return `{${Object.keys(value)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`)
-      .join(",")}}`;
-  if (typeof value === "number" && !Number.isSafeInteger(value)) throw new Error(`A policy number must be an integer, not ${value}`);
-  return JSON.stringify(value);
+const serializer = (number: (value: number) => void) => {
+  const serialize = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.map(serialize).join(",")}]`;
+    if (value && typeof value === "object")
+      return `{${Object.keys(value)
+        .sort()
+        .map((key) => `${JSON.stringify(key)}:${serialize((value as Record<string, unknown>)[key])}`)
+        .join(",")}}`;
+    if (typeof value === "number") number(value);
+    return JSON.stringify(value);
+  };
+  return serialize;
 };
+
+export const canonical = serializer((value) => {
+  if (!Number.isSafeInteger(value)) throw new Error(`A policy number must be an integer, not ${value}`);
+});
+
+/**
+ * The same canonical form for records that also hold non-integer numbers (a proposal's quoted USD values): any finite
+ * number, written as RFC 8785 (JCS) writes it, which is ECMAScript's shortest round-trip form, `JSON.stringify`'s.
+ * Whole numbers come out exactly as `canonical` writes them.
+ */
+export const canonicalRecord = serializer((value) => {
+  if (!Number.isFinite(value)) throw new Error(`A record number must be finite, not ${value}`);
+});
 
 const asSet = <T>(list: readonly T[]) => [...list].sort((a, b) => (canonical(a) < canonical(b) ? -1 : canonical(a) > canonical(b) ? 1 : 0));
 

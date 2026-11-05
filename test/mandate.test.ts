@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Policy } from "@near-intents-agent-api/sdk";
-import { canonicalPolicy, mandateDigest } from "../src/mandate.js";
+import { canonical, canonicalPolicy, canonicalRecord, mandateDigest } from "../src/mandate.js";
 import { ASSETS, treasuryPolicy } from "../src/policy.js";
 
 // Pinned: any other implementation of the canonical form must reproduce this digest.
@@ -63,4 +63,13 @@ test("digests recorded before provider SDK 0.7 stay the same: legacy `sign` and 
   const native: Policy = { ...treasuryPolicy, native: { near: { sign_message: ["b.near", "a.near"], transfer: false, call: [] },
     evm: { sign_typed_data: [], sign_message: false, sign_transaction: false }, solana: { sign_message: false, sign_transaction: false } } };
   assert.equal(mandateDigest(native), "sha256:471573bae0fdef942e28580b2d518ed9fddeb22da082b5d3dce3178fe45ad51a");
+});
+
+test("a record's canonical form takes any finite number, and writes whole numbers exactly as a policy's", () => {
+  const whole = { b: [2, 1], a: { n: 250, s: "x", f: false, z: null } };
+  assert.equal(canonicalRecord(whole), canonical(whole), "records hashed before stay the same");
+  assert.equal(canonicalRecord({ usdIn: 0.4998505, costBps: 37 }), '{"costBps":37,"usdIn":0.4998505}');
+  assert.equal(canonicalRecord({ v: 1e21, w: 1.5e-7 }), '{"v":1e+21,"w":1.5e-7}', "JCS number form");
+  for (const bad of [Number.NaN, Infinity]) assert.throws(() => canonicalRecord({ bad }), /finite/);
+  assert.throws(() => canonical({ usdIn: 0.5 }), /integer/, "a policy still refuses non-integers");
 });

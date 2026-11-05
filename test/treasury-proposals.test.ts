@@ -89,6 +89,14 @@ test("a proposal stores the quoted terms and moves nothing; the same request ans
   assert.deepEqual(listProposals(app).proposals.map(p => p.id), [proposal.id]);
 });
 
+// Seen on platform staging, 2026-11-05: at a market price a leg's USD value isn't a whole number (0.5 USDC at $0.999701).
+test("a proposal valued at a market price is stored, and its hash is reproducible", async () => {
+  mock.method(api, "getTokens", async () => timedPrices(Object.entries(ASSETS).map(([symbol, asset_id]) => ({ symbol, asset_id, decimals: 0, price: 0.999701 }))));
+  const proposal = await propose();
+  assert.equal(proposal.quoted[0]!.usdIn, 15 * 0.999701);
+  assert.equal(getProposal(app, { id: proposal.id }).sha256, proposal.sha256);
+});
+
 test("only an app through the gateway proposes; the expiry is bounded; the owner's text names the exact terms", async () => {
   await assert.rejects(createProposal({ ...app, actor: "owner.near" }, {}), PublicError);
   await assert.rejects(createProposal({ ...app, consent: undefined }, {}), PublicError);
