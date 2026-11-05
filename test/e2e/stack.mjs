@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import { join, resolve } from 'node:path';
 import { environment } from './environment.mjs';
 import { connectWallet, installWallet } from './wallet.mjs';
-import { OWNER, PAYEE, PUBLIC_KEY, listen } from './provider.mjs';
+import { DAO, OWNER, PAYEE, PUBLIC_KEY, SECOND, listen } from './provider.mjs';
 import { appCredential, stackControls } from './stack-controls.mjs';
 
 // A running isolated stack for app-owned recipes and filming: the same services, simulator and
@@ -21,6 +21,10 @@ const builder = values('--builder').at(-1), payoutFunding = values('--payout-fun
 // `--treasury`: also a Treasury agent, `portfolio`, owned by the owner (100 simulated USDC). The owner issues machine
 // credentials at /a/portfolio/access, or with the `machineCredential` control; a server reads it at /machine/v1/a/portfolio.
 const treasury = args.includes('--treasury');
+// `--dao-treasury`: the Treasury agent `portfolio` belongs to the simulated DAO instead: apps reach it only under a DAO's
+// consent, and its owner signatures are DAO votes the `daoVote` control passes. Use with `--app`, without `--treasury`.
+const daoTreasury = args.includes('--dao-treasury');
+if (treasury && daoTreasury) throw new Error('Use --treasury or --dao-treasury, not both');
 // `--app <deployment>`: an app deployment's server reaches /apps/v1 with a service credential issued at startup, and may
 // set up its Organizations' own hosted agents. The owner's signatures come from the `signOwner` control.
 const app = values('--app').at(-1);
@@ -28,7 +32,7 @@ if (frontend && payablesDist) throw new Error('Use --frontend or --payables-rele
 const directory = join(process.env.PROTO_E2E_ARTIFACTS, 'stack'), controls = join(directory, 'controls');
 mkdirSync(controls, { recursive: true });
 const stack = await environment(join(directory, 'environment'), { owner, payees, ...(builder && { accounts: [builder] }), ...(payoutFunding !== undefined && { payoutFunding: BigInt(payoutFunding) }),
-  ...(frontend && { frontendDist: resolve(frontend) }), ...(treasury && { workspace: true, portfolioOwner: owner }),
+  ...(frontend && { frontendDist: resolve(frontend) }), ...(treasury && { workspace: true, portfolioOwner: owner }), ...(daoTreasury && { daoPortfolio: true }),
   ...(app && { selfService: true, hostedAreas: ['payables'] }),
   ...(payablesDist && { ownerApp: { product: 'payables', a: resolve(payablesDist), b: resolve(payablesDist) } }) });
 const { simulated } = stack;
@@ -68,8 +72,12 @@ const state = () => ({
   ownerFrontend: payablesDist ? { product: 'payables', release: resolve(payablesDist) } : frontend ? { dist: resolve(frontend) } : 'proto web',
   dialogs, parentAgent: simulated.id, createdAgents: simulated.created(), records: stack.records(), builder: builder ?? null,
   payoutPolicy: simulated.payoutPolicy(),
-  treasury: stack.portfolio ? { agent: 'portfolio', agentId: stack.portfolio.id, owner, access: `${stack.dashboard}/a/portfolio/access`,
-    machineBase: `${stack.dashboard}/machine/v1/a/portfolio` } : null,
+  treasury: stack.portfolio ? { agent: 'portfolio', agentId: stack.portfolio.id, owner: daoTreasury ? DAO : owner, signer: daoTreasury ? 'dao' : 'wallet',
+    access: `${stack.dashboard}/a/portfolio/access`, machineBase: `${stack.dashboard}/machine/v1/a/portfolio` } : null,
+  // The DAO's Group members: the council may file and vote, the member only vote.
+  dao: daoTreasury ? { account: DAO, council: OWNER, member: SECOND } : null,
+  // The simulated chain, as the stack's services read it (`NEAR_RPC_URL`): an app's server makes its own chain reads here.
+  chain: { rpc: `${simulated.url}/chain` },
   app: app ? { deployment: app, base: stack.dashboard, credentialFile } : null,
   deposits: simulated.deposits.map(({ agent, correlation_id }) => ({ agent, correlation: correlation_id })),
   transfers: simulated.transfers.map(p => ({ agent: p.agent, correlation: p.correlation, approval: p.approval, status: p.status, recipient: p.body.recipient, amount: p.body.amount })),
