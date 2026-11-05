@@ -249,7 +249,7 @@ test("an absolute base reaches a scoped non-browser route through the caller's f
 });
 
 test("a plain (unencoded) answer keeps its HTTP status as a diagnostic, without becoming a refusal; an encoded refusal keeps its status and code", async () => {
-  for (const status of [404, 405, 429, 502]) {
+  for (const status of [404, 405, 502]) {
     const client = ownerClient({ base: "/a/t", fetch: async () => Response.json({ error: "Not found" }, { status }) });
     // The handler may never have run (a missing route), but nothing in the answer proves it: the outcome stays unknown.
     assert.deepEqual(await client.call("externalPlan", { swaps: [] }), { ok: false, kind: "unknown", procedure: "externalPlan", identity: { swaps: [] }, httpStatus: status });
@@ -259,6 +259,18 @@ test("a plain (unencoded) answer keeps its HTTP status as a diagnostic, without 
   assert.deepEqual(await client.call("recover"), { ok: false, kind: "refused", error: "Reviewed.", status: 400, rpcCode: "BAD_REQUEST" });
   const pay = { recipient: "a.near", asset: "nep141:usdc", amount: "1", confidential: true, expectedPolicy: { revision: 1, digest: "sha256:" + "0".repeat(64) } };
   assert.deepEqual(await client.call("pay", pay), { ok: false, kind: "refused", error: "No such payee", status: 404, rpcCode: "NOT_FOUND" });
+});
+
+test("the gateway's 429 is its own kind with its Retry-After, for reads and mutations alike: nothing was forwarded (#15)", async () => {
+  const limited = (headers: Record<string, string> = {}) => ownerClient({ base: "/a/t", fetch: async () => Response.json({ error: "Request limit reached" }, { status: 429, headers }) });
+  const answer = { ok: false, kind: "rate_limited", status: 429, error: "Request limit reached" };
+  assert.deepEqual(await limited({ "retry-after": "120" }).call("externalPlan", { swaps: [] }), { ...answer, retryAfterSeconds: 120 });
+  assert.deepEqual(await limited({ "retry-after": "120" }).call("activity"), { ...answer, retryAfterSeconds: 120 });
+  assert.deepEqual(await limited().call("activity"), answer, "without the header, no guess");
+  assert.deepEqual(await limited({ "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" }).call("activity"), answer, "only delay-seconds is read");
+  // A 429 that isn't the gateway's JSON (a proxy page) still proves nothing: a mutation stays unknown.
+  const page = ownerClient({ base: "/a/t", fetch: async () => new Response("<html>slow down</html>", { status: 429 }) });
+  assert.deepEqual(await page.call("externalPlan", { swaps: [] }), { ok: false, kind: "unknown", procedure: "externalPlan", identity: { swaps: [] }, httpStatus: 429 });
 });
 
 test("oRPC's 400 fallback for unmapped codes can't read as a refusal; every code Proto throws has its own status", async () => {

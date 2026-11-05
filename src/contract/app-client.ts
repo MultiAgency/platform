@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { retryAfterSeconds } from "./retry-after.js";
 import { appAgent, appConsentList, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
 import type { appConsentSubmission } from "./app-consent.js";
 import { ownerClient, type OwnerCallOptions, type OwnerFailure, type OwnerOutput, type OwnerProcedure, type OwnerResult } from "./owner-client.js";
@@ -14,7 +15,9 @@ export type AppConsentSubmission = z.input<typeof appConsentSubmission>;
  * - `session` (401): the service credential is invalid, expired or revoked.
  * - `forbidden` (403): refused for this caller (for example setup unavailable on this host, or a signer that doesn't own
  *   the agent). Resending the same request won't change it.
- * - `refused`: the platform refused the request as made (400 invalid or revoked text, 404, 409 conflict, 429 limit).
+ * - `refused`: the platform refused the request as made (400 invalid or revoked text, 404, 409 conflict).
+ * - `rate_limited` (429): the deployment's request limit; nothing was done. Send the same request again after
+ *   `retryAfterSeconds` (from `Retry-After`) when given.
  * - `unavailable`: no answer, 5xx (503: an ownership or key check went unanswered, nothing stored or forwarded), or an
  *   unreadable one. Setup, consent submission and revocation are idempotent for the same signed body, so resending it is safe.
  */
@@ -23,6 +26,7 @@ export type AppRouteResult<T> =
   | { ok: false; kind: "session"; status: 401; error: string }
   | { ok: false; kind: "forbidden"; status: 403; error: string }
   | { ok: false; kind: "refused"; status: number; error: string }
+  | { ok: false; kind: "rate_limited"; status: 429; error: string; retryAfterSeconds?: number }
   | { ok: false; kind: "unavailable"; httpStatus?: number };
 
 /** Procedure inputs as an app may send them: `owner/prepare` takes only actions an app may ask an owner to sign. */
@@ -57,6 +61,10 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
     const error = typeof (body as { error?: unknown } | undefined)?.error === "string" ? (body as { error: string }).error : `HTTP ${response.status}`;
     if (response.status === 401) return { ok: false, kind: "session", status: 401, error };
     if (response.status === 403) return { ok: false, kind: "forbidden", status: 403, error };
+    if (response.status === 429) {
+      const after = retryAfterSeconds(response.headers);
+      return { ok: false, kind: "rate_limited", status: 429, error, ...(after !== undefined && { retryAfterSeconds: after }) };
+    }
     if (response.status >= 400 && response.status < 500) return { ok: false, kind: "refused", status: response.status, error };
     return { ok: false, kind: "unavailable", httpStatus: response.status };
   }

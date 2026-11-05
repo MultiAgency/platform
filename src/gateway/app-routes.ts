@@ -95,7 +95,8 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   }
   const credential = credentials.authenticate(req.headers.authorization, host);
   if (!credential) { json(res, 401, { error: "Invalid, expired or revoked app credential" }); return true; }
-  if (!mayUse(credential.id)) { json(res, 429, { error: "Request limit reached" }); return true; }
+  // The SDK reads this as `rate_limited` (#15): refused before forwarding, so the same request may be sent once it clears.
+  if (!mayUse(credential.id)) { const after = mayUse.retryAfterSeconds(credential.id); json(res, 429, { error: "Request limit reached", retryAfterSeconds: after }, { "retry-after": String(after) }); return true; }
   const url = new URL(req.url ?? "/", "http://gateway");
   /**
    * The DAO's signature for a request: the one recorded when it was found, or searched for now while its vote window is

@@ -32,13 +32,20 @@ export const clientAddress = (req: IncomingMessage) =>
 /** A per-key hourly limit. Once there are many keys, idle ones are forgotten, so distinct callers can't grow memory without bound. */
 export function hourlyLimit(perHour: number) {
   const hits = new Map<string, number[]>();
-  return (key: string, now = Date.now()) => {
+  const recent = (key: string, now: number) => (hits.get(key) ?? []).filter((t) => now - t < 3_600_000);
+  const allow = (key: string, now = Date.now()) => {
     if (hits.size > 10_000) for (const [k, times] of hits) if (now - (times.at(-1) ?? 0) >= 3_600_000) hits.delete(k);
-    const recent = (hits.get(key) ?? []).filter((t) => now - t < 3_600_000);
-    if (recent.length >= perHour) return false;
-    hits.set(key, [...recent, now]);
+    const inWindow = recent(key, now);
+    if (inWindow.length >= perHour) return false;
+    hits.set(key, [...inWindow, now]);
     return true;
   };
+  /** Seconds until a refused key may send again: when its oldest request leaves the hour (0 if it may now). */
+  allow.retryAfterSeconds = (key: string, now = Date.now()) => {
+    const inWindow = recent(key, now);
+    return inWindow.length < perHour ? 0 : Math.max(1, Math.ceil((inWindow[0]! + 3_600_000 - now) / 1000));
+  };
+  return allow;
 }
 
 /** The most open challenges at once, so a flood of requests can't grow memory without bound. */

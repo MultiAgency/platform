@@ -120,9 +120,9 @@ test("a consent is stored once by signature; a revocation is permanent, survives
 const listen = (server: Server) => new Promise<number>(resolve => server.listen(0, "127.0.0.1", () => resolve((server.address() as { port: number }).port)));
 const close = (server: Server) => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
 function call(port: number, path: string, method = "GET", token?: string, body?: object, headers = {}) {
-  return new Promise<{ status: number; body: any }>((resolve, reject) => {
+  return new Promise<{ status: number; body: any; headers: import("node:http").IncomingHttpHeaders }>((resolve, reject) => {
     const req = request({ host: "127.0.0.1", port, path, method, headers: { ...headers, ...(token && { authorization: `Bearer ${token}` }), "content-type": "application/json" } }, res => {
-      let text = ""; res.on("data", chunk => text += chunk); res.on("end", () => resolve({ status: res.statusCode!, body: text ? JSON.parse(text) : null }));
+      let text = ""; res.on("data", chunk => text += chunk); res.on("end", () => resolve({ status: res.statusCode!, body: text ? JSON.parse(text) : null, headers: res.headers }));
     }); req.on("error", reject); req.end(body ? JSON.stringify(body) : undefined);
   });
 }
@@ -739,11 +739,24 @@ test("the call that observes a removed key is refused by the key check itself; a
   assert.equal(forwarded.length, before, "nothing forwarded");
 });
 
-test("each credential has an hourly request limit", async t => {
+test("each credential has an hourly request limit, and its 429 says when to try again (#15)", async t => {
   const { port, staging } = await routeHarness(t);
-  let last = 0;
-  for (let i = 0; i < 1_201; i++) last = (await call(port, "/apps/v1/agents/payout", "GET", staging)).status;
-  assert.equal(last, 429);
+  let last: Awaited<ReturnType<typeof call>> | undefined;
+  for (let i = 0; i < 1_201; i++) last = await call(port, "/apps/v1/agents/payout", "GET", staging);
+  assert.equal(last!.status, 429);
+  const after = Number(last!.headers["retry-after"]);
+  assert.ok(Number.isInteger(after) && after >= 1 && after <= 3_600, `Retry-After ${last!.headers["retry-after"]}`);
+  assert.deepEqual(last!.body, { error: "Request limit reached", retryAfterSeconds: after });
+  // The SDK reports it as its own kind, never as a refusal of the request or an unknown outcome.
+  const httpFetch: typeof fetch = async (input, init) => {
+    const answered = await call(port, new URL(String(input)).pathname, init?.method ?? "GET", staging, init?.body ? JSON.parse(String(init.body)) : undefined);
+    return Response.json(answered.body, { status: answered.status, headers: answered.headers["retry-after"] ? { "retry-after": String(answered.headers["retry-after"]) } : {} });
+  };
+  const app = appClient({ base: `http://127.0.0.1:${port}`, credential: staging, fetch: httpFetch });
+  const limited = { ok: false, kind: "rate_limited", status: 429, error: "Request limit reached", retryAfterSeconds: after };
+  assert.deepEqual(await app.identity("payout"), limited);
+  assert.deepEqual(await app.agent("org_1", "payout").call("proposals/create", { requestId: "r", legs: "strategy", expiresAt: new Date(Date.now() + 3_600_000).toISOString() }), limited);
+  assert.deepEqual(await app.agent("org_1", "payout").call("overview"), limited);
 });
 
 test("app access state is written only into a directory no one else can read", t => {

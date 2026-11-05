@@ -25,7 +25,7 @@ export async function machineRoutes(req: IncomingMessage, res: ServerResponse, p
     if (req.method !== "POST") { json(res, 405, { error: "Use POST" }); return true; }
     const credential = credentials.authenticate(req.headers.authorization, host);
     if (!credential) { json(res, 401, { error: "Invalid, expired or revoked credential" }); return true; }
-    if (!mayUse(credential.id)) { json(res, 429, { error: "Request limit reached" }); return true; }
+    if (!mayUse(credential.id)) { const after = mayUse.retryAfterSeconds(credential.id); json(res, 429, { error: "Request limit reached", retryAfterSeconds: after }, { "retry-after": String(after) }); return true; }
     const agent = selected.find(a => a.name === call[1] && a.area === "treasury");
     if (!agent || agent.name !== credential.agent || agent.owner !== credential.owner) {
       json(res, 403, { error: "Credential does not authorize this agent" }); return true;

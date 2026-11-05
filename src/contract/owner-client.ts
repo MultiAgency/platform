@@ -1,4 +1,5 @@
 import { createORPCClient, ORPCError, RPCLink } from "./orpc-client.js";
+import { retryAfterSeconds } from "./retry-after.js";
 import type { z } from "zod";
 import { ownerOutputs, ownerStreams } from "./owner-outputs.js";
 import type { OwnerInputs } from "./owner-inputs.js";
@@ -21,6 +22,9 @@ export type OwnerCallOptions = { signal?: AbortSignal };
  * - `unresolved` / `busy`: refused before anything was sent; follow existing operations, then try again.
  * - `refused`: the platform refused before sending (with `code` when it names a reason).
  * - `provider`: the provider refused or failed; check the recorded outcome before retrying.
+ * - `rate_limited` (429): the gateway's request limit refused the call before forwarding it; nothing happened. Send the
+ *   same call again after `retryAfterSeconds` when the gateway gave it. A 429 that isn't the gateway's JSON answer (a
+ *   proxy page) stays `unavailable` or `unknown`.
  * - `unavailable`: a read failed or returned an invalid answer; reading again is safe.
  * - `unknown`: a mutation or stream may have taken effect. Keep `identity`, read the existing records, never resend.
  * `refused` keeps the HTTP `status` and oRPC `rpcCode` of the encoded refusal. A plain answer that isn't an encoded
@@ -33,6 +37,7 @@ export type OwnerFailure =
   | { ok: false; kind: "unresolved" | "busy"; error: string }
   | { ok: false; kind: "refused"; error: string; code?: string; status?: number; rpcCode?: string }
   | { ok: false; kind: "provider"; error: string; code?: string; details: RefusalDetails }
+  | { ok: false; kind: "rate_limited"; status: 429; error: string; retryAfterSeconds?: number }
   | { ok: false; kind: "unavailable"; httpStatus?: number }
   | { ok: false; kind: "unknown"; procedure: OwnerProcedure; identity: Identity; httpStatus?: number };
 /** Who refused: the gateway (a plain answer, before forwarding) or the agent server (an encoded oRPC error). */
@@ -52,6 +57,7 @@ const isRpcError = (error: unknown): error is Pick<ORPCError<string, unknown>, "
 /** A non-2xx answer that isn't an encoded oRPC error. */
 class PlainAnswer extends Error { constructor(readonly status: number) { super(`HTTP ${status}`); } }
 class GatewayDenial extends Error { constructor(readonly status: 401 | 403, message: string, readonly scope?: GatewayDenialScope) { super(message); } }
+class GatewayLimit extends Error { constructor(message: string, readonly retryAfterSeconds?: number) { super(message); } }
 type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 /**
@@ -82,6 +88,7 @@ export function ownerClient({ base = "", fetch: send = globalThis.fetch }: { bas
     if (typeof body?.json?.code === "string") return response;
     if (response.status === 401 || response.status === 403)
       throw new GatewayDenial(response.status, typeof body?.error === "string" ? body.error : response.status === 401 ? "Sign in again." : "This account may not do that.", gatewayDenialScope(body));
+    if (response.status === 429 && typeof body?.error === "string") throw new GatewayLimit(body.error, retryAfterSeconds(response.headers));
     throw new PlainAnswer(response.status);
   }
 
@@ -93,6 +100,8 @@ export function ownerClient({ base = "", fetch: send = globalThis.fetch }: { bas
       return error.status === 401 ? { ok: false, kind: "session", status: 401, error: error.message, source: "gateway", ...scope }
         : { ok: false, kind: "forbidden", status: 403, error: error.message, source: "gateway", ...scope };
     }
+    if (error instanceof GatewayLimit)
+      return { ok: false, kind: "rate_limited", status: 429, error: error.message, ...(error.retryAfterSeconds !== undefined && { retryAfterSeconds: error.retryAfterSeconds }) };
     if (error instanceof PlainAnswer) return error.status > 0 ? { ...lost, httpStatus: error.status } : lost;
     if (!isRpcError(error)) return lost;
     if (error.code === "UNAUTHORIZED") return { ok: false, kind: "session", status: 401, error: error.message, source: "agent" };

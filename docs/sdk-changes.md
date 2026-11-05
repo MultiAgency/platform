@@ -15,6 +15,12 @@ public-interface change bumps at least the minor version.
   names the changed fields only, never values; members compare `policy.current` and `policy.requested` from
   `owner/prepare` in the app. A revocation's proposal names the grant and its label. Each is a provider owner intent
   with about 290 s to pass (#20). Offline-tested only.
+- **A 429 is `rate_limited`, with `retryAfterSeconds`** (behaviour, #15): the gateway's request-limit answer now carries
+  `Retry-After` and `{ error, retryAfterSeconds }`. `appClient`'s routes reported it as `refused` and agent calls through
+  `ownerClient` as `unavailable` or, for a mutation, `unknown`, though nothing was forwarded. Both now answer
+  `{ kind: "rate_limited", status: 429, error, retryAfterSeconds? }`: send the same call again once it clears. A 429 that
+  isn't the gateway's JSON (a proxy page) keeps its old kind. A consumer that switches on `kind` exhaustively gains a
+  case. The limit itself stays 1,200 an hour per credential; an operator-set one isn't built.
 
 ## 0.5.1 (2026-11-04)
 

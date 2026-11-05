@@ -268,6 +268,9 @@ payout is held, so a withdrawal is paid only once the owner turns `owner_approva
   can send payouts without another signature. An app asks only for consent and setup texts.
 - **Sending the credential to a browser** (CRITICAL): whoever holds it acts within every consent the deployment holds.
 - **A new requestId after `unknown`** (CRITICAL): the first may have been sent. Read `payouts/status`.
+- **Treating `rate_limited` as a refusal or as `unknown`** (HIGH): the deployment's request limit (1,200 an hour, shared
+  by every owner) refused the call before anything happened. Send the same call again after `retryAfterSeconds`; don't
+  tell an owner they lack access, and don't cache it as an answer.
 - **Treating `failed` as unpaid** (HIGH): a partial payout fails too. A person checks before a new attempt.
 - **Showing your own summary instead of the signed text** (HIGH): the owner must read what the wallet signs.
 - **Asking the owner to sign the confirm page's text ("Open a MultiAgency confirm page.") in your app** (CRITICAL): it

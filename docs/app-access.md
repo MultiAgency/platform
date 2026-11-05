@@ -219,6 +219,14 @@ resends, and nothing an app calls is needed for that. An app follows that work t
   (platform#14). Polling `unresolved` every 10–30 seconds is enough, and keeps within the deployment's 1,200 calls an
   hour.
 
+The limit is per app credential, 1,200 requests an hour across every owner and Organization of the deployment. Over it,
+the gateway answers 429 before forwarding anything, with `Retry-After` (delay-seconds until the oldest request leaves
+the hour) and `{ error, retryAfterSeconds }`. From SDK 0.5.2 `appClient` reports that as `kind: "rate_limited"` with
+`retryAfterSeconds`, for its own routes and for agent calls alike, so it's never mistaken for a refusal or an unknown
+outcome; the same request may be sent again once it clears. A 429 that isn't the gateway's JSON answer (a proxy page)
+stays `unavailable` or `unknown`. A limit the operator sets per deployment or per Organization isn't built (#15).
+Offline-tested (`test/app-access.test.ts`, `test/contract-owner.test.ts`).
+
 DAO requests are bounded per deployment: at most 64 waiting for a vote and 256 filed a day. A finished one (completed,
 ended by a stop, lapsed with no signature found, or past what it signed) is removed 30 days later; `access.jsonl` keeps
 its history, and reading it after that answers 404. A signature found once is recorded and completes the request on a
