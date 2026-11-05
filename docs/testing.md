@@ -249,7 +249,9 @@ saves `portfolio`'s strategy through `strategy/save`, which turns autopilot off;
 `authorizeStrategy` (the owner signs, with the fixture key and through its own route, a grant bound to the saved
 strategy, which an app's or a machine credential's plans need; answers the digest it binds), `signOwner`
 (`message`, `recipient`, `nonce`: the owner's NEP-413 signature from the fixture key, standing in for the wallet an app
-asks; never the platform sign-in text), `daoVote` (`hash`: the DAO passes the proposal that signs that 64-hex hash, as a member's
+asks; never the platform sign-in text), `signOwnerDelegate` (`receiverId`, `actions`: the owner's NEP-366 signature over a
+delegate action of function calls, as the platform's confirm page asks the wallet for it with `signDelegateActions`; answers
+`{ accountId, signedDelegate }`, base64), `daoVote` (`hash`: the DAO passes the proposal that signs that 64-hex hash, as a member's
 transaction names it in its `v1.signer` call) or `machineCredential` (`scopes`, optional `label` and `ttlSeconds`: the owner
 signs in with the fixture key and issues a `portfolio` credential); its result appears as `<name>.result.json`,
 `{ ok, value }` or `{ ok: false, error }`. Create `stack/stop` to stop. Every service the stack starts (gateway, agent

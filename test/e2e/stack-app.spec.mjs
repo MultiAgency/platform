@@ -8,6 +8,9 @@ import { appClient } from '../../src/contract/app-client.ts';
 import { setupMessage, consentMessage } from '../../src/contract/app-consent.ts';
 import { proposalText } from '../../src/contract/treasury-proposals.ts';
 import { ownerClient } from '../../src/contract/owner-client.ts';
+import { delegateSigningHash } from '../../src/owner-signature.ts';
+import { verifyEd25519 } from '../../src/nep413.ts';
+import { decodeSignedDelegateAction } from 'near-kit';
 import { OWNER, PAYEE, PUBLIC_KEY, USDC } from './provider.mjs';
 
 // The running stack as a builder uses it (`pnpm test:e2e:stack --treasury --app <deployment>`): a separate app server
@@ -91,6 +94,17 @@ test('a separate app server runs a held payout and a Treasury machine read on th
 
     expect(await control('signOwner', { message: `Sign in to ${host}`, recipient: host, nonce: randomBytes(32).toString('base64') }),
       'the control never signs the platform sign-in text').toMatchObject({ ok: false });
+
+    // The confirm page's delegate action, signed as the owner's wallet would (#21): what the platform verifies it with.
+    const freeze = { receiverId: 'outlayer.near', actions: [{ type: 'FunctionCall', params: { methodName: 'freeze_wallet', args: { wallet_pubkey: 'ed25519:x' }, gas: '30000000000000', deposit: '0' } }] };
+    const delegated = value(await control('signOwnerDelegate', freeze));
+    expect(delegated.accountId).toBe(OWNER);
+    const bytes = Buffer.from(delegated.signedDelegate, 'base64');
+    const { delegateAction, signature } = decodeSignedDelegateAction(bytes).signedDelegate;
+    expect([delegateAction.senderId, delegateAction.receiverId, delegateAction.actions[0].functionCall.methodName]).toEqual([OWNER, 'outlayer.near', 'freeze_wallet']);
+    expect(verifyEd25519(PUBLIC_KEY, delegateSigningHash(bytes), Buffer.from(signature.ed25519Signature.data)), 'signed by the owner\'s key over the delegate').toBe(true);
+    expect(await control('signOwnerDelegate', { receiverId: 'outlayer.near', actions: [{ type: 'Transfer', params: { deposit: '1' } }] }),
+      'function calls only').toMatchObject({ ok: false });
 
     // The Organization's own payout agent: setup, creation, consent, grant and payee, all signed through the control.
     const { agent: name } = value(await app.setup(await ownerSigned(setupMessage({ host, deployment: 'dao-local', organization: 'org_1', owner: OWNER, area: 'payables', expiresAt: later(1 / 48) }))));

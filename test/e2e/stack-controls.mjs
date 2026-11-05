@@ -4,7 +4,7 @@ import { request } from 'node:https';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { tsImport } from 'tsx/esm/api';
-import { sign } from './provider.mjs';
+import { sign, signDelegate } from './provider.mjs';
 
 // The running stack's file controls (stack.mjs) and its app credential. Every signature comes from the stack's unfunded
 // fixture key, standing in for the owner's wallet. None of this is an application route.
@@ -132,6 +132,17 @@ export function stackControls(stack, { owner }) {
       if (message === `Sign in to ${host}`) throw new Error('An app never asks the owner to sign the platform sign-in text');
       const { publicKey, signature } = await sign(owner, { message, recipient, nonce });
       return { accountId: owner, publicKey, signature };
+    },
+    /**
+     * The owner's NEP-366 signature over a delegate action, as the platform's confirm page asks the wallet for it
+     * (`signDelegateActions`): `{ receiverId, actions }` of function calls in, `{ accountId, signedDelegate }` out, the
+     * signed delegate base64 as near-connect returns it. Only function calls, as the confirm page's actions are.
+     */
+    signOwnerDelegate: ({ receiverId, actions }) => {
+      if (typeof receiverId !== 'string' || !Array.isArray(actions) || !actions.length
+        || !actions.every(a => a?.type === 'FunctionCall' && typeof a.params?.methodName === 'string' && typeof a.params.gas === 'string' && typeof a.params.deposit === 'string'))
+        throw new Error('Give receiverId and actions: function calls with methodName, args, gas and deposit');
+      return { accountId: owner, signedDelegate: signDelegate(owner, { receiverId, actions }) };
     },
     /** The Treasury owner issues a machine credential for `portfolio`, as on its access page: `{ credential, token }`. */
     machineCredential: async ({ label = 'stack', scopes, ttlSeconds }) => {
