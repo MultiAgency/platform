@@ -9,7 +9,7 @@ import { nep413Hash, verifyEd25519 } from "../nep413.js";
 import { chainKeyState, hourlyLimit, type KeyLookup, type KeyStateLookup } from "../signin.js";
 import { appendSynced } from "../synced.js";
 import type { AgentEntry } from "./config.js";
-import { appScopesCover } from "../contract/app-access.js";
+import { daoScopesCover } from "../contract/app-access.js";
 import { ownerPrepareOutput } from "../contract/owner-outputs.js";
 import { mayCall } from "./allowlist.js";
 import { consentKeyHolds, AppConsents, AppCredentials, appMayCall, appMayPrepare, appMayPrepareForDao, proposalSignatureProblem, setupConsent, submittedCorrelation, UNBORN, verifyConsent, verifySetup, type ConsentRecord } from "./app-access.js";
@@ -435,7 +435,7 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     (c.agentId === UNBORN && authority!.agentId !== null && FOLLOW_CREATION.has(path)));
   // A DAO's treasury consent also covers preparing the owner actions it votes on (checked above).
   const covers = (c: ConsentRecord) => byDao
-    ? (mayCall(authority!.access, path) && appScopesCover(c.scopes, path) && path !== "owner/prepare")
+    ? (mayCall(authority!.access, path) && daoScopesCover(c.scopes, path) && path !== "owner/prepare")
       || (prepared !== undefined && (c.agentId === UNBORN ? prepared.type === "agent_create" : prepared.type !== "agent_create" && c.scopes.includes("treasury")))
     : appMayCall(c.scopes, authority!.access, path);
   const consent = authority && live.find(c => matches(c) && covers(c));

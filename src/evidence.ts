@@ -60,6 +60,8 @@ export type TickStart = {
   at: string;
   /** `schedule`: the autopilot's timer; `operator`: "Run now". */
   trigger: "schedule" | "operator";
+  /** Who pressed "Run now" through app access (`app:<deployment>:<organization>`); absent for the owner's own session. */
+  actor?: string;
   /** The scheduler's settings when the tick started; `lastRun` is the tick the schedule counts from. */
   schedule: { on: boolean; everyMin: number; maxUsd: number; lastRun: string | null };
   build: typeof BUILD;

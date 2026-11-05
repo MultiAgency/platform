@@ -467,7 +467,7 @@ test("a treasury consent reaches proposals, bound to that consent and host; a re
   assert.deepEqual(String(forwarded.at(-1)!.headers["x-gateway-consents"]).split(",").sort(), [stored.id, second.id].sort());
   assert.equal((await call(port, rpc("org_1", "strategy/get"), "POST", staging, { json: null }, forged)).status, 200);
   assert.equal(forwarded.at(-1)!.headers["x-gateway-consent"], undefined, "only proposal calls carry it");
-  for (const procedure of ["executePlan", "externalPlan", "rebalance", "pay", "payouts/request", "autopilot/tick", "treasury/link"])
+  for (const procedure of ["executePlan", "externalPlan", "rebalance", "pay", "payouts/request"])
     assert.equal((await call(port, rpc("org_1", procedure), "POST", staging, {})).status, 403, `${procedure}: treasury alone doesn't reach it`);
   const before = forwarded.length;
   const relay = async (recipient: string) => call(port, rpc("org_1", "proposals/approve"), "POST", staging, { json: { id: "a".repeat(32), signed: await signed("text", "owner.near", recipient) } });
@@ -762,4 +762,24 @@ test("a setup stores no consent when access ends or a stop begins while its agen
   state.setup = reserve(() => { for (const c of credentials.list()) if (c.deployment === "staging") credentials.revoke(c.id); });
   assert.equal((await call(port, "/apps/v1/setup", "POST", staging, body)).status, 403, "a credential revoked meanwhile");
   assert.equal(new AppConsents(".app-access").list({}).length, 0, "nothing stored");
+});
+
+test("under a wallet's consent, read reaches account and reconcileBooks, treasury reaches the link and a tick, and no scope reaches setup, recover, fund or the steward", async t => {
+  const { port, forwarded, staging, rpc, consent } = await routeHarness(t);
+  assert.equal((await consent({ scopes: ["owner"] })).status, 201);
+  const before = forwarded.length;
+  for (const procedure of ["account", "reconcileBooks"])
+    assert.equal((await call(port, rpc("org_1", procedure), "POST", staging, {})).status, 403, `${procedure}: needs read`);
+  assert.equal(forwarded.length, before);
+  assert.equal((await consent({ organization: "org_2", scopes: ["read", "owner", "payout", "treasury", "treasury-execute"] })).status, 201);
+  for (const procedure of ["account", "reconcileBooks"])
+    assert.equal((await call(port, rpc("org_2", procedure), "POST", staging, {})).status, 200, procedure);
+  for (const procedure of ["setup", "recover", "treasury/fund", "steward/propose"])
+    assert.equal((await call(port, rpc("org_2", procedure), "POST", staging, {})).status, 403, `${procedure}: owner-session only, whatever the scopes`);
+  for (const procedure of ["treasury/link", "treasury/unlink", "treasury/setConfidential", "autopilot/tick"])
+    assert.equal((await call(port, rpc("org_2", procedure), "POST", staging, { json: { accountId: "treasury.near", confidential: true } })).status, 200,
+      `${procedure}: a wallet owner's treasury consent reaches it`);
+  assert.equal((await consent({ organization: "org_3", scopes: ["read"] })).status, 201);
+  for (const procedure of ["treasury/link", "autopilot/tick"])
+    assert.equal((await call(port, rpc("org_3", procedure), "POST", staging, { json: { accountId: "treasury.near" } })).status, 403, `${procedure}: needs treasury`);
 });

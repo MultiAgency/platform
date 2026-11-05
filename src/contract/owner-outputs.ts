@@ -63,7 +63,12 @@ const policy = z.looseObject({
     time_zone: z.string(),
     windows: z.array(z.looseObject({ days: z.array(z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])), start: z.string(), end: z.string() })),
   }).optional(),
-  sign: z.looseObject({ recipients: z.array(z.string()) }).optional(),
+  // SDK `Native` (provider SDK 0.5.3 replaced `sign` with it): omitted, every native method is off.
+  native: z.looseObject({
+    near: z.looseObject({ sign_message: z.array(z.string()), transfer: z.boolean(), call: z.array(z.string()) }),
+    evm: z.looseObject({ sign_typed_data: z.array(z.looseObject({})), sign_message: z.boolean(), sign_transaction: z.boolean() }),
+    solana: z.looseObject({ sign_message: z.boolean(), sign_transaction: z.boolean() }),
+  }).optional(),
 });
 const cooldowns = z.looseObject({ policy_change_available_at: z.string().nullable(), unfreeze_available_at: z.string().nullable() });
 /** One USD budget window. An uncapped window's spend is "0.000000": nothing counted (`countedSpend`, src/budget-window.ts). */
@@ -214,6 +219,17 @@ export const setupOutput = z.looseObject({
   owner: ownerWallet.nullable(),
   grant: grantSummary.nullable(),
   dao: z.looseObject({ id: z.string(), owner: nearOwner, funded: z.boolean() }).nullable(),
+});
+/**
+ * rpc/observations.ts account: the agent's wallet account and the grants this executor holds, matched by token.
+ * `grant` is the one in use; `stagedGrant` a newly issued one not yet promoted. Both null on an approve-only copy.
+ */
+export const accountOutput = z.looseObject({
+  agentId: z.string().nullable(),
+  executor: z.boolean(),
+  wallet: z.string().nullable(),
+  grant: grantSummary.nullable(),
+  stagedGrant: grantSummary.nullable(),
 });
 /** rpc/observations.ts instance. */
 export const instanceOutput = z.looseObject({ agentId: z.string().nullable(), executor: z.boolean() });
@@ -699,6 +715,7 @@ export const stewardProposeEvent = z.discriminatedUnion("type", [
 export const ownerOutputs = {
   "setup": setupOutput,
   "instance": instanceOutput,
+  "account": accountOutput,
   "overview": overviewOutput,
   "policyHistory": policyHistoryOutput,
   "activity": activityOutput,

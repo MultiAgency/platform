@@ -28,6 +28,14 @@ which runs once, under the owner's signed policy. No production host serves this
 repository's local stack.
 
 Two consent scopes, each named in the text the owner signs:
+- `read` (beside the scopes below) for the owner UI's frame: `account` gives the agent's wallet account and the grant
+  the executor holds (`grant`, plus `stagedGrant` while a new one waits to be promoted); `reconcileBooks` gives each
+  balance against its independent record. Follow unresolved operations with `unresolved`; the platform reconciles them
+  itself, and an app never calls `recover`.
+- `treasury` also covers, from 0.5.1: "Run now" (`autopilot/tick`, swapping only under the owner's grant for the saved
+  strategy and within its per-run ceiling); for a wallet owner, the linked treasury account (`treasury/link`, `unlink`,
+  `setConfidential`, refused for a DAO-owned agent); and funding (`deposit`, then the SDK's `fundingTransaction` for the
+  transfer the owner or the DAO signs).
 - `treasury`: Treasury reads (`strategy/get`, `autopilot/get`, `autopilot/evidence`, `autopilot/log`, `treasury/get`),
   strategy settings (`strategy/save`, which act only once the owner signs a grant binding them), `autopilot/enable` and
   `autopilot/stop`, `sweep`, `deposit` (a one-time address that credits the agent, to fund it), and every `proposals/*` procedure.
@@ -39,8 +47,10 @@ Two consent scopes, each named in the text the owner signs:
 
 The owner's signed policy is the boundary, and the provider enforces it on every path: proposals, `treasury-execute`
 and the owner's own actions. It sets per-asset caps per transaction, hour, day and month, and a USD budget across
-assets (rolling 24-hour, 7-day and 30-day windows, per the Agent API's docs). These are absolute amounts, not a share of
-the treasury, and they bound spending, not exposure. No consent or credential has a budget of its own, and a
+assets. Per the Agent API's docs, each budget cap runs in fixed daily, weekly or monthly periods counted from when the
+owner turned it on, not a rolling window, so up to twice a cap can move across a reset; a smaller shorter cap or a
+per-asset hourly limit bounds that. These are absolute amounts, not a share of the treasury, and they bound spending,
+not exposure. No consent or credential has a budget of its own, and a
 proposal's approval is the platform's check, not the provider's. Limits your app keeps in its own process (a share per
 order, orders per hour) are your app's rules, not a boundary: whoever holds the agent's treasury grant can act without
 them. To change a limit, the owner signs a policy update. What each limit is known to guarantee:

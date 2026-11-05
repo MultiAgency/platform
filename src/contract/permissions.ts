@@ -11,6 +11,7 @@ export type Access = { canSign: boolean; canPropose: boolean; canVote: boolean; 
 export const READS = new Set([
   "setup",
   "instance",
+  "account",
   "overview",
   "policyHistory",
   "treasury/get",

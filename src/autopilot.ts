@@ -67,7 +67,7 @@ type Found = Pick<TickEnd, "plan" | "steps" | "shields" | "rejected" | "refusal"
  * ones included, writes a start and an end evidence line (src/evidence.ts). A tick whose start can't
  * be written doesn't run: unrecorded work is never done. A missing end means interrupted or unknown.
  */
-export async function tick(trigger: TickStart["trigger"]): Promise<string> {
+export async function tick(trigger: TickStart["trigger"], actor?: string): Promise<string> {
   const id = newTickId();
   const at = new Date().toISOString();
   const found: Found = { plan: null, steps: [], shields: [], rejected: [], refusal: null };
@@ -77,7 +77,7 @@ export async function tick(trigger: TickStart["trigger"]): Promise<string> {
   running = true;
   try {
     try {
-      recordStart({ id, at, trigger, schedule, ...(busy ? {} : { progressVersion: 1 as const }), ...(await context()) });
+      recordStart({ id, at, trigger, ...(actor && { actor }), schedule, ...(busy ? {} : { progressVersion: 1 as const }), ...(await context()) });
     } catch (error) {
       const outcome = `Not run: the tick's evidence could not be recorded (${error instanceof Error ? error.message : String(error)}).`;
       post("warn", outcome);

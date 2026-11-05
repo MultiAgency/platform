@@ -56,6 +56,19 @@ test("an unrecognized provider refusal (policy_usage_unavailable) records its ev
   assert.equal(sends, 1);
 });
 
+test("a payout over the per-transaction cap is refused before sending, so later payouts still go out", async () => {
+  // Per the provider's docs it would answer `policy_transaction_limit_exceeded`, which isn't a proven refusal here.
+  answer = async () => { throw providerError(403, "policy_transaction_limit_exceeded"); };
+  const cap = policy.policy!.limits.per_transaction![ASSETS.USDC]!;
+  const over = { ...request, amount: (BigInt(cap) + 1n).toString() };
+  assert.deepEqual(await pay(over, expected), { outcome: "refused", code: "per_transaction_exceeded" });
+  assert.equal(sends, 0, "nothing reaches the provider");
+  answer = async () => ({ correlation_id: "op_after" });
+  mock.method(api, "getStatus", async () => ({ correlation_id: "op_after", status: "SUCCESS" }));
+  assert.equal((await pay(request, expected)).outcome, "settled");
+  assert.equal(sends, 1);
+});
+
 test("a lost reply records no evidence and stays unresolved", async () => {
   answer = async () => { throw new TypeError("fetch failed: socket hang up"); };
   await assert.rejects(pay(request, expected));

@@ -8,12 +8,46 @@ public-interface change bumps at least the minor version.
 
 ## 0.5.1 (2026-11-04)
 
+Additive procedures for owner UIs (platform#17), funding through the `treasury` scope, plus two fixes: an over-cap
+payment is refused locally where it used to block the agent's sends, and policy outputs type `native`. The changelog's
+rule would make this a minor version, since procedures are added and an exported constant changed. The user chose a
+patch: an app pinned to `^0.5.x` keeps working.
 - **The `treasury` scope reaches `deposit`** (behaviour): under a `treasury` consent, a DAO's included, `deposit`
   answers a one-time address that credits only the agent's own confidential balance, so an app can fund the Treasury
   agent it reaches. A DAO's consent can't carry `payout`, so before this an app had no way to fund a DAO-owned agent
-  (found on platform staging, 2026-11-04). `APP_TREASURY` gains `deposit`. The changelog's rule would make this a minor
-  version, since an exported constant changed; the user chose a patch, because no procedure, type or wire format is
-  new and only a scope's coverage widens.
+  (found on platform staging, 2026-11-04). `APP_TREASURY` gains `deposit`.
+- **`account`** (added, `read`): `{ agentId, executor, wallet, grant, stagedGrant }`. It gives the agent's wallet
+  account (the NEAR account holding its balances) and the grants this executor holds. `grant` is the one in use, and
+  `stagedGrant` a newly issued one whose token isn't promoted yet; each is `{ id, label, expiresAt }` or null.
+  - **Matched by token:** each grant is matched by its token's credential, never picked from the grants list. An
+    approve-only copy names none.
+  - **Pure, unlike `setup`:** it adopts nothing. A staged token is promoted by the owner-intent watcher, which every
+    agent runs every 10 seconds, once the grant's owner action settles. `setup` stays owner-session only.
+- **`reconcileBooks`** (added to `read`): each balance against its independent record, the chain for public and the
+  provider's executions for confidential. It sends nothing.
+- **`autopilot/tick`** (added to `treasury`, the user's decision): "Run now", one autopilot pass under its usual
+  guard (one tick at a time, shared with the schedule). It swaps only under a grant that binds the saved strategy, and
+  within that strategy's per-run ceiling, for a DAO's voted grant as for a wallet's. Its evidence start line records the
+  app (`actor`, optional, so readers on 0.5.0 and earlier strip it).
+- **`treasury/link`, `treasury/unlink`, `treasury/setConfidential`** (added to `treasury` for wallet owners, the
+  user's decision): the agent's linked treasury account. Refused under a DAO's consent (`DAO_APP_REFUSED`,
+  `daoScopesCover`): a DAO-owned agent's link is the DAO, fixed at setup, and the agent itself refuses a hosted DAO
+  agent's relink (`checkHostedTreasury`).
+- **`fundingTransaction(asset, address, amount)`** (added to the SDK, moved unchanged from the platform): the transfer
+  `treasury/fund` answers (register the deposit address on the token, wrap NEAR, pay), for an address from `deposit`.
+- **Not in app access:**
+  - `setup`: use `account`, with the identity and `instance`.
+  - `recover`: the platform reconciles unresolved operations itself every 10 seconds (#14). Apps read `unresolved`.
+  - `treasury/fund`: use `deposit` (under `treasury`, above) and `fundingTransaction`.
+  - `steward/propose`: an app's own agent proposes with `proposals/create`.
+- **Policy outputs type `native`, not `sign`** (schema): the Agent API replaced the policy's `sign` block with `native`
+  (provider SDK 0.5.3). Policy outputs now declare `native` with its `near`, `evm` and `solana` blocks, each required
+  when `native` is present, as the provider documents. A policy still carrying `sign`, or a chain block added later,
+  passes through as before.
+- **Payments over the per-transaction cap are refused before sending** (behaviour): a payout, invoice or approval
+  above the policy's `limits.per_transaction` for its asset is now refused locally with code
+  `per_transaction_exceeded` (a payout request: `BAD_REQUEST`, `data.kind: "refused"`) instead of reaching the provider. The provider documents that refusal under a code the platform doesn't treat as
+  proof nothing was sent, so it used to pause the agent's sends until reviewed (docs/enforcement.md).
 
 ## 0.5.0 (2026-11-04)
 

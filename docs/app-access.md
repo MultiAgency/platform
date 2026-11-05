@@ -69,9 +69,10 @@ current provider ID, whose signing key is still a full-access key of the owner, 
 key is read with `view_access_key` at final finality on every call (`chainKeyState`, `src/signin.ts`): when the chain
 answers that the key is absent or no longer full-access, the consent is revoked for good (tombstone reason `key-removed`
 or `key-not-full-access`), so re-adding the key revives nothing; an unanswered lookup refuses the call with 503 and
-revokes nothing. Read scope: `read` permits `instance`, `overview`, `policyHistory`,
-`activity`, `unresolved`, `held`, `ledger`, `ledgerCsv`, `owner/actions`, `owner/pending`, `owner/status`,
-`paymentHistory` and `paymentStatus`. Owner scope: `owner` permits `owner/prepare`, `owner/submit`, `owner/status`,
+revokes nothing. Read scope: `read` permits `instance`, `account` (0.5.1: the agent's wallet account and the grants this
+executor holds, matched by token; it adopts nothing), `reconcileBooks` (0.5.1: each balance against its independent
+record), `overview`, `policyHistory`, `activity`, `unresolved`, `held`, `ledger`, `ledgerCsv`, `owner/actions`,
+`owner/pending`, `owner/status`, `paymentHistory` and `paymentStatus`. Owner scope: `owner` permits `owner/prepare`, `owner/submit`, `owner/status`,
 `owner/pending` and `owner/actions`, and nothing else (no reads beyond those). Payout scope: `payout` permits
 `payouts/request`, `payouts/status`, `held` and `deposit` (a one-time address crediting USDC to the agent's
 confidential balance, so the app can fund it; it moves nothing out): payout requests (CONTEXT.md, "Payout request"), each sent at most once
@@ -145,8 +146,11 @@ credential issued again under the same deployment name acts on every consent tha
 The platform doesn't see the app's users: the app's own sign-in and roles decide which of its users act for which
 Organization, so a fault there acts within every consent the deployment holds (for `payout`, within the owner-signed
 policy). With `treasury`, an app reaches Treasury reads, strategy settings (which act on an app's or a machine credential's plans only once the owner's grant binds them,
-[enforcement](enforcement.md#treasury-proposals-offline--and-stack-tested)), autopilot on and off, sweep, `deposit`
-(from 0.5.1: a one-time address crediting the agent, so the app can fund it) and proposals:
+[enforcement](enforcement.md#treasury-proposals-offline--and-stack-tested)), autopilot on and off, `autopilot/tick` (0.5.1: one pass now,
+swapping only under a grant that binds the saved strategy and within its per-run ceiling; the tick's evidence names the
+app), sweep, `deposit` (from 0.5.1: a one-time address crediting the agent, so the app can fund it; `fundingTransaction`
+in the SDK builds the transfer), for a wallet owner the linked treasury account (0.5.1: `treasury/link`, `unlink`,
+`setConfidential`; refused under a DAO's consent, whose link is the DAO, fixed at setup) and proposals:
 its swaps run only after the owner signs each proposal's exact terms (`proposalText`), a check the platform makes, not
 the provider. With `treasury-execute` as well, it can prepare and execute plans within the policy and the strategy's
 cost limit without a signature per swap, only while the owner's live grant binds the plan's strategy
@@ -191,6 +195,21 @@ makes every app route answer an error:
   088239e and before. Remove those fields, or keep the directory out of the earlier build (0.4.1 never reads it). Stop
 proposals filed by those earlier builds link `/confirm/dao/stop/<agent>`, which now answers 404: open
 `/confirm/dao/stop/<dao>/<agent>`, which shows the same open stop.
+
+**Following an operation to its end, without `recover`.** Every agent reconciles its own operations: every 10 seconds
+it reads each unresolved operation's status once and records it (`startReconciliation`, `src/recover.ts`). It never
+resends, and nothing an app calls is needed for that. An app follows that work through reads:
+- `unresolved` lists the operations that block new sends, each with `key`, `kind`, `status`, `sent`, and the
+  provider's recorded answer if any. An entry leaves the list when its outcome is proven.
+- `activity` and `ledger` show settled operations.
+- After a lost reply, an app reads the record that names the action, not a fresh send:
+  - `proposals/get` for a proposal's execution
+  - `payouts/status` by `requestId` for a payout
+  - `owner/status` by `correlationId` for an owner action
+
+  It never resends while that record reads `unknown`, `executing` or `processing`. `recover` stays owner-session only
+  (platform#14). Polling `unresolved` every 10–30 seconds is enough, and keeps within the deployment's 1,200 calls an
+  hour.
 
 DAO requests are bounded per deployment: at most 64 waiting for a vote and 256 filed a day. A finished one (completed,
 ended by a stop, lapsed with no signature found, or past what it signed) is removed 30 days later; `access.jsonl` keeps

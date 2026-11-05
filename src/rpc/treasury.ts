@@ -66,7 +66,8 @@ export const treasuryRoutes = {
     enable: os.input(z.strictObject({ expectedDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/) }))
       .handler(({ input }) => enableSchedule(input.expectedDigest)),
     stop: os.handler(() => stopSchedule()),
-    tick: os.handler(() => tick("operator")),
+    /** "Run now": one autopilot pass under its usual guard and grant check; an app's actor is recorded in the tick's evidence. */
+    tick: os.handler(({ context }) => tick("operator", context.actor?.startsWith("app:") ? context.actor : undefined)),
     /** Every tick's evidence line since `since`: what the scheduler saw and did (src/evidence.ts). */
     evidence: os.input(z.object({ since: z.iso.datetime().optional() })).use(readOutput("autopilot/evidence")).handler(({ input }) => ticks(input.since)),
     /** A private recording from this executor's existing records; never starts or reconciles a tick. */

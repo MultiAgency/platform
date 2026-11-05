@@ -1053,3 +1053,48 @@ test("a treasury consent, a DAO's included, reaches deposit: the app funds the a
   assert.ok(appScopesCover(["treasury"], "deposit"), "a wallet owner's treasury consent too");
   assert.ok(!appScopesCover(["read"], "deposit"), "read alone takes no deposit address");
 });
+
+test("under a DAO's consent, read reaches account and reconcileBooks; treasury alone doesn't", async t => {
+  const { port, state, forwarded, staging, file, vote, rpc } = await harness(t);
+  const { request: treasuryOnly } = (await file({ scopes: ["treasury"] })).body;
+  vote(treasuryOnly.hash);
+  assert.equal((await call(port, `/apps/v1/dao-consents/${treasuryOnly.hash}`, "GET", staging)).body.state, "signed");
+  state.signature = null;
+  const before = forwarded.length;
+  for (const procedure of ["account", "reconcileBooks"])
+    assert.equal((await call(port, rpc(procedure), "POST", staging, {})).status, 403, `${procedure}: needs read`);
+  assert.equal(forwarded.length, before, "nothing refused was forwarded");
+  const { request: withRead } = (await file({ scopes: ["read"] })).body;
+  vote(withRead.hash);
+  assert.equal((await call(port, `/apps/v1/dao-consents/${withRead.hash}`, "GET", staging)).body.state, "signed");
+  for (const procedure of ["account", "reconcileBooks"]) {
+    assert.equal((await call(port, rpc(procedure), "POST", staging, {})).status, 200, procedure);
+    assert.equal(forwarded.at(-1)!.path, `/rpc/${procedure}`);
+  }
+  for (const procedure of ["setup", "recover", "treasury/fund", "steward/propose", "treasury/link"])
+    assert.equal((await call(port, rpc(procedure), "POST", staging, {})).status, 403, `${procedure}: owner-session only, or refused for a DAO`);
+});
+
+test("under a DAO's treasury consent, an app may run a tick, but never changes the DAO's treasury link", async t => {
+  const { port, forwarded, staging, rpc, consented } = await harness(t);
+  await consented();
+  assert.equal((await call(port, rpc("autopilot/tick"), "POST", staging, {})).status, 200, "a tick runs under the DAO-voted grant only");
+  assert.equal(forwarded.at(-1)!.path, "/rpc/autopilot/tick");
+  const before = forwarded.length;
+  for (const procedure of ["treasury/link", "treasury/unlink", "treasury/setConfidential"])
+    assert.equal((await call(port, rpc(procedure), "POST", staging, { json: { accountId: "other.near", confidential: true } })).status, 403,
+      `${procedure}: a DAO-owned agent's link is the DAO, fixed at setup`);
+  for (const procedure of ["setup", "recover", "treasury/fund", "steward/propose"])
+    assert.equal((await call(port, rpc(procedure), "POST", staging, {})).status, 403, `${procedure}: owner-session only`);
+  assert.equal(forwarded.length, before, "nothing refused was forwarded");
+});
+
+test("the SDK's fundingTransaction is the platform's own: with deposit, an app builds what treasury/fund answers", async () => {
+  const { fundingTransaction: sdk } = await import("../src/contract/index.js");
+  const { fundingTransaction: platform } = await import("../src/chain.js");
+  assert.equal(sdk, platform, "one function, not a copy");
+  const usdc = sdk("USDC", "deposit-1.near", "1000000");
+  assert.deepEqual(usdc.actions.map(a => a.params.methodName), ["storage_deposit", "ft_transfer"], "registers the fresh address, then pays");
+  assert.deepEqual(usdc.actions[1]!.params.args, { receiver_id: "deposit-1.near", amount: "1000000" });
+  assert.deepEqual(sdk("NEAR", "deposit-1.near", "5").actions.map(a => a.params.methodName), ["storage_deposit", "near_deposit", "ft_transfer"], "NEAR is wrapped first");
+});

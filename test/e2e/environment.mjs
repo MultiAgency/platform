@@ -63,7 +63,9 @@ export async function environment(directory, { workspace = false, portfolioOwner
   let executor, reviewer;
   const executorDir = join(directory, 'executor'), reviewerDir = join(directory, 'reviewer'), gatewayDir = join(directory, 'gateway');
   for (const dir of [executorDir, reviewerDir, gatewayDir]) mkdirSync(dir);
-  const [executorPort, reviewerPort, gatewayPort, invoicePort] = await Promise.all([freePort(), freePort(), freePort(), freePort('::1')]);
+  // Each port is probed on the address its service binds: the gateway listens on every interface (`::`), and a port free
+  // on 127.0.0.1 can still be held there by another process (macOS allows both binds), so its start would fail.
+  const [executorPort, reviewerPort, gatewayPort, invoicePort] = await Promise.all([freePort(), freePort(), freePort('::'), freePort('::1')]);
   const key = join(directory, 'localhost.key'), cert = join(directory, 'localhost.crt');
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert,
     '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1'], { stdio: 'ignore' });

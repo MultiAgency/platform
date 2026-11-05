@@ -94,10 +94,15 @@ test("sends need a live grant whose label allows the purpose; approval votes nee
   assert.equal(code("invoice", pay(), { grant: grant("treasury:anything") }), "grant_purpose_denied");
 });
 
-test("an approval over the policy's per-transaction cap is refused; sends leave the cap to the provider", () => {
-  assert.equal(code("approval", pay("payee.near", USDC(25))), "ok");
-  assert.equal(code("approval", pay("payee.near", String(25_000_001))), "per_transaction_exceeded");
-  for (const purpose of ["payout", "invoice"] as const) assert.equal(code(purpose, pay("payee.near", String(25_000_001))), "ok", purpose);
+// The provider's refusal of an amount over the cap (`policy_transaction_limit_exceeded`, per its docs) is not a proven
+// refusal here, so a send over the cap would leave the agent's sends paused: every payment purpose refuses it first.
+test("a payout, invoice or approval over the policy's per-transaction cap is refused before sending", () => {
+  for (const purpose of ["payout", "invoice", "approval"] as const) {
+    assert.equal(code(purpose, pay("payee.near", USDC(25))), "ok", purpose);
+    assert.equal(code(purpose, pay("payee.near", String(25_000_001))), "per_transaction_exceeded", purpose);
+  }
+  const uncapped: Policy = { ...payout, limits: { ...payout.limits, per_transaction: {} } };
+  assert.equal(code("payout", pay("payee.near", USDC(26)), { view: policyView(uncapped, 11) }), "ok", "no cap, no local refusal");
 });
 
 test("a swap may buy only an asset in the policy, whoever sends it", () => {
@@ -163,7 +168,7 @@ test("invoices and approvals need a policy that holds every payment for the owne
 
 test("a payout or invoice the wallet can't cover is refused before it goes to a vote", () => {
   for (const purpose of ["payout", "invoice"] as const) {
-    assert.equal(code(purpose, pay("payee.near", USDC(100)), { available: USDC(100) }), "ok", purpose);
+    assert.equal(code(purpose, pay("payee.near", USDC(25)), { available: USDC(25) }), "ok", purpose);
     assert.equal(code(purpose, pay("payee.near", USDC(1)), { available: "999999" }), "insufficient_balance", purpose);
     assert.equal(code(purpose, pay(), { available: "0" }), "insufficient_balance", purpose);
   }

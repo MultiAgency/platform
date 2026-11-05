@@ -31,6 +31,8 @@ export type JournalHistory = z.infer<typeof JournalHistorySchema>;
 export const StartSchema = z.object({
   progressVersion: z.literal(1).optional(),
   id, agentId: id, at: iso, trigger: z.enum(["schedule", "operator"]),
+  /** Who pressed "Run now" through app access; absent before 0.5.1 and for the owner's own session. */
+  actor: text.optional(),
   schedule: z.object({ on: z.boolean(), everyMin: number, maxUsd: number, lastRun: iso.nullable() }),
   build: z.object({ deployment: text.nullable(), source: text, lockfile: text.nullable(), packageJson: text.nullable() }),
   policy: z.object({ revision: number.nullable(), digest: text.nullable(), status: text }), strategy: text,

@@ -94,7 +94,7 @@ export function stewardTools(plan: PlannedAction[], strategy: Strategy): Tool[] 
             weight: total ? (h.usd / total).toFixed(3) : "0",
             target: targets(strategy)[h.asset],
           })),
-          // Every rolling window binds: the tightest one with room left decides what a swap can spend.
+          // Every budget period binds: the tightest one with room left decides what a swap can spend.
           budget_remaining_usd: Object.fromEntries(
             Object.entries(view.usage?.budget ?? {}).map(([window, b]) => [window, b.remaining_usd]),
           ),

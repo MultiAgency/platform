@@ -314,6 +314,19 @@ test("an app sets up an Organization's own Treasury agent; its plans run only un
     expect(value(await agent.call('autopilot/enable', { expectedDigest: saved.digest })).on).toBe(true);
     expect(value(await agent.call('autopilot/stop')).on).toBe(false);
 
+    // The frame's observations (0.5.1): the agent's wallet and the grant this executor holds, matched by its token.
+    const account = value(await agent.call('account'));
+    expect(account).toMatchObject({ executor: true, stagedGrant: null });
+    expect(account.wallet, "the agent's wallet account").toBeTruthy();
+    expect(account.grant?.label, 'the grant for the saved strategy, held by this executor').toMatch(/^treasury:[0-9a-f]{32}$/);
+    expect(Array.isArray(value(await agent.call('reconcileBooks'))), 'each balance against its independent record').toBe(true);
+    // A wallet owner's app links a treasury account, reads it back, and unlinks it.
+    value(await agent.call('treasury/link', { accountId: OWNER }));
+    expect(value(await agent.call('treasury/get'))?.accountId).toBe(OWNER);
+    value(await agent.call('treasury/unlink'));
+    expect(value(await agent.call('treasury/get'))).toBeNull();
+    steps.push("account named the agent's wallet and its strategy grant; reconcileBooks read; a treasury account linked and unlinked");
+
     // The app saves another strategy: no plan of its runs, and autopilot can't turn on, until the owner signs for it.
     const next = value(await agent.call('strategy/save', { strategy: { ...saved.strategy, maxCostBps: saved.strategy.maxCostBps + 1 }, expectedDigest: saved.digest }));
     expect(await run(value(await plan()).id)).toEqual([{ type: 'rejected', problems: [expect.stringMatching(/grant doesn't bind the saved strategy/)] }]);
@@ -362,6 +375,11 @@ test("a DAO consents to an app by its own vote; its grant vote lets autopilot ru
     // The DAO's grant vote is what authorizes unattended swaps: autopilot turns on under it, and off.
     expect(value(await agent.call('autopilot/enable', { expectedDigest: strategy.digest })).on).toBe(true);
     expect(value(await agent.call('autopilot/stop')).on).toBe(false);
+    // Run now under the DAO's consent: one pass, under the DAO-voted grant; the frame names that grant.
+    expect(typeof value(await agent.call('autopilot/tick'))).toBe('string');
+    expect(value(await agent.call('account')).grant?.label).toBe(`treasury:${strategy.grantSuffix}`);
+    // The DAO's treasury link is the DAO itself: an app never changes it.
+    expect(await agent.call('treasury/link', { accountId: OWNER }), 'refused under a DAO consent').toMatchObject({ ok: false, kind: 'forbidden' });
 
     const proposal = value(await agent.call('proposals/create', { requestId: 'dao-1', legs: [{ from: USDC, to: 'nep141:wrap.near', amount: '1000000' }], expiresAt: later(2) }));
     expect(await agent.call('proposals/approve', { id: proposal.id, signed: { message: 'x', nonce: 'x', publicKey: PUBLIC_KEY, signature: 'x' } }),

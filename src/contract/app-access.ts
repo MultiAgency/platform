@@ -8,7 +8,7 @@ import type { OwnerAction } from "./owner-inputs.js";
  */
 
 /** Reads the app may make with `read` consent. Workflow records (agreements, invoices, work orders) stay out. */
-export const APP_READS = ["instance", "overview", "policyHistory", "activity", "unresolved", "held", "ledger", "ledgerCsv",
+export const APP_READS = ["instance", "account", "reconcileBooks", "overview", "policyHistory", "activity", "unresolved", "held", "ledger", "ledgerCsv",
   "owner/actions", "owner/pending", "owner/status", "paymentHistory", "paymentStatus"] as const;
 /** Owner actions with `owner` consent: prepared here, completed only by the owner's own wallet signature at submit. */
 export const APP_OWNER = ["owner/prepare", "owner/submit", "owner/status", "owner/pending", "owner/actions"] as const;
@@ -23,11 +23,14 @@ export const APP_PAYOUT = ["payouts/request", "payouts/status", "held", "deposit
  * Treasury with `treasury` consent (docs/enforcement.md, "Treasury proposals"): reads; strategy settings, which an
  * app's plans, a machine credential's plans and the autopilot use only under a grant binding their digest; autopilot on
  * (under such a grant) and off; sweeping public balances into the confidential one; `deposit`, a one-time address that
- * credits only the agent's own confidential balance, so the app can fund it; and proposals, whose swaps execute only
- * after the owner signs their exact terms.
+ * credits only the agent's own confidential balance, so the app can fund it; `autopilot/tick`, one autopilot pass now,
+ * swapping only under a grant that binds the saved strategy and within its per-run ceiling; for a wallet owner, the
+ * linked treasury account (`treasury/link`, `unlink`, `setConfidential`); and proposals, whose swaps execute only after
+ * the owner signs their exact terms.
  */
 export const APP_TREASURY = ["strategy/get", "autopilot/get", "autopilot/evidence", "autopilot/log", "treasury/get", "strategy/save",
-  "autopilot/enable", "autopilot/stop", "sweep", "deposit", "proposals/create", "proposals/get", "proposals/list", "proposals/approve",
+  "autopilot/enable", "autopilot/stop", "autopilot/tick", "sweep", "deposit", "treasury/link", "treasury/unlink", "treasury/setConfidential",
+  "proposals/create", "proposals/get", "proposals/list", "proposals/approve",
   "proposals/reject", "proposals/withdraw", "proposals/execute"] as const;
 /**
  * With `treasury-execute` as well: plans prepared and executed within the owner's policy and the strategy's cost limit,
@@ -85,6 +88,14 @@ export const AppSigner = z.enum(["wallet", "dao"]);
  * each time. Not `owner` (the platform files a DAO's owner actions itself) or `payout` (not yet).
  */
 export const DAO_CONSENT_SCOPES = ["read", "treasury", "treasury-execute"] as const satisfies readonly AppScope[];
+/**
+ * What a DAO's `treasury` consent doesn't cover although a wallet owner's does: the linked treasury account. A DAO-owned
+ * agent's link is the DAO itself, fixed at setup (src/hosted-binding.ts): an app never changes which DAO it answers to.
+ */
+export const DAO_APP_REFUSED = ["treasury/link", "treasury/unlink", "treasury/setConfidential"] as const;
+/** Whether a DAO's consent scopes cover a procedure: as `appScopesCover`, less `DAO_APP_REFUSED`. */
+export const daoScopesCover = (scopes: readonly AppScope[], path: string) =>
+  appScopesCover(scopes, path) && !(DAO_APP_REFUSED as readonly string[]).includes(path);
 
 /** `GET /apps/v1/agents/<agent>`: what the owner's consent must name. */
 export const appAgent = z.looseObject({ agent: z.string(), owner: z.string(), agentId: z.string().nullable(), created: z.boolean(),

@@ -57,6 +57,23 @@ export const observationsRoutes = {
     return { agentId: id, owner: agent?.owner ?? null };
   }),
   /**
+   * The agent's account and the grants this executor holds, observed now. Pure, unlike `setup`: it adopts nothing. A
+   * grant is named only when this server holds its token (matched by its credential, never picked from the list), so
+   * an approve-only copy names none. `stagedGrant` is a newly issued grant whose token is staged and not yet promoted;
+   * the owner-intent watcher promotes it once its owner action settles (owner-intents.ts).
+   */
+  account: os.use(readOutput("account")).handler(async () => {
+    const id = process.env.AGENT_ID;
+    if (!id) return { agentId: null, executor: executes(), wallet: null, grant: null, stagedGrant: null };
+    const [agent, grants] = await Promise.all([api.getAgent(id), api.listGrants(id)]);
+    const held = (token: string | undefined) => {
+      const grant = executes() ? liveGrant(grants, token) : undefined;
+      return grant ? { id: grant.grant_id, label: grant.label, expiresAt: grant.expires_at } : null;
+    };
+    return { agentId: id, executor: executes(), wallet: agent.wallet?.near_account_id ?? null,
+      grant: held(process.env.AGENT_GRANT_TOKEN), stagedGrant: held(process.env.AGENT_GRANT_TOKEN_PENDING) };
+  }),
+  /**
    * How far onboarding has got: an agent, its owner, and a live grant whose token this server holds.
    * Adopts a staged grant token whose grant is in force, so it writes the settings file at times.
    */

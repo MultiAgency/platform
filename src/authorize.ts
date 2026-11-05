@@ -13,7 +13,7 @@ import { withinRunCeiling } from "./strategy-value.js";
  * The one authorization rule every money action passes before it is sent. The provider enforces the
  * policy itself (identity, actions, payees, limits, budgets) when the action reaches it; this refuses
  * only what it can't see: a policy not in force, a grant for another purpose, what a swap buys, a
- * public, duplicate or unfunded payout, a changed plan, and, before the owner signs, a release the
+ * public, duplicate, unfunded or over-cap payout, a changed plan, and, before the owner signs, a release the
  * policy no longer allows. Pure: the caller reads the facts, this decides. Facts are typed per purpose, so
  * missing evidence is a type error, never a skipped rule.
  */
@@ -134,10 +134,14 @@ export function authorize(action: Action, c: Case): Refusal | null {
       if (!policy.actions.includes("transfer")) return refuse("action_not_allowed", "The current policy does not permit transfers");
       if (policy.assets !== "any" && !policy.assets.includes(asset)) return refuse("asset_not_allowed", "The current policy does not permit this payment asset");
       if (!agreedPayees(policy).has(recipient)) return refuse("payee_not_agreed", `${recipient} is not an agreed payee`);
-      const cap = policy.limits.per_transaction?.[asset];
-      if (cap !== undefined && BigInt(amount) > BigInt(cap))
-        return refuse("per_transaction_exceeded", `${amount} of ${asset} is over the per-transaction limit of ${cap}`);
     }
+    // The provider refuses an amount over the per-transaction cap under a code not proven here
+    // (`policy_transaction_limit_exceeded`), which would leave the operation unknown and block the agent's sends:
+    // refused before anything is sent instead.
+    const { asset, amount } = action.request;
+    const cap = policy.limits.per_transaction?.[asset];
+    if (cap !== undefined && BigInt(amount) > BigInt(cap))
+      return refuse("per_transaction_exceeded", `${amount} of ${asset} is over the per-transaction limit of ${cap}`);
     if (purpose !== "payout" && (!policy.owner_approval || !policy.confidential))
       return refuse("owner_approval_required", "Invoices and approvals need a confidential policy holding every payment for the owner");
     // The provider holds a payment for the owner's vote without checking the balance, and fails it

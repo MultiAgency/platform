@@ -264,10 +264,15 @@ test("every tick records its start and its end: trigger, settings, mandate, book
   limit(100);
   await tick("schedule");
   await tick("operator");
-  const { ticks: [first, second], corrupt } = ticks();
+  await tick("operator", "app:staging:org_1");
+  const { ticks: [first, second, third], corrupt } = ticks();
   assert.deepEqual(corrupt, []);
   assert.equal(first!.trigger, "schedule");
   assert.equal(second!.trigger, "operator");
+  assert.equal(second!.actor, undefined, "the owner's own Run now names no app");
+  assert.deepEqual([third!.trigger, third!.actor], ["operator", "app:staging:org_1"], "an app's Run now is recorded as that app's");
+  const { StartSchema } = await import("../src/contract/run-log-schema.js");
+  assert.equal(StartSchema.parse({ ...third!, kind: undefined }).actor, "app:staging:org_1");
   assert.deepEqual({ on: first!.schedule.on, everyMin: first!.schedule.everyMin, maxUsd: first!.schedule.maxUsd }, settings());
   assert.equal(first!.grant?.label, grantLabel());
   assert.match(first!.build.source, /^sha256:[0-9a-f]{64}$/);

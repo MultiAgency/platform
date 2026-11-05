@@ -15,7 +15,7 @@ type In<T extends z.ZodType> = z.input<T>;
 
 export type OwnerInputs = {
   // Reads
-  setup: undefined; instance: undefined; overview: undefined; policyHistory: undefined; activity: undefined; unresolved: undefined; held: undefined;
+  setup: undefined; instance: undefined; account: undefined; overview: undefined; policyHistory: undefined; activity: undefined; unresolved: undefined; held: undefined;
   "inbox/list": undefined; "autopilot/get": undefined; "autopilot/evidence": { since?: string }; "autopilot/log": { tickId?: string };
   "strategy/get": undefined; "treasury/get": undefined; ledger: undefined; ledgerCsv: undefined; reconcileBooks: undefined; paymentHistory: undefined;
   paymentStatus: { correlationId: string; waitMs?: number }; invoices: undefined; "agreements/list": undefined;

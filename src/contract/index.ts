@@ -16,6 +16,7 @@ export * from "./app-consent.js";
 export * from "./app-access.js";
 export * from "./app-client.js";
 export * from "./dao-roles.js";
+export { fundingTransaction } from "./funding.js";
 export type { OwnerInputs, OwnerAction } from "./owner-inputs.js";
 export * from "./inputs.js";
 export { ASSETS } from "./assets.js";

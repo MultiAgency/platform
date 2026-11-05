@@ -20,7 +20,12 @@ policy; independently verifying the binding from its plaintext to the signed pay
   OutLayer's pinned tests show the hour and day counters as UTC calendar periods, not rolling windows
   (tests/velocity_accounting_e2e.sh:40–41); the monthly bucket key `monthly:%Y-%m` comes from coordinator
   code since removed, so its current form is unknown. The deployed version is not established.
-- **A cross-asset USD budget.** The Agent API documents rolling 24 h, 7 d and 30 d windows, shared by every grant.
+- **A cross-asset USD budget.** Shared by every grant. The Agent API documents fixed daily, weekly and monthly
+  periods, each counted from when the applied policy turned that cap on, not rolling windows; so up to twice a cap
+  can move across a reset ($100 just before and $100 just after under a $100 daily cap). A smaller shorter-period
+  cap, per-asset hourly limits or a timelock bound that burst
+  ([skills@72482e3, policy reference](https://github.com/NEAR-Intents-Agent-API/skills/blob/72482e34acaf16236b74c85f64243dba73e70c8d/near-intents-agent-api/references/policy.md),
+  per provider docs; reset edges not observed here).
 
 Outside the envelope:
 - The strategy (allocation target, cost cap, per-run ceiling): an application rule bound to the owner's
@@ -240,7 +245,14 @@ If the provider now answers a listed code at another status class, that answer a
 observed provider behaviour and a separate rule decision. `policy_denied` was mainnet-observed as a refusal (2026-10-11 and 2026-10-13,
 [mainnet log](mainnet-log.md)) but 0.7.1's types no longer name it; they name `policy_action_denied`,
 `policy_destination_denied`, `policy_asset_denied` and `policy_schedule_denied`, which aren't listed, so a refusal under
-those codes leaves the operation unresolved. `quote_unavailable`, which the changelog removes, stays in
+those codes leaves the operation unresolved. The provider now documents an amount over `limits.per_transaction` as
+403 `policy_transaction_limit_exceeded`, refused before anything is recorded
+([skills@72482e3, errors reference](https://github.com/NEAR-Intents-Agent-API/skills/blob/72482e34acaf16236b74c85f64243dba73e70c8d/near-intents-agent-api/references/errors.md);
+docs, not observed). A payout, invoice or approval over that cap is therefore refused locally before sending
+(`per_transaction_exceeded`, `src/authorize.ts`; offline-tested, `test/authorize.test.ts`,
+`test/submission-evidence.test.ts`), as an asset outside `assets` already was. An hourly, daily or monthly per-asset
+limit can't be checked locally (the provider exposes no per-asset usage), so a payment crossing one still leaves the
+operation unresolved until those codes are observed. `quote_unavailable`, which the changelog removes, stays in
 `PROVEN_5XX` because the deployed provider version isn't established. Since provider API #51/#54 (skills repo,
 2026-10-27), a dry swap quote is no longer refused by the account's rules: it answers 200 with `warnings` carrying the
 code the live swap would get. `quoteLeg` (`src/treasury.ts`) returns those codes, and a leg with any code not on the
@@ -402,7 +414,8 @@ across hosts or prove remote exactly-once execution. See the
   - initial usage reconciliation, from the provider's history, for activity before the journal existed;
   - accounting prices: which quote, and whether charges are trued up to `amount_in`;
   - windows: hourly and daily per-asset counters in UTC calendar periods (pinned tests), the monthly
-    bucket unknown, USD budget rolling 24 h / 7 d / 30 d (docs), with edges confirmed on the deployed version;
+    bucket unknown, USD budget in fixed periods anchored to when each cap was turned on (docs), with edges
+    confirmed on the deployed version;
   - unresolved operations: reservations kept on unknown outcomes;
   - policy changes: reductions never release usage;
   - external activity: operations other senders made, seen only once they reach the provider's history.
@@ -416,9 +429,11 @@ across hosts or prove remote exactly-once execution. See the
    - Done: wired into `dispatch` (every send), `checkPaymentApproval` and `invoices.agreed()`. Plan
      refusals are now logged with their codes. The authorization regressions are plain tests (test/authorization.test.ts).
    - Trimmed at the user's direction to what the provider can't check: the identity and
-     agent-status rules (and their two reads per send) are gone, and sends leave payees and the
-     per-transaction cap to the provider. Approvals still check payee and cap against the policy now,
-     since the provider checked them under the policy when the payment was requested.
+     agent-status rules (and their two reads per send) are gone, and sends leave payees to the
+     provider. Approvals still check payee and cap against the policy now, since the provider checked
+     them under the policy when the payment was requested. From 2026-11-04, at the user's direction,
+     every payment purpose checks the per-transaction cap before sending again: the provider now
+     documents its refusal under a code not proven here (see the proven-refusal paragraph above).
    - Verified in current local source. Deployed-source correspondence was not established by the public-documentation review; do not infer deployment from these tests.
 2. **One grant-using send site, enforced.** Done: test/send-path.test.ts fails if anything but
    `dispatch` → `send` (src/agent.ts) calls swap, transfer, shield or unshield on a grant, or if
@@ -765,6 +780,13 @@ a proposal already claimed or closed answers its own state, never a withdrawal. 
 without a lock, so concurrent proposals can pass it slightly; one unreadable proposal record fails proposal calls for
 the whole agent (closed, not open). The owner's approving key is checked when the approval is relayed, not again at
 execution.
+
+**"Run now" through an app (0.5.1, offline-tested).** Under a `treasury` consent, `autopilot/tick` runs one autopilot
+pass: the same guard as the schedule (one tick at a time), and it swaps only under a grant whose label binds the saved
+strategy (`grantApproves`; a plain `treasury` grant never approves) and within that strategy's per-run ceiling
+(`maxUsd`). An app that saves another strategy gets no swap until the owner, or the DAO, grants for it. The tick's
+evidence start line names the app (`actor`). Limits: the app chooses when a pass runs, within those bounds, as the
+schedule otherwise would.
 
 ### DAO owners through apps (offline- and stack-tested)
 
