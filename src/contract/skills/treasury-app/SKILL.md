@@ -8,7 +8,7 @@ metadata:
   purpose: 'Treasury proposals through an app: propose by requestId, the owner signs the exact terms, execute once, recover by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.5.1'
+  library_version: '0.5.2'
 requires:
   - getting-started
   - app-server

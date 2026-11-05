@@ -6,21 +6,24 @@ version, so a package staged or packed from changed sources never carries a rele
 commit dates the heading, before its candidate runs; staging copies this file as it is. Under 0.x, any
 public-interface change bumps at least the minor version.
 
-## 0.5.2
+## 0.5.2 (2026-11-05)
+
+Platform fixes ship with it but outside the package: revoked app consents no longer count toward a deployment's limit
+(#16), and proposals at market prices are stored (8ce51c2).
 
 - **More owner actions a DAO votes on through an app** (behaviour, the user's decision 2026-11-05): `DAO_APP_ACTIONS`
-  gains `grant_revoke` and `policy_update`. A policy edit may change only `destinations`, `withdrawals` and `budget`
-  (`DAO_POLICY_FIELDS`, added), the fields the provider signs as a readable message; an on-chain edit carries the policy
-  encrypted, so it stays refused. `AppDaoAction` gains both. A DAO's proposals are public, so a policy edit's proposal
+  gains `grant_revoke` and `policy_update`, off-chain and on-chain edits alike (the user's decision: parity with wallet
+  owners, who also sign an on-chain edit's encrypted policy on the provider's preview). An edit that changes nothing is
+  refused. `AppDaoAction` gains both. A DAO's proposals are public, so a policy edit's proposal
   names the changed fields only, never values; members compare `policy.current` and `policy.requested` from
   `owner/prepare` in the app. A revocation's proposal names the grant and its label. Each is a provider owner intent
-  with about 290 s to pass (#20). Offline-tested only.
+  with about 290 s to pass, or 600 s for an on-chain edit (#20). Offline-tested only.
 - **A 429 is `rate_limited`, with `retryAfterSeconds`** (behaviour, #15): the gateway's request-limit answer now carries
   `Retry-After` and `{ error, retryAfterSeconds }`. `appClient`'s routes reported it as `refused` and agent calls through
   `ownerClient` as `unavailable` or, for a mutation, `unknown`, though nothing was forwarded. Both now answer
   `{ kind: "rate_limited", status: 429, error, retryAfterSeconds? }`: send the same call again once it clears. A 429 that
-  isn't the gateway's JSON (a proxy page) keeps its old kind. A consumer that switches on `kind` exhaustively gains a
-  case. The limit itself stays 1,200 an hour per credential; an operator-set one isn't built.
+  isn't the gateway's JSON (a proxy page) keeps its old kind (`refused` on the routes; `unavailable` or `unknown` on agent
+  calls). A consumer that switches on `kind` exhaustively gains a case. The limit itself stays 1,200 an hour per credential; an operator-set one isn't built.
 
 ## 0.5.1 (2026-11-04)
 
