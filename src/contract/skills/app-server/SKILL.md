@@ -10,7 +10,7 @@ metadata:
   purpose: 'An app server''s access to agents: credential, consents, relayed owner actions, and payout requests by requestId with recovery by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.5.1'
+  library_version: '0.5.2'
 requires:
   - getting-started
   - owner-workflows
@@ -178,9 +178,13 @@ same shape covers the rest:
   only, and only on a host whose setup includes Treasury (the deployed platform host's doesn't yet: 403). `state` answers `reserved` with the agent and a setup consent. Then `owner/prepare` with
   `{ type: "agent_create", role: "treasury" }` and `signer: "dao"`. Then file the DAO's consent naming the new `agentId`.
 - **Owner actions:** under a `treasury` consent, `owner/prepare` with `signer: "dao"` prepares the `treasury` grant,
-  `grant_revoke`, a `policy_update` that changes only `destinations`, `withdrawals` or `budget` (`DAO_POLICY_FIELDS`;
-  anything else is refused), freeze or unfreeze. A policy edit's public proposal names only the fields it changes: show
-  members `policy.current` and `policy.requested` from the answer before they vote. A member files the answer's `dao.proposal` (or `dao.proposalAndVote`); `dao.transaction` is the
+  `grant_revoke`, a `policy_update`, freeze or unfreeze. A policy edit's public proposal names only the fields it
+  changes: show members `policy.current` and `policy.requested` from the answer before they vote. For an on-chain edit
+  (actions, assets, limits, approval, `max_actions_per_hour`; 600 s) the bytes carry the policy encrypted, so members
+  rely on that preview, as a wallet owner does.
+- **A `policy_update`'s `limits` replaces the policy's limits whole** (any owner): send every period and asset you mean
+  to keep, starting from `overview`'s `policy.policy.limits`. `{ limits: { hourly } }` alone drops the per-transaction,
+  daily and monthly limits. The other fields (`budget`, `assets`, …) are replaced whole too. A member files the answer's `dao.proposal` (or `dao.proposalAndVote`); `dao.transaction` is the
   `v1.signer` call inside that proposal, never one a member signs. The agent finds and submits the DAO's signature
   itself once the vote passes; follow `owner/status`.
 - **Treasury proposals:** see treasury-app.

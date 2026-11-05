@@ -336,7 +336,7 @@ test("a DAO vote relays nothing for a proposal that isn't open, a consent that e
   assert.equal(forwarded.length, stood, "nothing relayed");
 });
 
-test("under its consent a DAO is asked to vote only on a Treasury grant, its revocation, an off-chain policy edit, freeze or unfreeze, and the app gets only the proposal", async t => {
+test("under its consent a DAO is asked to vote only on a Treasury grant, its revocation, a policy edit, freeze or unfreeze, and the app gets only the proposal", async t => {
   const { port, state, forwarded, staging, rpc, consented } = await harness(t);
   await consented();
   const prepare = (action: object, signer = "dao") => call(port, rpc("owner/prepare"), "POST", staging, { json: { action, signer } });
@@ -346,7 +346,10 @@ test("under its consent a DAO is asked to vote only on a Treasury grant, its rev
   const reviewed = { revision: 1, digest: `sha256:${"a".repeat(64)}` };
   for (const action of [{ type: "agent_freeze" }, { type: "agent_unfreeze" }, { type: "grant_issue", label: "treasury" }, { type: "grant_revoke", grantId: "g-1" },
     { type: "policy_update", expectedPolicy: reviewed, changes: { budget: { daily_usd: "30", weekly_usd: "75", monthly_usd: "150" } } },
-    { type: "policy_update", expectedPolicy: reviewed, changes: { destinations: [{ address: "payee.near", confidential: true }] } }]) {
+    { type: "policy_update", expectedPolicy: reviewed, changes: { destinations: [{ address: "payee.near", confidential: true }] } },
+    // On-chain edits too (the user's decision 2026-11-05): members trust the provider's preview, as a wallet owner does.
+    { type: "policy_update", expectedPolicy: reviewed, changes: { limits: { per_transaction: {} } } },
+    { type: "policy_update", expectedPolicy: reviewed, changes: { budget: { daily_usd: "30", weekly_usd: "75", monthly_usd: "150" }, assets: "any" } }]) {
     const prepared = await prepare(action);
     assert.equal(prepared.status, 200, `${action.type}: ${JSON.stringify(prepared.body)}`);
     assert.equal(prepared.body.json.dao.transaction.receiverId, "v1.signer");
@@ -354,10 +357,8 @@ test("under its consent a DAO is asked to vote only on a Treasury grant, its rev
   const before = forwarded.length;
   for (const [action, signer] of [[{ type: "grant_issue", label: "payout" }, "dao"], [{ type: "agent_create", owner: { type: "near", account_id: "x", public_key: "ed25519:x" } }, "dao"],
     [{ type: "policy_update", changes: {} }, "dao"], [{ type: "agent_freeze" }, "wallet"],
-    // Only off-chain edits (destinations, withdrawals, budget): an on-chain edit's policy is encrypted, so voters couldn't check it.
-    [{ type: "policy_update", expectedPolicy: reviewed, changes: {} }, "dao"],
-    [{ type: "policy_update", expectedPolicy: reviewed, changes: { limits: { per_transaction: {} } } }, "dao"],
-    [{ type: "policy_update", expectedPolicy: reviewed, changes: { budget: { daily_usd: "30", weekly_usd: "75", monthly_usd: "150" }, assets: "any" } }, "dao"]] as const)
+    // An edit that changes nothing is never filed for a vote.
+    [{ type: "policy_update", expectedPolicy: reviewed, changes: {} }, "dao"]] as const)
     assert.equal((await prepare(action, signer)).status, 403, `${(action as { type: string }).type} as ${signer}`);
   assert.equal(forwarded.length, before, "nothing refused was forwarded");
 

@@ -165,9 +165,14 @@ account. The DAO's grant vote is what authorizes unattended swaps (autopilot, an
 plans), within the strategy it binds and the DAO's signed policy; the grant's proposal says so. The platform authorizes the app, not a member: the app gates its own members with the
 SDK's `accessOf` and `mayCall`, from the DAO's policy. Under it the app asks for the DAO's
 votes: on its Treasury proposals (`POST /apps/v1/dao-votes`, relayed to the agent once the signature is found), and on
-the `treasury` grant, revoking a grant, a policy edit to `destinations`, `withdrawals` or `budget`, freeze and unfreeze
-(`owner/prepare` with `signer: "dao"`, which answers the proposal to file; the agent submits the signature). An edit to
-any other policy field is refused: it's an on-chain edit whose policy is encrypted, so voters couldn't check it. Because
+the `treasury` grant, revoking a grant, a policy edit, freeze and unfreeze (`owner/prepare` with `signer: "dao"`, which
+answers the proposal to file; the agent submits the signature). An off-chain edit (`destinations`, `withdrawals`,
+`budget`) is a readable NEP-413 message with about 290 s to pass; an on-chain edit (actions, assets, limits, approval,
+`max_actions_per_hour`) is a delegate action with 600 s. For an on-chain edit the DAO relies on the provider's preview,
+as a wallet owner does: its policy travels encrypted, so neither the platform nor a voter can check the bytes against
+it. A `policy_update`'s fields each replace the policy's field whole, for every owner: `limits: { hourly }` alone drops
+the other limit periods (`src/owner-requests.ts`, `policyChange`), so an app sends each field complete, starting from the
+policy in force. Because
 a DAO's proposals are public, a policy edit's proposal names only the fields it changes, never their values (payees, the
 DAO's budget); `owner/prepare` answers the policy before and after (`policy.current`, `policy.requested`) for the app
 to show its members. A revocation's proposal names the grant and its label. Revoking and policy edits through an app

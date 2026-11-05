@@ -416,11 +416,11 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   // A DAO's consents answer to the DAO's derived account now, re-read on every call; a wallet's to the wallet's.
   const byDao = live.some(c => c.signer === "dao");
   // Through an app, an owner's wallet signs only what it can read or what the platform built entirely; a DAO votes only on
-  // `DAO_APP_ACTIONS` (a Treasury grant, its revocation, an off-chain policy edit, freeze or unfreeze), which the platform
+  // `DAO_APP_ACTIONS` (a Treasury grant, its revocation, a policy edit, freeze or unfreeze), which the platform
   // prepares and files as its proposal.
   const prepared = path === "owner/prepare" ? (byDao ? appMayPrepareForDao(input) : appMayPrepare(input)) : undefined;
   if (prepared === null) {
-    json(res, 403, { error: byDao ? "Through an app, a DAO (signer \"dao\") votes only on a Treasury grant, its revocation, a policy edit to destinations, withdrawals or budget, freeze and unfreeze."
+    json(res, 403, { error: byDao ? "Through an app, a DAO (signer \"dao\") votes only on a Treasury grant, its revocation, a policy edit, freeze and unfreeze."
       : "Through an app, the owner's wallet (signer \"wallet\") signs only: agent creation without payees, freeze, " +
       "unfreeze, grants, policy edits and votes on held payouts." }); return true;
   }

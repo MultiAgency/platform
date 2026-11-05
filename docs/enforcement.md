@@ -796,12 +796,13 @@ schedule otherwise would.
 
 A DAO-owned agent reaches an app under a consent the DAO signs by its own vote: a passed proposal calling `v1.signer`,
 found on chain by `findSignature`. Every text the DAO votes on is built by the platform (the consent and setup texts,
-`proposalText`, and the provider's owner intents for creation, the grant, its revocation, an off-chain policy edit,
-freeze and unfreeze). The app gets the proposal a member files, never a text or intent to sign
-(coordination/p5-treasury-dao-consent.md). A policy edit through an app may change only `destinations`, `withdrawals`
-and `budget` (`DAO_POLICY_FIELDS`): the provider signs those as a readable NEP-413 message, while any other field is an
-on-chain edit carrying the policy encrypted. Its public proposal names the changed fields only, never values; the app
-gets both policies from `owner/prepare` to show members (offline-tested, `test/app-dao.test.ts`,
+`proposalText`, and the provider's owner intents for creation, the grant, its revocation, a policy edit, freeze and
+unfreeze). The app gets the proposal a member files, never a text or intent to sign
+(coordination/p5-treasury-dao-consent.md). A policy edit through an app may change any field. An off-chain edit
+(`destinations`, `withdrawals`, `budget`) is a readable NEP-413 message. An on-chain edit carries the policy encrypted:
+the DAO relies on the provider's preview of it, as a wallet owner does, and nothing here checks the encrypted bytes
+against the policy shown (the user's decision, 2026-11-05). Its public proposal names the changed fields only, never
+values; the app gets both policies from `owner/prepare` to show members (offline-tested, `test/app-dao.test.ts`,
 `test/proposals.test.ts`).
 
 What holds, offline-tested in `test/app-dao.test.ts`, where each planted fault fails a test:

@@ -129,6 +129,9 @@ table{border-collapse:collapse;width:100%;font-size:.85rem}td,th{border-bottom:1
 <label><input type="checkbox" class="dscope" value="read" checked> read</label><label><input type="checkbox" class="dscope" value="treasury" checked> treasury</label>
 <label><input type="checkbox" class="dscope" value="treasury-execute"> treasury-execute</label><button data-run="daoConsent">File DAO consent</button></div>
 <div class="row"><button data-run="daoGrant">DAO: grant for the saved strategy</button><button data-run="daoFreeze">DAO: freeze</button><button data-run="daoUnfreeze">DAO: unfreeze</button></div>
+<div class="row"><label>Grant ID <input id="revokeGrant" class="w"></label><button data-run="daoRevoke">DAO: revoke grant</button>
+<label>Daily budget USD <input id="dailyBudget" size="6"></label><button data-run="daoBudget">DAO: set daily budget</button>
+<label>USDC hourly limit (raw) <input id="hourlyUsdc" size="10"></label><button data-run="daoLimit">DAO: set USDC hourly limit (on-chain)</button></div>
 <div class="row"><label>Proposal ID <input id="proposalId" class="w"></label><button data-run="daoApprove">File DAO approve</button><button data-run="daoReject">File DAO reject</button></div>
 <div class="row"><button data-run="memberFiles">Member signs the filed proposal</button><button data-run="daoState">Read request state</button><button data-run="stopPage">Open the DAO stop page</button></div>
 <div id="daoRequest" class="muted">No DAO request filed in this tab.</div></section>
@@ -408,6 +411,27 @@ var runs = {
   },
   daoFreeze: function () { return daoOwner({ type: "agent_freeze" }); },
   daoUnfreeze: function () { return daoOwner({ type: "agent_unfreeze" }); },
+  daoRevoke: function () { return daoOwner({ type: "grant_revoke", grantId: $("revokeGrant").value.trim() }); },
+  /** An off-chain policy edit: only the daily USD budget changes, the other periods kept as they are. */
+  daoBudget: async function () {
+    var overview = await call("overview");
+    if (!overview.ok) return;
+    var budget = overview.value.policy.policy.budget;
+    var changes = { budget: { daily_usd: $("dailyBudget").value.trim(), weekly_usd: budget.weekly_usd, monthly_usd: budget.monthly_usd } };
+    return daoOwner({ type: "policy_update", expectedPolicy: { revision: overview.value.policy.revision, digest: overview.value.digest }, changes: changes });
+  },
+  /**
+   * An on-chain policy edit: USDC's hourly limit. `limits` replaces the policy's limits whole, so every other limit is sent
+   * as it stands. A delegate action, 600 s to pass.
+   */
+  daoLimit: async function () {
+    var overview = await call("overview");
+    if (!overview.ok) return;
+    var limits = JSON.parse(JSON.stringify(overview.value.policy.policy.limits || {}));
+    limits.hourly = Object.assign({}, limits.hourly || {});
+    limits.hourly["nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"] = $("hourlyUsdc").value.trim();
+    return daoOwner({ type: "policy_update", expectedPolicy: { revision: overview.value.policy.revision, digest: overview.value.digest }, changes: { limits: limits } });
+  },
   daoApprove: async function () { var c = needAgent(); filed("proposal", await api("daoVote", { organization: c.org, agent: c.agent, proposal: $("proposalId").value.trim(), verdict: "approve" }, "dao approve")); },
   daoReject: async function () { var c = needAgent(); filed("proposal", await api("daoVote", { organization: c.org, agent: c.agent, proposal: $("proposalId").value.trim(), verdict: "reject" }, "dao reject")); },
   // The member's wallet signs exactly the transaction the platform answered; a member who can't vote files only.

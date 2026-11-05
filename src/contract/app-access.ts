@@ -112,25 +112,19 @@ export const appConsentView = z.looseObject({ id: z.string(), deployment: z.stri
  */
 export const DAO_APP_ACTIONS = ["grant_issue", "grant_revoke", "policy_update", "agent_freeze", "agent_unfreeze"] as const;
 /**
- * The policy fields a DAO may change through an app: the ones the provider enforces off-chain and signs as a readable
- * NEP-413 message. An edit to any other field is an on-chain edit whose policy is encrypted, which voters couldn't check.
- */
-export const DAO_POLICY_FIELDS = ["destinations", "withdrawals", "budget"] as const;
-/**
  * Whether a parsed owner action is one an app may ask a DAO to vote on: a Treasury grant, the revocation of a grant
- * (which only removes authority), an off-chain policy edit (`DAO_POLICY_FIELDS` only), freeze or unfreeze, or, under
+ * (which only removes authority), a policy edit that changes something, freeze or unfreeze, or, under
  * a DAO's setup consent only, the Treasury agent's creation (its owner is the DAO's derived account, never given).
  */
 export function appMayAskDao(action: { type: string; label?: string; owner?: unknown; role?: string; payees?: readonly unknown[]; changes?: object }) {
   if (action.type === "agent_create") return action.owner === undefined && !action.payees?.length && (action.role ?? "treasury") === "treasury";
   if (action.type === "policy_update") {
-    const fields = Object.keys(action.changes ?? {});
-    return fields.length > 0 && fields.every(field => (DAO_POLICY_FIELDS as readonly string[]).includes(field));
+    // On-chain edits too: like a wallet owner, members rely on the provider's preview of the encrypted policy.
+    return Object.keys(action.changes ?? {}).length > 0;
   }
   return (DAO_APP_ACTIONS as readonly string[]).includes(action.type) && (action.type !== "grant_issue" || action.label === "treasury");
 }
-export type AppDaoAction = Of<"agent_freeze"> | Of<"agent_unfreeze"> | (Of<"grant_issue"> & { label: "treasury" }) | Of<"grant_revoke">
-  | (Of<"policy_update"> & { changes: Pick<Of<"policy_update">["changes"], (typeof DAO_POLICY_FIELDS)[number]> })
+export type AppDaoAction = Of<"agent_freeze"> | Of<"agent_unfreeze"> | (Of<"grant_issue"> & { label: "treasury" }) | Of<"grant_revoke"> | Of<"policy_update">
   | { type: "agent_create"; role?: "treasury" };
 /** The areas a DAO may set up a hosted agent for through an app: Treasury only. */
 export const DAO_SETUP_AREAS = ["treasury"] as const;
