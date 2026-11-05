@@ -180,10 +180,13 @@ cutoff: a consent the DAO gives after the stop applied stays live. A passed stop
 opened, even after its window. Until then, autopilot and the consents it will end stay live. It only removes authority.
 Offline- and stack-tested (simulated DAO votes). Mainnet-observed on platform staging on 2026-11-04 with
 `agentic.sputnik-dao.near` ([mainnet log](mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc)): setup, creation, consent, the strategy-bound grant, autopilot on, and
-the DAO's own stop. Not observed: funding (see below), a DAO-approved proposal, freeze and unfreeze. Not in production.
+the DAO's own stop; on 2026-11-05 ([mainnet log](mainnet-log.md#a-dao-funds-its-agent-and-approves-a-swap-through-an-app-on-platform-staging-2026-11-05-utc)), funding through
+`deposit` by the DAO's vote and an app's proposal approved by DAO vote, then executed. Not observed: freeze and unfreeze.
+Not in production.
 
 **Funding through an app:** found on that run, a DAO's consent couldn't reach `deposit`, which was in the `payout`
-scope only. From 0.5.1 the `treasury` scope reaches it too (offline-tested; not yet run on staging). See
+scope only. From 0.5.1 the `treasury` scope reaches it too: offline-tested, and mainnet-observed on platform staging
+on 2026-11-05, where the DAO funded its agent with the calls `fundingTransaction` builds, filed as one proposal. See
 [enforcement](enforcement.md#dao-owners-through-apps-offline--and-stack-tested).
 
 Rolling back: records written from 0.5.0 on carry fields that earlier builds refuse to read, and one refused record

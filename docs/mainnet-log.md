@@ -281,6 +281,35 @@ No funds moved.
 
 Not checked: Trezu's display of these proposals, freeze and unfreeze by DAO vote, and a proposal's execution.
 
+## A DAO funds its agent and approves a swap through an app on platform staging, 2026-11-05 (UTC)
+
+The second run of DAO owners through apps on mainnet, user-run, on the agent the first run created (`own-4f7bfc06…`),
+whose app consents that run's stop had ended. It used:
+- **Staging:** platform staging at api.dev.multiagency.ai, SDK 0.5.1. Deployment `f417fc3a` (release candidate
+  `2b941c69`, commit `2223d11`) until the fix below, then `3c085b20` (candidate `956a0e55`, commit `8ce51c2`).
+- **The app:** the local app stand-in (`scripts/staging-app.ts`, deployment `staging`, Organization `org_dao1`).
+- **The DAO:** `agentic.sputnik-dao.near` (one vote passes). Its member `multiagentic.near` filed and voted each
+  proposal, through a wallet from the stand-in for the platform's requests and through `near-cli-rs` for the funding.
+
+| Check | Result |
+|---|---|
+| The DAO consents again by vote | Proposal #64 (03:19:19), filed and voted in one transaction. The consent was stored at 03:19:31 with `signer: dao`, scopes `read` and `treasury`, and the DAO's derived key |
+| `account` names the agent's wallet and the grant it holds | First answer on a deployed host (03:19:47): the agent's wallet account, and the grant the first run's proposal #62 issued, matched by token and still in force after that run's stop, as the stop page says |
+| An app takes a deposit address under `treasury` | `deposit` answered a one-time address (03:21:22) under the DAO's consent, which has no `payout` |
+| The DAO funds its agent by its own vote | The DAO held no USDC on its own account (its Trezu balance is confidential), so the member first sent it a small amount. Proposal #65 then carried the calls `fundingTransaction` builds (register the deposit address on USDC, transfer): approved at about 03:23, it executed with the DAO as sender, and the agent's confidential USDC showed the credit by 03:24:07 |
+| An app's proposal, approved by DAO vote and executed | `proposals/create` stored one USDC→wNEAR swap (04:26:47). The DAO's vote request named the swap, its floor and the proposal's hash; its check page recomputed the hash ("it matches"). Proposal #66 (04:29:42) signed it, the platform relayed the approval (04:30:09), and `proposals/execute` sent one swap under the DAO's strategy-bound grant: `SUCCESS` (04:34:52), received above the signed floor, nothing left unresolved, and the provider's USD budget counted the swap |
+
+**Found:**
+- **`proposals/create` failed for every proposal at a market price** (03:25:08, `unclassified_error` at `src/mandate.ts`):
+  the proposal record was hashed with the policy's canonical form, which refuses non-integer numbers, and a leg's quoted
+  USD value is rarely whole. Offline tests priced every asset at exactly 1, so it never showed. Nothing was stored or
+  sent. Fixed in `8ce51c2` (records hashed with JCS numbers; whole numbers hash as before), reproduced and tested offline
+  (`test/treasury-proposals.test.ts`, `test/mandate.test.ts`), deployed as `3c085b20`; the same request then succeeded.
+
+Not checked: Trezu's display of these proposals, freeze and unfreeze by DAO vote, a DAO's rejection, and a proposal
+expiring before its vote. Afterwards the agent keeps its balances under its policy; the DAO's consent from #64 stays
+live until 2026-12-05 unless the DAO stops the agent again.
+
 ## Token registration reads on the USDC contract, 2026-10-29T14:44Z
 
 Read-only RPC calls (`storage_balance_of` on the USDC contract, final finality), no funds moved. They back the

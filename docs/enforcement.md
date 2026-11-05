@@ -739,7 +739,11 @@ unverified or unimplemented respectively. See `docs/operations.md` for preservat
 ## Treasury proposals (offline- and stack-tested)
 
 An app with `treasury` consent proposes swaps; the owner approves their exact terms later by signing `proposalText`;
-the app asks for one execution (`src/proposals/service.ts`).
+the app asks for one execution (`src/proposals/service.ts`). Mainnet-observed once, for a DAO owner on platform
+staging (2026-11-05, [mainnet log](mainnet-log.md#a-dao-funds-its-agent-and-approves-a-swap-through-an-app-on-platform-staging-2026-11-05-utc)):
+one proposed swap, approved by DAO vote, executed once above its signed floor. That run found proposals at market
+prices couldn't be stored (their record's hash refused a non-integer USD value); fixed in `8ce51c2`. A wallet owner's
+approval, a rejection and an execution refused at the pre-send re-quote are not observed on mainnet.
 What holds, offline-tested in `test/treasury-proposals.test.ts` with planted faults (each check removed fails a test):
 the platform accepts only the owner's NEP-413 signature over the exact text for its host, by a full-access key of the
 owner (gateway, `test/app-access.test.ts`); a policy revision or digest, strategy or agent change voids the proposal;
@@ -850,11 +854,13 @@ Limits:
   (creation, grant, freeze), the agent builds the description from the provider's preview, as on the owner session, and
   no page recomputes its hash.
 - **Funding:** found on platform staging (2026-11-04), a DAO's consent couldn't reach `deposit`, which was in `payout`
-  only. From 0.5.1 the `treasury` scope reaches it; that's offline-tested, not observed. `deposit` answers an address
-  that only credits the agent's own balance.
+  only. From 0.5.1 the `treasury` scope reaches it: offline-tested, and mainnet-observed on staging on 2026-11-05
+  ([mainnet log](mainnet-log.md#a-dao-funds-its-agent-and-approves-a-swap-through-an-app-on-platform-staging-2026-11-05-utc)), the DAO funding its agent by its own vote. `deposit` answers an address that only credits the
+  agent's own balance.
 - Mainnet-observed on platform staging, 2026-11-04 ([mainnet log](mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc)):
-  setup, creation, consent, the strategy-bound grant, autopilot on and the DAO's own stop. Not observed: a DAO-approved
-  proposal and its execution, freeze, unfreeze. Not in production.
+  setup, creation, consent, the strategy-bound grant, autopilot on and the DAO's own stop; 2026-11-05
+  ([mainnet log](mainnet-log.md#a-dao-funds-its-agent-and-approves-a-swap-through-an-app-on-platform-staging-2026-11-05-utc)): funding, and an app's proposal approved by DAO vote and executed under the DAO's grant. Not
+  observed: freeze, unfreeze. Not in production.
 
 ## Shared machine access candidate
 

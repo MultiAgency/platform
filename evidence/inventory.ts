@@ -531,8 +531,13 @@ export const VERIFICATIONS: { claim: string; evidence: string; when: string; pub
   },
   {
     "claim": "Through app access, a DAO sets up and creates a hosted Treasury agent, consents to an app, issues its strategy-bound grant and stops the agent, each by its own vote",
-    "evidence": "[DAO through an app on staging](docs/mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc): `agentic.sputnik-dao.near`, proposals #59, #61, #62 and #63 plus the creation vote, platform staging deployment `bc635cb7`; funding and a DAO-approved proposal weren't run",
+    "evidence": "[DAO through an app on staging](docs/mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc): `agentic.sputnik-dao.near`, proposals #59, #61, #62 and #63 plus the creation vote, platform staging deployment `bc635cb7`; funding and a DAO-approved proposal followed on 2026-11-05 (next row)",
     "when": "2026-11-04T22:19Z to 22:51Z"
+  },
+  {
+    "claim": "Through app access, a DAO funds its hosted Treasury agent and approves an app's swap proposal by its own votes; the app executes it",
+    "evidence": "[DAO funds and approves on staging](docs/mainnet-log.md#a-dao-funds-its-agent-and-approves-a-swap-through-an-app-on-platform-staging-2026-11-05-utc): `agentic.sputnik-dao.near`, proposals #64 (consent), #65 (funding, built by `fundingTransaction`) and #66 (approval), platform staging deployments `f417fc3a` and `3c085b20`; one swap `SUCCESS` above its signed floor",
+    "when": "2026-11-05T03:19Z to 04:35Z"
   }
 ];
 

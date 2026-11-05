@@ -181,7 +181,7 @@ Stop rules as above. Record each outcome in `docs/mainnet-log.md`; amounts, fees
 release record. What step 9 shows decides whether approving a held withdrawal can be bound and enabled
 ([enforcement](enforcement.md)).
 
-## A DAO-owned Treasury agent on staging (run 2026-11-04, steps 1–4 and 7: [mainnet log](mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc))
+## A DAO-owned Treasury agent on staging (run 2026-11-04, steps 1–4 and 7: [mainnet log](mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc); 2026-11-05, steps 3, 5 and 6: [mainnet log](mainnet-log.md#a-dao-funds-its-agent-and-approves-a-swap-through-an-app-on-platform-staging-2026-11-05-utc))
 
 User-run, on mainnet, through staging, never scheduled. It would be the first evidence of DAO owners through apps,
 which so far is offline- and stack-tested against simulated votes only (`test/app-dao.test.ts`,
@@ -192,10 +192,11 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 - what the provider answers for a DAO-owned hosted agent
 
 **Before starting**
-- **Staging runs 0.5.1's `platform` package.** Since about 2026-11-05T02:53Z: candidate `2b941c69`, commit `2223d11`,
-  Railway deployment `f417fc3a`, image `sha256:9fa854c9…`, with `deploy/platform-staging.json`, whose `appSetup` lists
-  `treasury`. Before that, 0.5.0's from 2026-11-04T21:46Z: candidate `0263df8e`, commit `6ba0831`, deployment
-  `bc635cb7`, image `sha256:5994c8f6…`.
+- **Staging runs 0.5.1's `platform` package with the proposal-hash fix.** Since about 2026-11-05T04:12Z: candidate
+  `956a0e55`, commit `8ce51c2`, Railway deployment `3c085b20`, image `sha256:1870fb68…`, with
+  `deploy/platform-staging.json`, whose `appSetup` lists `treasury`. Before that, 0.5.1 from about 02:53Z (candidate
+  `2b941c69`, commit `2223d11`, deployment `f417fc3a`, image `sha256:9fa854c9…`), and 0.5.0 from 2026-11-04T21:46Z
+  (candidate `0263df8e`, commit `6ba0831`, deployment `bc635cb7`, image `sha256:5994c8f6…`).
 
   Read-only checks right after each deploy (both passed):
   - `/health` gives 200.
@@ -242,7 +243,10 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 4. **Grant.** Save a strategy (`strategy/save`), then `owner/prepare` with `{ type: "grant_issue", label: "treasury",
    expectedStrategyDigest }` and `signer: "dao"`. Check that the description names the strategy and its terms. Vote
    within the intent's minutes. Read `owner/status` until `SUCCESS`.
-5. **Fund.** Take a deposit address and send a small amount of USDC. Read `treasury/get` until it's credited.
+5. **Fund.** Take a deposit address (`deposit`, under `treasury`) and have the DAO send a small amount of USDC: build
+   the calls with `fundingTransaction("USDC", address, amount)` and file them as one function-call proposal on the
+   DAO, then vote. The DAO needs that USDC on its own NEAR account first; a confidential Trezu balance can't be sent this
+   way. Read `overview` until the agent's confidential USDC shows the credit.
 6. **Proposal.** Create a proposal for one small swap, then file the DAO's vote with `approve`. Check the description's
    swap and the check page. Vote, read `state` until `relayed`, then `proposals/execute`. Expect `executed`, with one
    swap whose floor is at least the signed one.

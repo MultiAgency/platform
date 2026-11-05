@@ -256,9 +256,9 @@ Each line is a gap; the linked page says how the rest is known. The
   the treasury grant can swap within the policy without it. Held swaps aren't used: what their vote commits to is
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
 - DAO-owned agents through apps: setup, creation, consent, the grant and the DAO's own stop are mainnet-observed on
-  platform staging (2026-11-04, [mainnet log](docs/mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc)); Treasury proposal votes are stack-tested only, and freeze
-  and unfreeze by DAO vote are offline-tested only. Funding through an app (`deposit` under `treasury`, from 0.5.1) is
-  offline-tested only. The provider's owner intents (creation, grant, freeze) expire in minutes, so only a DAO whose vote
+  platform staging (2026-11-04, [mainnet log](docs/mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc)), and so are funding through an app (`deposit` under
+  `treasury`, from 0.5.1) by the DAO's vote and an app's swap proposal approved by DAO vote and executed (2026-11-05,
+  [mainnet log](docs/mainnet-log.md#a-dao-funds-its-agent-and-approves-a-swap-through-an-app-on-platform-staging-2026-11-05-utc)). Freeze and unfreeze by DAO vote are offline-tested only. The provider's owner intents (creation, grant, freeze) expire in minutes, so only a DAO whose vote
   passes that fast completes them. A DAO's own stop (no app) ends what was given before it is applied; that happens only
   when someone opens its page after the vote, and the provider grant stands, so a consent the DAO gives later can turn
   autopilot on again. See [app access](docs/app-access.md).
