@@ -147,7 +147,9 @@ export async function daoApprove(app: ReturnType<typeof appClient>, organization
 
 Result: `pending`, then `relayed` with `proposalState` (`approved`). Nothing relays the vote until your server reads
 `state` after it passed: keep reading until it's final. Then `execute(...)` as above. A vote must pass
-before the proposal's `expiresAt` and while the DAO consent it is filed under is live. A swap's signed floor may be out
+before the proposal's `expiresAt` and while the DAO consent it is filed under is live. Proposals have no provider
+window, so they suit a DAO whose votes take hours or days; the strategy grant autopilot needs is a provider intent that
+expires in about 290 s, which only a DAO voting that fast can sign (app-server, "A DAO owner"). A swap's signed floor may be out
 of reach by then: execution is refused `not_executable` and the proposal stays approved.
 
 Unattended swaps are the DAO's grant vote: the `treasury` grant, prepared with `owner/prepare` and `signer: "dao"`,

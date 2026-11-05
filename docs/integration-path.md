@@ -76,7 +76,8 @@ total. It is offline-tested only.
 ## Gaps
 
 - DAO-owned agents: Treasury only (no `payout` or `owner`), and owner intents (creation,
-  grant, freeze) complete only when the DAO's vote passes within minutes.
+  grant, freeze) complete only when the DAO's vote passes within the provider's window (600 s, or about 290 s for the
+  grant); a slower DAO approves swaps one proposal at a time and can't turn on autopilot (#20).
 - Host `demo` and agent `area` are fixed enums.
 - Owner procedures outside the Treasury/Payables set (for example `ownerIdentity`, `demoGuide/compose`) have no packaged contract.
 - Independent owner-app releases are proven on the local stack only.

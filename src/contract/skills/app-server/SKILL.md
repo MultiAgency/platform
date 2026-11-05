@@ -185,7 +185,9 @@ same shape covers the rest:
 
 Scopes: `read`, `treasury`, and `treasury-execute` if the DAO votes it in. Not `owner` or `payout`. Consent and
 proposal votes may take the DAO's voting period (at most 7 days). Creation, the grant, freeze and unfreeze are provider
-intents that expire in minutes, so they complete only for a DAO whose vote passes that fast: show `expiresAt`. A
+intents with fixed windows, 600 s for wallet requests (creation, freeze, unfreeze) and about 290 s for consent messages (the grant), per the provider's docs (owner-signing, signing-standards, read 2026-11-05); nothing lengthens them. They complete only for a DAO whose vote passes that fast:
+show `expiresAt`. A slower DAO can still approve each swap as a Treasury proposal (treasury-app), but can't issue the
+strategy grant that unattended swaps (autopilot) need (#20). A
 signature found once completes on a later read until what the DAO signed expires, never after (410). A DAO can also stop
 its agent without you: a stop it votes on (`https://<host>/confirm/dao/stop/<dao>/<agent>`) revokes every app's consent
 for the agent given before the stop applies, ends consent requests filed by then (their `state` answers 409, whatever

@@ -815,7 +815,9 @@ proposal approved and executed once.
 
 Limits:
 - The approval is the platform's check, as for a wallet owner's proposals.
-- Only a DAO whose vote passes within the provider intent's minutes completes creation, the grant, freeze or unfreeze.
+- Only a DAO whose vote passes within the provider intent's window completes creation, the grant, freeze or unfreeze:
+  600 s for wallet requests (creation, freeze, unfreeze) and about 290 s for consent messages (the grant), per the provider's docs (owner-signing, signing-standards, read 2026-11-05). No request field lengthens it (sdk-typescript 0.7.3 `generateIntent`). A slower DAO can still approve
+  each swap as a Treasury proposal, which has no provider window, but can't turn on autopilot (#20).
 - The platform authorizes the app, not a member. The app gates its own members with the SDK's `accessOf` and `mayCall`.
 - **The DAO's own stop** (`/confirm/dao/stop/<dao>/<agent>`, no app involved) ends everything given before it first
   applies, once the DAO's vote over the exact text is found and the page is opened: every app consent for the agent ID
