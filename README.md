@@ -335,6 +335,11 @@ Each line is a gap; the linked page says how the rest is known. The
   the coordinated [credential rotation](docs/credential-rotation.md) after the diagnostic exposure is outstanding.
 - FastNear deposit batching awaits a verified raw-transaction hash mapping; deployed indexer freshness is unverified
   ([follow-up](docs/archive/infrastructure-review.md#follow-up-review-2026-10-16)).
+- Every deploy still uses Railway's Config as Code, which the Railway CLI warned on 2026-11-05 keeps working only until
+  2026-12-01; later deploys need Railway's Infrastructure as Code (`.railway/railway.ts`). Not migrated: the root
+  `railway.json` (the `invoices` service) and `deploy/railway.gateway.json` (the `dao` and `platform` packages' root
+  `railway.json`: proto.multiagency.ai and platform staging). See
+  [operations](docs/operations.md#railway-config-as-code-ends-2026-12-01).
 - Guided walkthroughs and short guides (`/demos`) are tested with offline browser fixtures, not on the deployed hosts,
   and can't guarantee a swap, prompt approval or settlement. Guidance is deterministic, not an LLM; live AG-UI agent
   orchestration isn't built.

@@ -114,6 +114,23 @@ The `dao` image is built only from a package made by `scripts/package-shared-fro
 `web/dist` plus the Treasury and Payables builds), which copies in `Dockerfile.gateway` as the package's root Dockerfile
 and `deploy/railway.gateway.json` as its `railway.json`. The image runs `deploy/shared-frontends.json`.
 
+### Railway Config as Code ends 2026-12-01
+
+On 2026-11-05, while deploying platform staging from a release candidate's `platform` package, the Railway CLI printed
+on every command that Config as Code (`railway.json` / `railway.toml`) is deprecated in favour of Infrastructure as Code
+(`.railway/railway.ts`, via `railway config migrate`) and that existing files keep working until 2026-12-01. Nothing
+here is migrated yet; deploys after that date need it. The files every deploy uses (no `railway.toml` is shipped):
+
+| File | Shipped as | Service |
+|---|---|---|
+| `railway.json` (root) | itself; `scripts/release-candidate.mjs` copies it into the candidate's `invoices` source | `invoices` (invoices.multiagency.ai) |
+| `deploy/railway.gateway.json` | the root `railway.json` of the `dao` package (`scripts/package-shared-frontends.mjs`) | `dao` (proto.multiagency.ai) |
+| `deploy/railway.gateway.json` | the root `railway.json` of the `platform` package (`scripts/package-platform.mjs`) | platform staging (api.dev.multiagency.ai); production would use the same package |
+
+Each selects its Dockerfile, one replica, healthcheck `/health` and restart on failure (up to 5 retries).
+`test/build-context.test.ts` pins the Dockerfile selection and the packaging. The Infrastructure as Code equivalent and
+whether `railway config migrate` reproduces these settings are unverified.
+
 Both services must use the same reviewed source and frozen lockfile. Rebuilding `dao`
 alone does not update the public invoice page. Preserve `AGREEMENTS_URL` and matching
 `AGREEMENTS_SECRET` configuration so the approve-only dashboard continues reading the executor's
