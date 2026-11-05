@@ -214,8 +214,9 @@ export class AppConsents {
   admit(consent: VerifiedConsent, now = Date.now()) {
     if (this.isRevoked(consent.id)) throw new BadRequest("This consent was revoked. The owner can sign a new one.");
     if (this.read(consent.id)) return;
-    if (this.list({ deployment: consent.deployment }).filter(r => r.expiresAt > now).length >= MAX_CONSENTS_PER_DEPLOYMENT)
-      throw new BadRequest("This deployment has too many unexpired consents. Revoke unused ones first.");
+    // Revoked consents don't count: their tombstones already refuse their signatures.
+    if (this.list({ deployment: consent.deployment }).filter(r => !r.revoked && r.expiresAt > now).length >= MAX_CONSENTS_PER_DEPLOYMENT)
+      throw new BadRequest("This deployment has too many live consents. Revoke unused ones first.");
   }
   store(consent: VerifiedConsent, now = Date.now()) {
     this.admit(consent, now);

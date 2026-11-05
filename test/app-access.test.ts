@@ -638,7 +638,7 @@ test("the operator sweep revokes consents whose key is gone and leaves unanswere
   assert.equal(store.isRevoked(record(3).id), false);
 });
 
-test("each deployment holds a bounded number of unexpired consents; expired ones and other deployments don't count", async t => {
+test("each deployment holds a bounded number of live consents; expired or revoked ones and other deployments' don't count", async t => {
   const dir = mkdtempSync(join(tmpdir(), "app-cap-")); t.after(() => rmSync(dir, { recursive: true, force: true }));
   const store = new AppConsents(dir);
   store.store(record(1));
@@ -646,8 +646,13 @@ test("each deployment holds a bounded number of unexpired consents; expired ones
   const file = (r: VerifiedConsent) => writeFileSync(join(dir, "consents", `${r.id}.json`), JSON.stringify({ ...r, createdAt: 0, revoked: false, revokedAt: null }));
   for (let i = 1; i <= 10; i++) file(record(10_000 + i, { expiresAt: Date.now() - 1 }));
   for (let i = 2; i <= MAX_CONSENTS_PER_DEPLOYMENT; i++) file(record(i));
-  assert.throws(() => store.store(record(MAX_CONSENTS_PER_DEPLOYMENT + 1)), /too many unexpired consents/);
+  assert.throws(() => store.store(record(MAX_CONSENTS_PER_DEPLOYMENT + 1)), /too many live consents/);
   assert.equal(store.store(record(20_000, { deployment: "production" })).deployment, "production");
+  // A revoked consent frees its place (#16); its tombstone still refuses its signature.
+  assert.ok(store.revoke(record(2).id, null));
+  assert.equal(store.store(record(MAX_CONSENTS_PER_DEPLOYMENT + 1)).revoked, false);
+  assert.throws(() => store.store(record(2)), /was revoked/);
+  assert.throws(() => store.store(record(MAX_CONSENTS_PER_DEPLOYMENT + 2)), /too many live consents/);
 });
 
 test("the operator lists and permanently revokes consents from the command line", t => {

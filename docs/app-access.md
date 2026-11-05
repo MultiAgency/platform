@@ -62,7 +62,7 @@ refusals (400, 403, 404, 409) are answers.
 A revocation writes a tombstone, `.app-access/revoked/<id>`, which is never deleted: a revoked consent stays
 revoked even if its record is archived, and its signature can't be stored again. The operator can revoke any consent by
 id, including one whose record is already gone. Expired records may be archived; their text can't verify again. Each
-deployment holds at most 1,024 unexpired consents.
+deployment holds at most 1,024 live consents; a revoked one frees its place (#16).
 
 A call is forwarded only with a live consent for that deployment, host, Organization and agent, bound to the agent's
 current provider ID, whose signing key is still a full-access key of the owner, and whose scope allows the procedure. The
