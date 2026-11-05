@@ -38,9 +38,9 @@ owner signs `consentMessage(...)` (or `setupMessage(...)` for a hosted agent) wi
 it. A consent reaches the listed reads (`APP_READS`) and owner actions (`APP_OWNER`) and, for `owner/prepare`, only
 actions the owner can read when signing or that platform code builds entirely (`AppOwnerAction`); everything else is
 refused. The app never asks an owner to sign the platform's sign-in text. See the platform's `docs/app-access.md`.
-No production MultiAgency host serves the `/apps/v1` routes yet; the operator runs them on a staging host
-for its own tests. Build against the SDK repository's local stack (`pnpm test:e2e:stack --app <deployment>`), with a
-simulated provider, chain and wallet.
+No production MultiAgency host serves the `/apps/v1` routes yet. Build against the platform repository's local stack
+(below), with a simulated provider, chain and wallet; then ask for a staging credential through
+[developer access](https://github.com/MultiAgency/platform/blob/main/docs/developer-access.md).
 
 An agent connection permits its contributor's reports and compensation reads only. It cannot file invoices, approve payments, sign owner actions or manage connections. Treasury machine access is a separate existing route and credential; Payables owner delegation and DAO machine delegation are unavailable.
 
@@ -66,6 +66,70 @@ What has run where, by the routes each client calls:
 | `payeeClient` with a report connection | Offline- and stack-tested; not deployed |
 
 Crash recovery and the refusals above are tested offline, not observed on mainnet. The platform's [mainnet log](https://github.com/MultiAgency/platform/blob/main/docs/mainnet-log.md) records what has run on mainnet, and [enforcement](https://github.com/MultiAgency/platform/blob/main/docs/enforcement.md) what the signed policy guarantees.
+
+## Quickstart: an app's server on the local stack
+
+Ten minutes, no wallet, no funds. Start the platform's local stack, which runs the real gateway and agent servers with
+a simulated provider, chain and wallet, and issues your app a credential. It needs Node 24.22 or later, pnpm (through
+Corepack) and OpenSSL:
+
+```sh
+git clone https://github.com/MultiAgency/platform && cd platform && pnpm install
+pnpm test:e2e:stack --treasury --app my-app --no-browser   # prints: Isolated stack ready: <stack>/state.json
+```
+
+In your own project (`npm install @multiagency/sdk`, `"type": "module"`), save this as `quickstart.mjs`. It gets the
+stack owner's consent (the stack's control files stand in for the owner's wallet) and reads the agent within it:
+
+```js
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { appClient, consentMessage } from "@multiagency/sdk";
+
+const statePath = process.argv[2];
+const state = JSON.parse(readFileSync(statePath, "utf8"));
+const base = state.app.base;                             // the platform host, e.g. https://localhost:54321
+const host = new URL(base).host;                         // what the owner's signature is bound to
+const credential = readFileSync(state.app.credentialFile, "utf8").trim(); // tap_…: a server secret
+const { agent, agentId, owner } = state.treasury;        // the stack's Treasury agent and its owner
+
+// The stack's stand-in for the owner's wallet: a control file it answers. A real app asks the owner's wallet instead.
+const controls = join(dirname(statePath), "controls");
+async function ownerSigns(message) {
+  const nonce = randomBytes(32).toString("base64"), name = `sign-${Date.now()}`;
+  writeFileSync(join(controls, `${name}.tmp`), JSON.stringify({ command: "signOwner", message, recipient: host, nonce }));
+  renameSync(join(controls, `${name}.tmp`), join(controls, `${name}.json`));
+  const result = join(controls, `${name}.result.json`);
+  while (!existsSync(result)) await new Promise(r => setTimeout(r, 100));
+  const answer = JSON.parse(readFileSync(result, "utf8"));
+  if (!answer.ok) throw new Error(answer.error);
+  return { message, nonce, publicKey: answer.value.publicKey, signature: answer.value.signature };
+}
+
+const app = appClient({ base, credential });
+// 1. The owner consents: your server builds the exact text, the owner's wallet signs it (NEP-413), your server submits it.
+const text = consentMessage({ host, deployment: state.app.deployment, organization: "org_1", owner, agent, agentId,
+  scopes: ["read", "treasury"], expiresAt: new Date(Date.now() + 30 * 86_400_000).toISOString() });
+const stored = await app.consents.submit(await ownerSigns(text));
+if (!stored.ok) throw new Error(`consent: ${JSON.stringify(stored)}`);
+// 2. Call the agent within that consent.
+const overview = await app.agent("org_1", agent).call("overview");
+if (!overview.ok) throw new Error(`overview: ${JSON.stringify(overview)}`);
+console.log("agent", overview.value.agentId, "holds", overview.value.book.map(h => `${h.symbol} ${h.usd.toFixed(2)} USD`).join(", "));
+```
+
+Run it with the stack's certificate trusted:
+
+```sh
+NODE_EXTRA_CA_CERTS=<stack>/environment/localhost.crt node quickstart.mjs <stack>/state.json
+# agent a442…5811 holds wNEAR 0.00 USD, USDC 99.97 USD, ETH 0.00 USD
+```
+
+With a real owner, only `ownerSigns` changes: your page asks the owner's wallet to sign the same text with NEP-413
+(`signMessage({ message, recipient: host, nonce })` through near-connect), and your server submits what it returns.
+Never ask the owner to sign `Sign in to <host>`. The app-server skill covers setup of new agents, owner actions, payouts
+and DAO owners; treasury-app covers Treasury proposals.
 
 ## First read from a browser product
 
