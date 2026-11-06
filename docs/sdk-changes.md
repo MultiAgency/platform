@@ -42,6 +42,11 @@ platform-only fixes are listed separately.
   without one keeps its digest, so existing grants stay valid. A DAO's Treasury grant proposal lists the floor among
   the strategy's terms, which makes it public. A server that predates the floor drops the field: check that the
   strategy `strategy/save` answers carries it. Offline-tested; not deployed.
+- **`treasury/get` balances are raw** (fix; narrows the output): `balances.near` was near-kit's formatted NEAR with
+  two decimals (`"305.53"`); it is now the account's yoctoNEAR as an integer string (`view_account` `amount`, including
+  what storage reserves), like `balances.usdc` (6 decimals) and every other amount on the wire. The schema accepts only
+  integer strings for both and states their units. An app that shows `balances.near` as received must format it with 24
+  decimals. Offline-tested.
 - **Docs:** the README opens app servers with a quickstart on the platform's local stack (a consent and a read, no
   wallet or funds), points to the credential request process for staging, and states the stack's prerequisites; its
   example no longer fails on a holding without a price. getting-started says `unavailable` on any app route means the
@@ -69,6 +74,9 @@ Platform fixes in the same release, outside the package:
 - **Provider SDK 0.8.0** (was 0.7.3): accepts the partner portal's opaque API keys, which replace the provider's
   retired ones ([credential rotation](credential-rotation.md)); none of its breaking changes touch this code.
 - **Rollback notes corrected:** DAO consent records carry no `filedAt`; only 0.4.1 and earlier refuse them.
+- **The `platform` package serves the confirm page** (platform#28): it now carries the confirm entry of the web build's
+  manifest, which a headless gateway reads to serve the page's assets. Packages built before had none, so the page
+  loaded blank (seen on staging 2026-11-06).
 
 ## 0.5.2 (2026-11-05)
 

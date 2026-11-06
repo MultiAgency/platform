@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, mock, test } from "node:test";
-import { accountExists, daoPolicy, nextProposalId } from "../src/chain.js";
+import { accountExists, daoPolicy, describeTreasury, nextProposalId } from "../src/chain.js";
+import { treasuryGetOutput } from "../src/contract/owner-outputs.js";
 
 /**
  * Whether an account is a DAO, or exists at all, is the chain's answer, never a failed read's. The bodies
@@ -58,4 +59,23 @@ test("an account exists unless the chain says it doesn't; a failed read throws",
   mock.restoreAll();
   mock.method(globalThis, "fetch", async () => new Response("Forbidden", { status: 403, statusText: "Forbidden" }));
   await assert.rejects(accountExists("multiagentic.near"), { name: "NetworkError" });
+});
+
+test("a treasury's balances are raw integer strings: yoctoNEAR and USDC at 6 decimals, as every amount on the wire", async () => {
+  // multiagentic.near's view_account as recorded above (306.13 NEAR), a plain account (no get_policy), and 305.53 USDC.
+  mock.method(globalThis, "fetch", async (_url: unknown, init: { body: string }) => {
+    const { id, params } = JSON.parse(init.body);
+    const body = params.request_type === "view_account"
+      ? { result: { amount: "306132631859932448916007858", block_hash: "MurZK6t14HL2Kc4kad6ZbLwHmaHU7CvmDFjJ2Pdsc8b", block_height: 219837126,
+        code_hash: "11111111111111111111111111111111", locked: "0", storage_paid_at: 0, storage_usage: 1147 } }
+      : params.method_name === "ft_balance_of" ? viewResult("305530000")
+      : viewError('wasm execution failed with error: CompilationError(CodeDoesNotExist { account_id: "multiagentic.near" })');
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, ...body }), { headers: { "content-type": "application/json" } });
+  });
+  const treasury = await describeTreasury("multiagentic.near");
+  assert.deepEqual(treasury.balances, { near: "306132631859932448916007858", usdc: "305530000" });
+  const answer = { ...treasury, confidential: false, payees: [] };
+  assert.equal(treasuryGetOutput.safeParse(answer).success, true);
+  // A decimal, as near-kit's getBalance formats it, fails the contract.
+  assert.equal(treasuryGetOutput.safeParse({ ...answer, balances: { near: "306.13", usdc: "305530000" } }).success, false);
 });
