@@ -37,7 +37,7 @@ async function freePort(host = '127.0.0.1') {
  * `secondAccount`: SECOND exists on chain and the host allows sessions without an agent (account-switch scenarios).
  * `daoOwned`: the owner app's agent belongs to the simulated Sputnik DAO, whose council (OWNER) and member (SECOND)
  * can both read it with different permissions (shared-reader scenarios). Test-only: no authorization code changes.
- * `onChainPolicyEdits`: the simulator signs provider-enforced policy edits as NEP-366 (see provider.mjs).
+ * `onChainPolicyEdits`: the simulator signs freeze, unfreeze and provider-enforced policy edits as NEP-366 (see provider.mjs).
  * `daoPortfolio`: the Treasury agent (`portfolio`) belongs to the simulated DAO, without an owner app: apps reach it only
  *   under a DAO's consent, and its owner actions are DAO votes the `daoVote` control passes.
  * `headless`: the gateway runs as the platform does (`deploy/platform*.json`): app access and the confirm page only,
@@ -59,7 +59,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
   const simulated = await provider(directory, { account: owner === DAO ? DAO_SIGNER : owner, payees, accounts, dao, onChainPolicyEdits, ...(payoutFunding !== undefined && { payoutFunding }) });
   const portfolioDir = join(directory, 'portfolio');
   let portfolio;
-  if (workspace) { mkdirSync(portfolioDir); portfolio = await provider(portfolioDir, { treasury: true, account: portfolioOwner === DAO ? DAO_SIGNER : portfolioOwner, accounts, dao }); }
+  if (workspace) { mkdirSync(portfolioDir); portfolio = await provider(portfolioDir, { treasury: true, account: portfolioOwner === DAO ? DAO_SIGNER : portfolioOwner, accounts, dao, onChainPolicyEdits }); }
   let executor, reviewer;
   const executorDir = join(directory, 'executor'), reviewerDir = join(directory, 'reviewer'), gatewayDir = join(directory, 'gateway');
   for (const dir of [executorDir, reviewerDir, gatewayDir]) mkdirSync(dir);

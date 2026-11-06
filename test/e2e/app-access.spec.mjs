@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { appClient } from '../../src/contract/app-client.ts';
 import { consentMessage, setupMessage } from '../../src/contract/app-consent.ts';
 import { environment } from './environment.mjs';
-import { BUILDER, DAO, OWNER, PUBLIC_KEY, USDC, sign } from './provider.mjs';
+import { BUILDER, DAO, OWNER, PUBLIC_KEY, USDC, sign, signDelegate } from './provider.mjs';
 import { browserContext } from './wallet.mjs';
 
 // An app deployment's server reaching the platform on the real stack: an operator-issued service credential, owner
@@ -44,6 +44,27 @@ async function connect(stack) {
     await expect.poll(async () => value(await agent.call('owner/status', { correlationId: prepared.correlationId })).status).toBe('SUCCESS');
     return prepared;
   };
+  /**
+   * A NEP-366 owner step: the app gets only a confirm link; the owner's wallet signs the link's text, then the delegate
+   * it releases, through the confirm page's own calls (the browser path is shown once, for a policy edit).
+   */
+  const confirmStep = async (agent, action) => {
+    const prepared = value(await agent.call('owner/prepare', { action, signer: 'wallet' }));
+    expect(prepared.intent, 'the app never holds the delegate bytes').toBeUndefined();
+    const api = prepared.confirm.url.replace('/confirm/', '/confirm/v1/');
+    const view = await (await localFetch(api)).json();
+    expect(view).toMatchObject({ type: action.type, state: 'open' });
+    const { signature } = await sign(OWNER, view.opening);
+    const opened = await localFetch(`${api}/open`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ signature }) });
+    expect(opened.status).toBe(200);
+    const { intent } = await opened.json();
+    expect(intent.standard).toBe('nep366');
+    const submitted = await localFetch(api, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ signedData: { ...intent, signed_delegate: signDelegate(OWNER, intent.payload) } }) });
+    expect(submitted.status).toBe(200);
+    await expect.poll(async () => value(await agent.call('owner/status', { correlationId: prepared.correlationId })).status).toBe('SUCCESS');
+    return prepared;
+  };
   /** The owner's consent for one Organization's agent, naming its current provider ID. */
   const consent = async (organization, agent, scopes) => value(await app.consents.submit(await ownerSigned(consentMessage({ host, deployment: 'local',
     organization, owner: OWNER, agent, agentId: value(await app.identity(agent)).agentId, scopes, expiresAt: later(90) }))));
@@ -54,7 +75,7 @@ async function connect(stack) {
     await ownerStep(app.agent(organization, name), { type: 'agent_create', owner: { type: 'near', account_id: OWNER, public_key: PUBLIC_KEY }, role: area === 'payables' ? 'payout' : 'treasury' });
     return name;
   };
-  return { host, gateway, app, ownerSigned, ownerStep, consent, hostedAgent };
+  return { host, gateway, app, ownerSigned, ownerStep, confirmStep, consent, hostedAgent };
 }
 
 test('an app server relays readable owner actions, sends NEP-366 ones to the platform confirm page, and sets up a hosted agent', async ({ browser }, info) => {
@@ -63,7 +84,7 @@ test('an app server relays readable owner actions, sends NEP-366 ones to the pla
   const steps = [];
   try {
     // The operator issues the deployment's service credential on the platform host.
-    const { host, gateway, app, ownerSigned, ownerStep } = await connect(stack);
+    const { host, gateway, app, ownerSigned, ownerStep, confirmStep } = await connect(stack);
     const intents = () => stack.simulated.requests.filter(r => r.path === '/v1/generate-intent').length;
 
     // 1. The configured payout agent: identity, then the owner's consent for reads and owner actions.
@@ -77,12 +98,12 @@ test('an app server relays readable owner actions, sends NEP-366 ones to the pla
     expect(typeof overview.book[0].confidential, 'holdings arrive as bigint').toBe('bigint');
     steps.push('consent for the payout agent; overview read through the app route');
 
-    // 2. Platform-built: freeze and unfreeze.
-    await ownerStep(payout, { type: 'agent_freeze' });
+    // 2. Platform-built: freeze and unfreeze, NEP-366 like the provider's, so each goes through the confirm page.
+    const frozen = await confirmStep(payout, { type: 'agent_freeze' });
     expect(stack.simulated.payoutPolicy().policy.frozen).toBe(true);
-    await ownerStep(payout, { type: 'agent_unfreeze' });
+    const unfrozen = await confirmStep(payout, { type: 'agent_unfreeze' });
     expect(stack.simulated.payoutPolicy().policy.frozen).toBe(false);
-    steps.push('freeze and unfreeze, each signed by the owner');
+    steps.push('freeze and unfreeze (NEP-366), each signed by the owner through the confirm page');
 
     // 3. Readable policy edits: a payee added to a non-empty list, then the budget.
     const reviewed = async () => { const o = value(await payout.call('overview')); return { revision: o.policy.revision, digest: o.digest }; };
@@ -151,7 +172,8 @@ test('an app server relays readable owner actions, sends NEP-366 ones to the pla
     await expect.poll(async () => value(await payout.call('owner/status', { correlationId: held.correlationId })).status).toBe('SUCCESS');
     expect(stack.simulated.payoutPolicy()).toMatchObject({ revision: 4, policy: { owner_approval: false } });
     const log = readFileSync(join(gateway, '.app-access/access.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
-    expect(log.filter(l => ['confirm', 'confirmed'].includes(l.event)).map(l => [l.event, l.correlationId])).toEqual([['confirm', held.correlationId], ['confirmed', held.correlationId]]);
+    expect(log.filter(l => ['confirm', 'confirmed'].includes(l.event)).map(l => [l.event, l.correlationId]))
+      .toEqual([frozen, unfrozen, held].flatMap(({ correlationId }) => [['confirm', correlationId], ['confirmed', correlationId]]));
     steps.push("a NEP-366 edit reached the app only as a confirm link; the owner signed it on the platform's page and it applied");
 
     // 6. Hosted setup: the owner's signed setup reserves this Organization's own payables agent, beside the owner's
@@ -176,6 +198,14 @@ test('an app server relays readable owner actions, sends NEP-366 ones to the pla
     const grants = stack.simulated.requests.filter(r => r.path === '/v1/generate-intent' && r.body.type === 'grant_issue');
     expect(grants.at(-1).body).toMatchObject({ agent_id: created.agentId, label: 'invoices' });
     steps.push('consent for the created agent; grant signed by the owner');
+
+    // 8. The owner revokes that grant through the app (NEP-413): the provider no longer lists it as live.
+    const grantsOf = async () => (await (await fetch(`${stack.simulated.url}/v1/agents/${created.agentId}/grants`)).json()).data;
+    const [issued] = await grantsOf();
+    expect(issued).toMatchObject({ label: 'invoices', revoked_at: null });
+    await ownerStep(hosted, { type: 'grant_revoke', grantId: issued.grant_id });
+    expect((await grantsOf()).find(g => g.grant_id === issued.grant_id).revoked_at).not.toBeNull();
+    steps.push('grant revoked by the owner through the app');
 
     expect(stack.simulated.errors).toEqual([]);
     expect(stack.simulated.transfers, 'no money moved').toEqual([]);
@@ -302,6 +332,13 @@ test("an app sets up an Organization's own Treasury agent; its plans run only un
     expect(swaps(), 'one swap, by the created agent').toHaveLength(1);
     expect(stack.simulated.treasuryBalances(created)[USDC]).toBe('9000000');
     steps.push("the owner's grant for the saved strategy (simulated signature); the app's plan swapped once on the created agent");
+
+    // The provider's history lists the swap, so the agent's books carry it: its ledger row and its CSV line.
+    const [swapped] = swaps();
+    expect(value(await agent.call('ledger')).filter(r => r.type === 'swap')).toEqual([expect.objectContaining({ correlationId: swapped.correlation_id,
+      status: 'SUCCESS', assetIn: USDC, assetOut: WNEAR, amountOut: swapped.amountOut.toString() })]);
+    expect(value(await agent.call('ledgerCsv'))).toContain(swapped.correlation_id);
+    steps.push("the swap read back from the provider's history into the ledger and its CSV");
 
     // A dry quote warned high_fee: the plan is refused before it is saved, and nothing is sent.
     stack.simulated.warnQuotes(['high_fee']);

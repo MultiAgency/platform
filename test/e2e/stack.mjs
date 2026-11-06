@@ -30,11 +30,15 @@ if (treasury && daoTreasury) throw new Error('Use --treasury or --dao-treasury, 
 const app = values('--app').at(-1);
 if (daoTreasury && !app) throw new Error('--dao-treasury needs --app: only an app reaches a DAO-owned agent');
 if (frontend && payablesDist) throw new Error('Use --frontend or --payables-release, not both');
+// `--on-chain-policy-edits`: freeze, unfreeze and a policy edit that changes a provider-enforced field come back as NEP-366, held for the
+// platform's confirm page (see provider.mjs), for the Treasury agent and the Payables agent alike.
+const onChainPolicyEdits = args.includes('--on-chain-policy-edits');
 const directory = join(process.env.PROTO_E2E_ARTIFACTS, 'stack'), controls = join(directory, 'controls');
 mkdirSync(controls, { recursive: true });
 const stack = await environment(join(directory, 'environment'), { owner, payees, ...(builder && { accounts: [builder] }), ...(payoutFunding !== undefined && { payoutFunding: BigInt(payoutFunding) }),
   ...(frontend && { frontendDist: resolve(frontend) }), ...(treasury && { workspace: true, portfolioOwner: owner }), ...(daoTreasury && { daoPortfolio: true }),
   ...(app && { selfService: true, hostedAreas: ['payables'] }),
+  ...(onChainPolicyEdits && { onChainPolicyEdits }),
   ...(payablesDist && { ownerApp: { product: 'payables', a: resolve(payablesDist), b: resolve(payablesDist) } }) });
 const { simulated } = stack;
 // One browser, two wallet contexts (owner, payee) behind the same wallet boundary as the tests. Attach over CDP.

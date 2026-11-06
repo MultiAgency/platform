@@ -71,8 +71,9 @@ const bodyOf = async req => { let body = ''; for await (const chunk of req) body
 const PROVIDER_FIELDS = ['frozen', 'actions', 'confidential', 'owner_approval', 'assets', 'limits', 'max_actions_per_hour'];
 /**
  * `account` owns the configured agent; `payees` are its agreed destinations; `accounts` only exist on chain.
- * `onChainPolicyEdits`: a policy update that changes a provider-enforced field comes back as a NEP-366 delegate carrying
- * an opaque payload, per the provider's docs (not observed here); by default every owner intent is NEP-413.
+ * `onChainPolicyEdits`: freeze, unfreeze and a policy update that changes a provider-enforced field come back as NEP-366
+ * delegates to `outlayer.near` (`freeze_wallet`, `unfreeze_wallet`; `store_wallet_policy` with an opaque payload), per
+ * the provider's docs (the call arguments are not observed here); by default every owner intent is NEP-413.
  */
 export async function provider(directory, { treasury = false, account = OWNER, payees = [PAYEE], accounts = [], dao = false, payoutFunding = 100000000n, onChainPolicyEdits = false } = {}) {
   const id = randomBytes(32).toString('hex');
@@ -102,12 +103,18 @@ export async function provider(directory, { treasury = false, account = OWNER, p
   // funding; a Treasury one its own balances.
   const agents = new Map([[id, { id, owner, wallet, policy, revision: 1, grants, funded: BigInt(payoutFunding), ...(treasury && { treasury: treasuryState(100000000n) }) }]]);
   const requests = [], errors = [], transfers = [], intents = [], swaps = [], shields = [], deposits = [];
+  /** A delegate to `outlayer.near` calling `methodName` once, as the provider's NEP-366 owner intents are shaped. */
+  const delegate = (methodName, args) => ({ standard: 'nep366', payload: { receiverId: 'outlayer.near', actions: [{ type: 'FunctionCall', params: { methodName,
+    args, gas: '30000000000000', deposit: '0' } }] } });
   const spent = agent => transfers.filter(p => p.agent === agent.id && p.status === 'SUCCESS').reduce((sum, p) => sum + BigInt(p.body.amount), 0n);
   const liveGrant = (agent, token) => typeof token === 'string' && agent.grants.some(g => !g.revoked_at && Date.parse(g.expires_at) > Date.now() && g.owner_message.credential === grantCommitment(token));
   if (treasury) { grant.label = 'treasury'; grant.owner_message.label = 'treasury'; }
   let unavailable = false, outageRefusals = 0;
   let dropSwapAt = 0, observationGate, quoteWarnings = [];
 
+  const swapStatus = swap => ({ correlation_id: swap.correlation_id, agent_id: swap.agent, type: 'swap', status: 'SUCCESS', created_at: swap.at, updated_at: swap.at,
+    failure_code: null, details: { action: 'swap', request: { origin_asset: swap.body.origin_asset, destination_asset: swap.body.destination_asset,
+      amount: swap.body.amount, min_amount_out: swap.body.min_amount_out, confidential: true }, confidential: true, amount_out: swap.amountOut.toString() } });
   const status = payment => ({ correlation_id: payment.correlation, agent_id: payment.agent, type: payment.type ?? 'transfer', status: payment.status,
     created_at: payment.at, updated_at: payment.at, failure_code: payment.failure ?? null, details: { approval_id: payment.approval } });
   // A held withdrawal's approval shape isn't observed on mainnet: modelled here as OutLayer's `Withdraw` op, only so a
@@ -195,13 +202,16 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         if (url.pathname === '/v1/tokens') return json(res, { data: TOKENS.map(token => ({ ...token, price_updated_at: new Date().toISOString(), price_expires_at: expires })) });
         // Provider records (ledger audit trail): none recorded by this simulator.
         if (agent && /^\/provider\/(requests|audit|deposits|deposit_history)$/.test(route)) return json(res, { data: { events: [] } });
-        if (agent && route === '/history') return json(res, { data: transfers.filter(p => p.agent === agent.id).map(status), next_cursor: null });
+        // Transfers, withdrawals and swaps, oldest first. A swap's row carries its request and `amount_out` in `details`, as the
+        // provider SDK's `ExecutionDetails` declares them (0.7.3 types; a swap row is not observed here).
+        if (agent && route === '/history') return json(res, { data: [...transfers.filter(p => p.agent === agent.id).map(status),
+          ...swaps.filter(s => s.agent === agent.id).map(swapStatus)].sort((a, b) => a.created_at.localeCompare(b.created_at)), next_cursor: null });
         if (url.pathname === '/v1/status') {
           const correlation = url.searchParams.get('correlation_id');
           const payment = transfers.find(p => p.correlation === correlation);
           if (payment) return json(res, status(payment));
           const swap = swaps.find(s => s.correlation_id === correlation);
-          if (swap) return json(res, { correlation_id: correlation, agent_id: swap.agent, type: 'swap', status: 'SUCCESS' });
+          if (swap) return json(res, swapStatus(swap));
           const shield = shields.find(s => s.correlation_id === correlation);
           if (shield) return json(res, { correlation_id: correlation, agent_id: shield.agent, type: 'shield', status: 'SUCCESS' });
           const intent = intents.find(i => i.correlation_id === correlation);
@@ -224,7 +234,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         if (BigInt(body.amount) > treasuryBalances.get(from.asset_id) || BigInt(body.min_amount_out) > amountOut) throw new Error('Infeasible swap');
         treasuryBalances.set(from.asset_id, treasuryBalances.get(from.asset_id) - BigInt(body.amount));
         treasuryBalances.set(to.asset_id, treasuryBalances.get(to.asset_id) + amountOut);
-        const swap = { correlation_id: randomUUID(), agent: agent.id, key: entry.key, body }; swaps.push(swap);
+        const swap = { correlation_id: randomUUID(), agent: agent.id, key: entry.key, body, amountOut, at: new Date().toISOString() }; swaps.push(swap);
         if (swaps.length === dropSwapAt) { dropSwapAt = 0; return res.destroy(); }
         return json(res, { correlation_id: swap.correlation_id });
       }
@@ -284,7 +294,8 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         if (body.type === 'agent_freeze' || body.type === 'agent_unfreeze') {
           const target = agents.get(body.agent_id);
           if (!target) throw new Error('Unexpected agent control');
-          const generated = { correlation_id: randomUUID(), type: body.type, signer: target.owner, expires_at: expires, intent: nep413(),
+          const intent = onChainPolicyEdits ? delegate(body.type === 'agent_freeze' ? 'freeze_wallet' : 'unfreeze_wallet', { wallet_pubkey: PUBLIC_KEY }) : nep413();
+          const generated = { correlation_id: randomUUID(), type: body.type, signer: target.owner, expires_at: expires, intent,
             preview: { summary: `${body.type === 'agent_freeze' ? 'Freeze' : 'Unfreeze'} the local agent` } };
           intents.push({ ...generated, agent: target, control: body.type }); return json(res, generated);
         }
@@ -293,11 +304,18 @@ export async function provider(directory, { treasury = false, account = OWNER, p
           const target = agents.get(body.agent_id);
           if (!target || body.expected_revision !== (target.revision ?? 1) || !body.policy) throw new Error('Unexpected policy update');
           const onChain = onChainPolicyEdits && PROVIDER_FIELDS.some(field => JSON.stringify(body.policy[field]) !== JSON.stringify(target.policy[field]));
-          const delegate = { standard: 'nep366', payload: { receiverId: 'outlayer.near', actions: [{ type: 'FunctionCall', params: { methodName: 'store_wallet_policy',
-            args: { wallet_pubkey: PUBLIC_KEY, encrypted_data: randomBytes(64).toString('base64') }, gas: '30000000000000', deposit: '0' } }] } };
-          const generated = { correlation_id: randomUUID(), type: 'policy_update', signer: target.owner, expires_at: expires, intent: onChain ? delegate : nep413(),
+          const intent = onChain ? delegate('store_wallet_policy', { wallet_pubkey: PUBLIC_KEY, encrypted_data: randomBytes(64).toString('base64') }) : nep413();
+          const generated = { correlation_id: randomUUID(), type: 'policy_update', signer: target.owner, expires_at: expires, intent,
             preview: { summary: 'Change the local agent policy', previous_revision: target.revision ?? 1, revision: (target.revision ?? 1) + 1, policy: body.policy } };
           intents.push({ ...generated, agent: target, policyUpdate: body }); return json(res, generated);
+        }
+        // An owner's revocation of one of the agent's live grants (NEP-413, per the provider's docs).
+        if (body.type === 'grant_revoke') {
+          const target = agents.get(body.agent_id), revoked = target?.grants.find(g => g.grant_id === body.grant_id);
+          if (!revoked || revoked.revoked_at) throw new Error('Unexpected grant revocation');
+          const generated = { correlation_id: randomUUID(), type: 'grant_revoke', signer: target.owner, expires_at: expires, intent: nep413(),
+            preview: { summary: `Revoke the local grant "${revoked.label}"` } };
+          intents.push({ ...generated, agent: target, revoked }); return json(res, generated);
         }
         if (body.type === 'grant_issue') {
           const target = agents.get(body.agent_id);
@@ -326,9 +344,12 @@ export async function provider(directory, { treasury = false, account = OWNER, p
             wallet: { wallet_id: `local-wallet-${n}`, near_account_id: `work-${n}.local-wallet.near` },
             ...(intent.createRequest.policy.actions.includes('swap') && { treasury: treasuryState() }) });
           intent.created = created;
+        } else if (intent.revoked) {
+          // The reason's wording is not observed; only `revoked_at` decides whether a grant is live.
+          Object.assign(intent.revoked, { revoked_at: new Date().toISOString(), revoked_reason: 'owner' });
         } else if (intent.grantRequest) {
           const request = intent.grantRequest, target = intent.agent;
-          target.grants.push({ ...grant, grant_id: randomUUID(), agent_id: target.id, wallet_id: target.wallet.wallet_id, label: request.label, expires_at: request.expires_at,
+          target.grants.push({ ...grant, grant_id: randomUUID(), agent_id: target.id, wallet_id: target.wallet.wallet_id, label: request.label, issued_at: new Date().toISOString(), expires_at: request.expires_at, revoked_at: null, revoked_reason: null,
             owner_message: { ...grant.owner_message, agent_id: target.id, wallet_id: target.wallet.wallet_id, owner: target.owner, label: request.label, credential: request.credential, expires_at_ms: Date.parse(request.expires_at) } });
         } else if (JSON.parse(intent.intent.payload.message).verdict === 'reject') {
           // Assumption, not observed provider behaviour: a rejected held payout ends FAILED and moves nothing.

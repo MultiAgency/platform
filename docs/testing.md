@@ -175,15 +175,21 @@ later sends are blocked until it is reviewed.
 
 App access (`test/e2e/app-access.spec.mjs`): an app deployment's server (the dashboard's, as the first app) on the real stack, using the
 published oRPC client. The operator CLI issues its service credential; the owner signs a consent with the simulated
-wallet; overview is read; freeze, unfreeze, a payee added to a non-empty list and a budget edit are each prepared through
-`/apps/v1`, signed and submitted. Payees at creation and DAO signing are refused before any intent is generated. A
+wallet; overview is read; a payee added to a non-empty list and a budget edit are each prepared through `/apps/v1`,
+signed and submitted. Freeze and unfreeze come back NEP-366 from the simulator, so the app gets only a confirm link
+for each; the simulated wallet signs the link's text and then the delegate through the confirm page's own calls, and
+each applies. Payees at creation and DAO signing are refused before any intent is generated. A
 provider-enforced edit (`owner_approval` off) is made NEP-366 by the simulator: the app receives only a confirm link;
 reading it gives the app the terms but not the bytes, and its own `owner/submit` is refused. In a browser the page
 shows the field before and after, the simulated wallet signs the link's text and then the delegate, the policy
-changes, and the log records `confirm` then `confirmed`. A signed
+changes, and the log records `confirm` then `confirmed` for each of the three. A signed
 setup reserves the Organization's own payables agent beside the owner's configured one, its creation is relayed
-under the setup consent, and a consent naming the created agent's ID then relays a grant. Here the simulator signs
-provider-enforced policy edits as NEP-366 (`onChainPolicyEdits`), following the provider's docs, not observation. A second
+under the setup consent, a consent naming the created agent's ID then relays a grant, and the owner's revocation of
+that grant (NEP-413) leaves it no longer live at the simulator. Here the simulator signs freeze, unfreeze and
+provider-enforced policy edits as NEP-366 (`onChainPolicyEdits`), following the provider's docs, not observation; the
+delegates' call arguments are the simulator's own. In the Treasury case, the executed swap is read back from the
+simulator's `/history` into the agent's `ledger` and `ledgerCsv`; the swap row's shape follows the provider SDK's
+types (0.7.3), not observation. A second
 case requests payouts through the app's `payout` consent on the Organization's own hosted agent (its grant and payee
 signed by the owner through the app, its funding simulated; policy edits stay NEP-413 in that environment): one request is held for the owner, asked again and read by `requestId` without a second send, other
 terms under its `requestId` are refused, a second request with the same payee and amount while the first is held is
@@ -234,6 +240,9 @@ instead of `--treasury` for the same agent owned by the simulated DAO (apps reac
 owner signatures are DAO votes the `daoVote` control passes; it needs `--app`),
 `--app <deployment>` for an app deployment's server on `/apps/v1` (a service credential issued at startup into
 `stack/app-credential`, mode 0600, never into `state.json`; self-service setup of the deployment's own Payables agents),
+`--on-chain-policy-edits` for the simulator to answer freeze, unfreeze and a policy edit that changes a
+provider-enforced field as NEP-366, for the Payables and Treasury agents alike (the app then receives only a confirm link, served from `web/dist`, so run
+`pnpm build:web` first),
 `--headed` or `--no-browser`) builds the same isolated stack for app-owned workflow
 recipes and filming, and keeps it running. `stack/state.json` lists the application URLs, CDP endpoint,
 owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`: the stack clicks a button named exactly
