@@ -1,11 +1,11 @@
 # domain_map.yaml
 # Library: @multiagency/sdk
-# Version: 0.5.2
+# Version: 0.5.3
 # Date: 2026-11-04
 # Status: draft
 library:
   name: '@multiagency/sdk'
-  version: '0.5.2'
+  version: '0.5.3'
   repository: 'MultiAgency/platform'
   description: 'Typed owner and payee clients, schemas and the shared release server for MultiAgency agents behind the gateway.'
   primary_framework: 'framework-agnostic'

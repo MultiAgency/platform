@@ -138,6 +138,20 @@ const journalLine = z.union([
 ]);
 
 /** Every operation in the log, oldest first, folded with the outcomes recorded for it. */
+/**
+ * Raw amounts that sends held for the owner's vote would take from each asset, if approved: a swap's input, a transfer's
+ * or withdrawal's amount. The reported balance still includes them.
+ */
+export const heldOutgoing = (ops: readonly Op[] = readOps()) => outgoing(ops.filter(isHeld));
+const outgoing = (ops: readonly Op[]) => {
+  const out: Record<string, bigint> = {};
+  for (const op of ops) {
+    const asset = String(op.method === "swap" ? op.request.origin_asset : op.request.asset);
+    out[asset] = (out[asset] ?? 0n) + BigInt(String(op.request.amount));
+  }
+  return out;
+};
+
 export function readOps(): Op[] {
   const log = opsLog();
   const ops = new Map<string, Op>();

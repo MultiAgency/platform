@@ -10,10 +10,13 @@ import { executePlan, type Observed, type PlanEvent } from "../planning/executio
 import { quoteChosen, type ChosenSwap } from "../planning/external.js";
 import type { Plan } from "../planning/model.js";
 import { observe } from "../planning/observation.js";
+import { heldOutgoing } from "../ops.js";
+import { assertNotStopping } from "../lock.js";
 import { savePlan } from "../planning/store.js";
 import { PublicError } from "../public-error.js";
 import { loadStrategy } from "../strategy.js";
 import { strategyDigest } from "../strategy-digest.js";
+import { planBreaksCashFloor } from "../strategy-value.js";
 import { planLegs, planSteps, quoteLeg } from "../treasury.js";
 import { MAX_OPEN_PROPOSALS, MAX_PROPOSAL_MS, proposalCreateInput, proposalRef, proposalSignature, proposalSigned } from "../contract/treasury-proposals.js";
 import type { CallContext } from "../rpc/base.js";
@@ -230,6 +233,12 @@ export async function executeProposal(context: CallContext, input: unknown, now 
     if (unenforced) return [`the policy is not in force: ${unenforced}`];
     const grant = liveGrant(await api.listGrants(agentId()), process.env.AGENT_GRANT_TOKEN);
     if (!grant || !(grant.label === "treasury" || grant.label.startsWith("treasury:"))) return ["no live treasury grant is held for this agent"];
+    // Checked again as each swap is sent; checked here too, so a floor refusal leaves the proposal approved, not claimed.
+    const cashFloor = loadStrategy().cashFloor;
+    if (cashFloor && planBreaksCashFloor(cashFloor, planned.actions, observed.book, heldOutgoing()))
+      return ["its swaps would take the strategy's cash under its floor"];
+    // A stop begun during the reads above claims nothing: the proposal stays approved for after the restart.
+    assertNotStopping();
     if (!claim(id, planned.id)) return ["the proposal was claimed or closed meanwhile"];
     return [];
   };

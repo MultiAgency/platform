@@ -37,6 +37,17 @@ export const Strategy = z.object({
     /** The largest rebalance, in USD, the agent executes without the owner; 0 leaves every swap to the owner. */
     maxUsd: z.number().int().min(0),
   }),
+  /**
+   * Cash the agent's swaps may not take it under, in whole USD: the public and confidential balance of `assets` at
+   * fresh prices. `authorize` refuses a swap that lowers that cash and leaves it under `usd`, never one that adds to
+   * it. Left out, there is no floor, and the strategy keeps the digest it had before the floor existed. `assets` is
+   * saved sorted, since the canonical form keeps array order.
+   */
+  cashFloor: z.object({
+    usd: z.number().int().min(1),
+    assets: z.array(asset).min(1).refine((list) => new Set(list).size === list.length, "cash floor assets must not repeat")
+      .transform((list) => [...list].sort()),
+  }).optional(),
 });
 
 export type Strategy = z.infer<typeof Strategy>;

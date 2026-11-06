@@ -194,3 +194,9 @@ test("dispatch refuses to send without a held lock, before logging anything", as
   );
   assert.deepEqual(readOps(), []);
 });
+
+test("a stopping process starts no new send and waits for the one in flight", () => {
+  assert.deepEqual(child("stop").split("\n"), ["dispatch busy", "acquire busy", "idle while held false", "idle once released true"]);
+  assert.equal(child("try"), "acquired", "the lock was released, and another process sends again");
+  assert.deepEqual(readOps(), []);
+});

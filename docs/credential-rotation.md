@@ -5,6 +5,18 @@ diagnostic exposure. Inspect credential names and consumer relationships only in
 Never print environment objects, secret values, cookies, signed payloads, credential-bearing URLs
 or raw diagnostic logs. Do not paste replacements into commands, source control or this document.
 
+## Provider keys move to the partner portal (2026-11-06)
+
+The provider now issues API keys only from its partner portal (partners.near-intents.org) and retires keys created
+before it: the API answers them `api_key_retired` (401). Every `NEAR_INTENTS_AGENT_API_KEY` below is such a key, on
+staging (`api.dev.multiagency.ai`) and on production `dao` and `invoices`. A send refused for its key stays unresolved
+and blocks that agent's sends until reviewed, so replace each before the provider retires it. Order per service:
+deploy a build with provider SDK 0.8.0 first (0.7.3 refuses a key that isn't `naa_` and 43 characters at startup, and
+a portal key is opaque), then create a portal key, set it on the service, restart, check an existing agent's read,
+and revoke the old key. Portal keys expire 365 days after creation; a partner holds at most 10 live ones. When the
+provider retires old keys was not announced; on 2026-11-06 at 20:53Z the live API didn't yet answer as 0.8.0 describes.
+Production deploys are paused: replacing production's key needs the user's go-ahead for its deploy.
+
 ## Names-only matrix
 
 The saved dao variable baseline contains the first five names below. This is a consumer inventory,

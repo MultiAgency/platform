@@ -422,8 +422,10 @@ lease before activation. External loopback agents without `envFile` are not supe
 On SIGINT/SIGTERM the gateway stops accepting requests, cancels restart timers and signals its own
 children (`src/gateway/supervisor.ts`: 30-second grace, then SIGKILL and up to 5 more seconds); HTTP
 connections close at 30 seconds (`src/gateway/server.ts`). A forced or unconfirmed shutdown exits
-nonzero. A child shutdown may interrupt work; the gateway replays no submission. Deployment grace must
-exceed the 35-second bound. The supervisor waits only for its direct children: an externally killed
+nonzero. An agent server that is told to stop starts no new send (a new one is refused as busy, before its
+write-ahead record; a plan stops before its next leg) and waits up to 25 seconds for a send in flight
+(`src/server.ts`); one still running then is cut off and stays unresolved. The gateway replays no submission.
+Deployment grace must exceed the 35-second bound: `deploy/railway.gateway.json` sets 45 seconds. The supervisor waits only for its direct children: an externally killed
 gateway, machine failure or detached descendant still needs the stopped-writer checks in
 [operations](operations.md). There is no automatic failover to another host.
 

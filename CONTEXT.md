@@ -137,6 +137,12 @@ not observed on mainnet. Supplier conversion and forwarding are separate, unimpl
 The owner's target allocation and limits for a treasury agent. The autopilot acts only while its live
 grant's label carries the digest of the strategy in force.
 
+**Cash floor**:
+An optional strategy limit: whole USD of named assets' public and confidential balance that the agent's swaps may not
+take it under. Authorization refuses a swap that lowers that cash and leaves it under the floor, never one that adds
+cash. Absent, there is no floor.
+_Avoid_: reserve (Treasury's own term for part of its cash), minimum balance
+
 **Plan**:
 A saved, expiring list of swaps and shields, bound to the policy and strategy it was made under.
 

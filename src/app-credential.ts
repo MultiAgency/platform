@@ -8,6 +8,7 @@ import { chainKeyState } from "./signin.js";
 //   pnpm app-credential consents [deployment]
 //   pnpm app-credential revoke-consent <consent id>   (permanent, even if the record was archived)
 //   pnpm app-credential check-keys   (revokes consents whose signing key the chain reports removed)
+//   pnpm app-credential archive-consents   (moves records of consents ended over 30 days ago to consents-ended/)
 const credentials = new AppCredentials(".app-access"), consents = new AppConsents(".app-access");
 const [command, ...rest] = process.argv.slice(2);
 
@@ -33,10 +34,13 @@ if (command === "issue") {
   const [id] = rest;
   if (!id || !consents.revoke(id, null)) throw new Error("Not a consent id");
   console.log(`Revoked consent ${id}`);
+} else if (command === "archive-consents") {
+  const moved = consents.archive();
+  console.log(`Archived ${moved.length} ended consent record(s) to .app-access/consents-ended/.`);
 } else if (command === "check-keys") {
   const { checked, revoked, unanswered } = await sweepConsentKeys(consents, chainKeyState);
   console.log(`Checked ${checked} live consents; revoked ${revoked.length}; ${unanswered.length} unanswered (check again).`);
   for (const id of revoked) console.log(`revoked ${id}`);
   for (const id of unanswered) console.log(`unanswered ${id}`);
   if (unanswered.length) process.exitCode = 1;
-} else throw new Error("Usage: pnpm app-credential issue|list|revoke|consents|revoke-consent|check-keys");
+} else throw new Error("Usage: pnpm app-credential issue|list|revoke|consents|revoke-consent|check-keys|archive-consents");

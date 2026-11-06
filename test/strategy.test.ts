@@ -43,6 +43,37 @@ test("a file that isn't a whole, consistent strategy is refused, never half-appl
   }
 });
 
+// Pinned before the cash floor existed: a strategy without one keeps its digest, so its grants stay valid.
+test("a saved strategy without a cash floor keeps the digest and grant suffix it had before the floor existed", () => {
+  save({ targetBps: { [ASSETS.USDC]: 6_000, [ASSETS.wNEAR]: 3_000, [ASSETS.ETH]: 1_000 }, minLegUsd: 5, maxCostBps: 100, autopilot: { everyMin: 30, maxUsd: 25 } });
+  const loaded = loadStrategy();
+  assert.equal("cashFloor" in loaded, false, "leaving it out means no floor, never a default one");
+  assert.equal(strategyDigest(loaded), "sha256:978b7029378efb1f681227e127def466afd77f6f9a5e10c185d58e4507be9265");
+  assert.equal(strategyLabelSuffix(loaded), "978b7029378efb1f681227e127def466");
+  saveStrategy(loaded);
+  assert.equal(strategyDigest(loadStrategy()), "sha256:978b7029378efb1f681227e127def466afd77f6f9a5e10c185d58e4507be9265");
+});
+
+test("a cash floor is bound by the digest, saved with its assets sorted, and refused when malformed", () => {
+  const sorted = [ASSETS.USDC, ASSETS.wNEAR].sort();
+  saveStrategy({ ...DEFAULT_STRATEGY, cashFloor: { usd: 500, assets: [...sorted].reverse() } } as Strategy);
+  const loaded = loadStrategy();
+  assert.deepEqual(loaded.cashFloor, { usd: 500, assets: sorted });
+  assert.equal(strategyDigest(loaded), strategyDigest({ ...DEFAULT_STRATEGY, cashFloor: { usd: 500, assets: sorted } } as Strategy));
+  assert.notEqual(strategyDigest(loaded), strategyDigest(DEFAULT_STRATEGY));
+  assert.ok(!grantApproves(`treasury:${strategyLabelSuffix(DEFAULT_STRATEGY)}`, loaded), "a grant for the strategy without the floor doesn't approve it");
+  assert.notEqual(strategyDigest({ ...loaded, cashFloor: { usd: 501, assets: sorted } } as Strategy), strategyDigest(loaded));
+  const cases: [string, unknown][] = [
+    ["a fraction", { usd: 2.5, assets: [ASSETS.USDC] }], ["zero", { usd: 0, assets: [ASSETS.USDC] }],
+    ["no assets", { usd: 10, assets: [] }], ["a repeated asset", { usd: 10, assets: [ASSETS.USDC, ASSETS.USDC] }],
+    ["an asset outside the treasury", { usd: 10, assets: ["nep141:usdt.tether-token.near"] }], ["no amount", { assets: [ASSETS.USDC] }],
+  ];
+  for (const [name, cashFloor] of cases) {
+    save({ ...DEFAULT_STRATEGY, cashFloor });
+    assert.throws(() => loadStrategy(), /cashFloor/, name);
+  }
+});
+
 test("a grant approves the strategy whose digest its label carries, and no other", () => {
   const suffix = strategyLabelSuffix(DEFAULT_STRATEGY);
   assert.match(suffix, /^[0-9a-f]{32}$/);

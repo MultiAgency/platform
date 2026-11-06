@@ -4,7 +4,7 @@ import { agentId, executes } from "./env.js";
 import { assertCanDispatch, assertMoneyLock, type MoneyLock, withMoneyLock } from "./lock.js";
 import { mandateDigest, type ReviewedPolicy } from "./mandate.js";
 import { recipientState, registrationFor } from "./recipients.js";
-import { AuthorizationHeld, claimSubmission, isHeld, provenRefusal, readOps, record, submittedSwapValues } from "./ops.js";
+import { AuthorizationHeld, claimSubmission, heldOutgoing, isHeld, provenRefusal, readOps, record, submittedSwapValues } from "./ops.js";
 import { recordSubmissionEvidence } from "./submission-evidence.js";
 import { authorize, type Case, type Purpose } from "./authorize.js";
 import type { Plan, PlannedAction } from "./plans.js";
@@ -92,11 +92,17 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
   // its payee must exist on NEAR.
   const payee = action.method === "transfer" || (action.method === "withdraw" && action.request.chain === "near") ? action.request.recipient : null;
   const paysOut = payee !== null;
-  const [view, tokens, grants, shielded, recipient] = await Promise.all([
+  // Under a cash floor, a planned swap (and its prerequisite shield) also reads the floor's cash, public and
+  // confidential: the only send the floor can refuse. This read only decides what to fetch; the send is judged on the
+  // strategy read after the provider's answers, so one saved meanwhile refuses it. A floor added meanwhile finds no
+  // cash read, which refuses a swap that would lower cash.
+  const cashFloor = sending?.planned?.leg.type === "swap" ? loadStrategy().cashFloor : undefined;
+  const [view, tokens, grants, shielded, recipient, cashViews] = await Promise.all([
     api.getPolicy(agentId()), api.getTokens(), api.listGrants(agentId()),
     // A payout's funds, so `authorize` can refuse one the wallet can't cover before it goes to a vote.
     paysOut ? api.getBalances(agentId(), { source: "confidential" }) : undefined,
     payee === null ? "exists" as const : recipientState(payee, action.method === "withdraw" ? registrationFor(action.request.asset) : null),
+    cashFloor ? Promise.all([api.getBalances(agentId(), { source: "public" }), api.getBalances(agentId(), { source: "confidential" })]) : undefined,
   ]);
   // A recipient that doesn't exist on NEAR, isn't registered on the token it is withdrawn to, or that the chain couldn't
   // confirm, is refused before anything is recorded: the provider's own refusal, or a failed delivery, would arrive after
@@ -159,12 +165,21 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
   const common = { now, agentId: agentId(), view, grant };
   const held = priorOps.filter(isHeld);
   const reserved = held.filter((op) => op.request.asset === asset).reduce((sum, op) => sum + BigInt(String(op.request.amount)), 0n);
+  // The floor's cash, less what sends held for the owner's vote would take from it: the reported balance still
+  // includes them (as for payouts), and each may yet be approved.
+  const committed = heldOutgoing(priorOps);
+  const cash = cashFloor && cashViews
+    ? Object.fromEntries(cashFloor.assets.map((a) => {
+      const left = rawBalance(cashViews[0], a) + rawBalance(cashViews[1], a) - (committed[a] ?? 0n);
+      return [a, (left > 0n ? left : 0n).toString()];
+    }))
+    : null;
   const available = ((shielded ? rawBalance(shielded, asset) : 0n) - reserved).toString();
   const judged: Case = purpose === "autopilot"
-    ? { purpose, facts: { ...common, plan: sending?.planned ?? null, strategy: loadStrategy(), tokens,
+    ? { purpose, facts: { ...common, plan: sending?.planned ?? null, strategy: loadStrategy(), tokens, cash,
       submittedSwapValues: sending?.planned ? submittedSwapValues(priorOps, sending.planned.plan.id) : null } }
     : purpose === "treasury"
-      ? { purpose, facts: { ...common, plan: sending?.planned ?? null, strategy: loadStrategy(), tokens } }
+      ? { purpose, facts: { ...common, plan: sending?.planned ?? null, strategy: loadStrategy(), tokens, cash } }
       : purpose === "payout"
         ? { purpose, facts: { ...common, available, heldPayouts: held.map(({ request: r }) => ({ recipient: String(r.recipient), asset: String(r.asset), amount: String(r.amount) })) } }
         : { purpose, facts: { ...common, available } };

@@ -7,13 +7,13 @@ import { ASSETS, outputAssetRefusal } from "./policy.js";
 import { grantApproves, type Strategy, strategyDigest } from "./strategy-digest.js";
 import { costBps } from "./value.js";
 import { tokenUsd } from "./valuation.js";
-import { withinRunCeiling } from "./strategy-value.js";
+import { breaksCashFloor, cashChange, cashUsd, withinRunCeiling } from "./strategy-value.js";
 
 /**
  * The one authorization rule every money action passes before it is sent. The provider enforces the
  * policy itself (identity, actions, payees, limits, budgets) when the action reaches it; this refuses
  * only what it can't see: a policy not in force, a grant for another purpose, what a swap buys, a
- * public, duplicate, unfunded or over-cap payout, a changed plan, and, before the owner signs, a release the
+ * public, duplicate, unfunded or over-cap payout, a changed plan, a swap under the strategy's cash floor, and, before the owner signs, a release the
  * policy no longer allows. Pure: the caller reads the facts, this decides. Facts are typed per purpose, so
  * missing evidence is a type error, never a skipped rule.
  */
@@ -36,7 +36,11 @@ type Common = {
 };
 /** A plan's send, with the leg being sent; `null` for a sweep, which has no plan. */
 type PlanFacts = { plan: Plan; leg: PlannedAction } | null;
-type TreasuryFacts = Common & { plan: PlanFacts; strategy: Strategy; tokens: Token[] };
+/**
+ * `cash`: the raw public plus confidential balance of each of the strategy's cash floor assets, read under the money
+ * lock; `null` when not read (no floor, or not a planned swap), which a swap that lowers cash under a floor refuses.
+ */
+type TreasuryFacts = Common & { plan: PlanFacts; strategy: Strategy; tokens: Token[]; cash: Record<string, string> | null };
 /**
  * What a payout may still spend, in the asset's smallest unit: the confidential balance less payouts of
  * that asset already held for approval. The reported balance still includes held payouts (mainnet,
@@ -160,8 +164,10 @@ export function authorize(action: Action, c: Case): Refusal | null {
     // Only a payout request withdraws.
     if (action.method === "withdraw") return refuse("withdraw_not_allowed", "Only a payout request withdraws");
     const { plan: sending, strategy, tokens } = c.facts;
-    if (c.purpose === "autopilot" && action.method === "swap" && sending?.leg.type !== "swap")
-      return refuse("valuation_unavailable", "An automatic swap needs a plan-bound valuation");
+    // Under a cash floor, a swap without a plan-bound valuation can't be counted against it.
+    if ((c.purpose === "autopilot" || strategy.cashFloor) && action.method === "swap" && sending?.leg.type !== "swap")
+      return refuse("valuation_unavailable", c.purpose === "autopilot" ? "An automatic swap needs a plan-bound valuation"
+        : "Under a cash floor, a swap needs a plan-bound valuation");
     if (sending) {
       const { plan, leg } = sending;
       if (!Number.isFinite(Date.parse(plan.expiresAt)) || now >= Date.parse(plan.expiresAt)) return refuse("plan_expired", "The plan expired");
@@ -180,6 +186,15 @@ export function authorize(action: Action, c: Case): Refusal | null {
         const cost = costBps(usdIn, floorUsd);
         if (!Number.isFinite(cost) || cost > strategy.maxCostBps)
           return refuse("swap_cost_exceeded", "The swap's output floor exceeds the strategy's cost limit");
+        const cashFloor = strategy.cashFloor;
+        const change = cashFloor ? cashChange(cashFloor, leg, usdIn, floorUsd) : 0;
+        // Cash is valued only for a swap that lowers it: one that adds cash is never refused for want of a price.
+        if (cashFloor && change < 0) {
+          const cash = c.facts.cash === null ? null : cashUsd(cashFloor, c.facts.cash, tokens, now);
+          if (cash === null) return refuse("valuation_unavailable", "The cash floor's balance needs a fresh price for each asset it holds");
+          if (breaksCashFloor(cashFloor, cash, change))
+            return refuse("cash_floor_exceeded", "The swap would take the strategy's cash under its floor");
+        }
         if (c.purpose === "autopilot") {
           const prior = c.facts.submittedSwapValues;
           const within = Array.isArray(prior) ? withinRunCeiling([...prior, usdIn], strategy.autopilot.maxUsd) : null;

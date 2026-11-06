@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, beforeEach, mock } from "node:test";
@@ -43,3 +43,9 @@ export function freshDirectory(prefix: string, { per = "test" }: { per?: "test" 
 
 /** Any network call fails, so a test that would reach the provider or a chain says so. */
 export const offline = () => mock.method(globalThis, "fetch", async () => { throw new Error("offline only"); });
+
+/** The app access log's text, every month's file in order (`accessLog`); empty when nothing was logged. */
+export const accessLogText = (root = ".app-access") => {
+  const files = existsSync(root) ? readdirSync(root).filter(name => /^access-\d{4}-\d{2}\.jsonl$/.test(name)).sort() : [];
+  return files.map(name => readFileSync(join(root, name), "utf8")).join("");
+};

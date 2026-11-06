@@ -31,6 +31,44 @@ export class UnresolvedOperations extends Error {
   }
 }
 
+/** Refused because this process is stopping: nothing was sent, and the action can be asked for again once it's back. */
+export class Stopping extends MoneyLockBusy {
+  constructor() {
+    super();
+    this.message = "This agent's server is stopping. Nothing was sent; try again once it's back.";
+  }
+}
+
+/** This process's money locks held now, and whether it is stopping: a stop starts no send and waits for the one running. */
+let heldHere = 0;
+let stopping = false;
+const idleWaiters = new Set<() => void>();
+
+/** From now on this process takes no money lock and dispatches nothing more under one it holds. */
+export function stopSending() {
+  stopping = true;
+}
+
+/** Undoes `stopSending`, for tests that stop a process and go on in it; a stopping server never resumes. */
+export function resumeSendingForTests() {
+  stopping = false;
+}
+
+/** Refuses once this process is stopping: checked before claiming work, so a stop never uses up what wasn't started. */
+export function assertNotStopping() {
+  if (stopping) throw new Stopping();
+}
+
+/** Resolves true once this process holds no money lock, or false after `ms`: a send in flight is left to finish. */
+export function moneyIdle(ms: number): Promise<boolean> {
+  if (heldHere === 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = () => { clearTimeout(timer); idleWaiters.delete(done); resolve(true); };
+    const timer = setTimeout(() => { idleWaiters.delete(done); resolve(false); }, ms);
+    idleWaiters.add(done);
+  });
+}
+
 /** Check again after asynchronous preflight: ownership may have been lost while awaiting it. */
 export function assertMoneyLock(lock: MoneyLock) {
   if (!lock.held) throw new Error("Money actions need the money lock, held by this process");
@@ -39,6 +77,7 @@ export function assertMoneyLock(lock: MoneyLock) {
 /** A new action must not follow an unknown outcome, even within the same locked run. */
 export function assertCanDispatch(lock: MoneyLock, initiatingKey?: string) {
   assertMoneyLock(lock);
+  assertNotStopping();
   const unresolved = readOps().filter((op) => blocksDispatch(op) && op.idempotencyKey !== initiatingKey);
   if (unresolved.length) throw new UnresolvedOperations(unresolved);
 }
@@ -50,6 +89,7 @@ export function assertCanDispatch(lock: MoneyLock, initiatingKey?: string) {
  * for the owner's approval don't block (see `isHeld`).
  */
 export async function acquireMoneyLock({ reconcile = false }: { reconcile?: boolean } = {}): Promise<MoneyLock> {
+  assertNotStopping();
   let held = true;
   let free: () => Promise<void>;
   try {
@@ -67,14 +107,21 @@ export async function acquireMoneyLock({ reconcile = false }: { reconcile?: bool
     if ((error as { code?: string }).code === "ELOCKED") throw new MoneyLockBusy();
     throw error;
   }
+  heldHere++;
+  let counted = true;
+  const uncount = () => {
+    if (!counted) return;
+    counted = false;
+    if (--heldHere === 0) for (const done of [...idleWaiters]) done();
+  };
   const lock: MoneyLock = {
     get held() {
       return held;
     },
     async release() {
-      if (!held) return;
+      if (!held) return uncount();
       held = false;
-      await free();
+      try { await free(); } finally { uncount(); }
     },
   };
   try {

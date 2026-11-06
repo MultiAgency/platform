@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { RPCSerializer } from "@orpc/client";
 import { z } from "zod";
 import { ownerPrepareInput } from "../contract/inputs.js";
@@ -8,7 +8,7 @@ import { proposalSigned } from "../contract/treasury-proposals.js";
 import { BadRequest } from "../http.js";
 import { nep413Hash, signatureBytes, verifyEd25519 } from "../nep413.js";
 import type { KeyLookup, KeyStateLookup } from "../signin.js";
-import { writeAtomic } from "../synced.js";
+import { moveOnce, writeAtomic } from "../synced.js";
 import { AppScope, appConsentSubmission, parseConsentMessage, parseSetupMessage, UNBORN_AGENT } from "../contract/app-consent.js";
 import { appMayAsk, appMayAskDao, appScopesCover, AppSigner } from "../contract/app-access.js";
 import { mayCall } from "./allowlist.js";
@@ -161,10 +161,10 @@ async function verifySigned<T extends Signable>(body: unknown, expected: { host:
   if (nonceBytes.length !== 32) throw new BadRequest("The NEP-413 nonce must be 32 bytes.");
   let signed = false;
   try { signed = verifyEd25519(publicKey, nep413Hash(message, nonceBytes, text.host), signatureBytes(signature)); } catch { signed = false; }
-  if (!signed) throw new BadRequest(`The signature doesn't match this ${what}.`);
+  if (!signed) throw new BadRequest(`The signature doesn't match this ${what}.`, "signature_invalid");
   // A lookup that throws went unanswered: it propagates, so the route answers 503 instead of a refusal.
   const permission = await lookup(text.owner, publicKey);
-  if (permission !== "FullAccess") throw new BadRequest(`${publicKey} is not a full-access key of ${text.owner}.`);
+  if (permission !== "FullAccess") throw new BadRequest(`${publicKey} is not a full-access key of ${text.owner}.`, "signature_invalid");
   return { text, expiresAt, signed: { id: hash(signatureBytes(signature).toString("hex")).toString("hex"), message, nonce, publicKey, signature } };
 }
 
@@ -196,14 +196,50 @@ export function setupConsent(verified: Awaited<ReturnType<typeof verifySetup>>, 
 export const MAX_CONSENTS_PER_DEPLOYMENT = 1_024;
 
 /**
+ * The app access log for the month of `at`: `access-YYYY-MM.jsonl` (UTC) beside the records. Every consent, call,
+ * revocation, filing and confirmation is appended, synced, so it grows with use; a month's file is complete once the
+ * month ends, and the operator may compress or move it then (docs/operations.md). Builds before 0.5.3 wrote one
+ * `access.jsonl`, kept as it is.
+ */
+export const accessLog = (root: string, at = new Date()) => join(root, `access-${at.toISOString().slice(0, 7)}.jsonl`);
+
+/** Parsed consent records by directory, shared by every `AppConsents` in this process. */
+const consentCache = new Map<string, { stamp: string; records: ConsentRecord[] }>();
+
+/** How long an ended consent's record stays among the live ones before `archive` moves it to `consents-ended/`. */
+export const CONSENT_ARCHIVE_AFTER_MS = 30 * 86_400_000;
+
+/**
  * Consents by id (the signature's hash). A revocation is a separate tombstone, `revoked/<id>`, that nothing deletes: a
  * revoked consent stays revoked even if its record is archived, and resubmitting its signature is refused. Expired
- * records may be archived; their text can never verify again.
+ * records are archived too; their text can never verify again. Every app call reads the consents, so the parsed records
+ * are kept in memory, shared by every instance in this process, and read again after any of their own writes or when
+ * the directory changes (a record stored, replaced or moved by another process: records are only ever replaced whole,
+ * by rename, never edited in place). Only the gateway stores consents, so a coarse directory timestamp can't hide a
+ * new one; a tombstone is checked on each read, so an operator's revocation from another process applies at once.
  */
 export class AppConsents {
   private readonly dir: string;
+  private readonly ended: string;
   private readonly tombstones: string;
-  constructor(root: string) { this.dir = join(root, "consents"); this.tombstones = join(root, "revoked"); }
+  constructor(root: string) { this.dir = join(root, "consents"); this.ended = join(root, "consents-ended"); this.tombstones = join(root, "revoked"); }
+  /** Every stored record, re-read after this process wrote one or after the directory changed. */
+  private records() {
+    let stamp: string;
+    try { const stat = statSync(this.dir); stamp = `${stat.mtimeMs}:${stat.ctimeMs}`; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+    const key = resolve(this.dir), cached = consentCache.get(key);
+    if (cached?.stamp === stamp) return cached.records;
+    const records = jsonFiles(this.dir).flatMap(file => readRecord(join(this.dir, file), Consent) ?? []);
+    consentCache.set(key, { stamp, records });
+    return records;
+  }
+  /** Writes a record whole, then drops this process's cached records, whatever the directory's timestamp says. */
+  private write(id: string, record: ConsentRecord) {
+    try { writeAtomic(join(this.dir, `${id}.json`), JSON.stringify(record) + "\n", 0o600); }
+    finally { consentCache.delete(resolve(this.dir)); }
+  }
+  private withTombstone(record: ConsentRecord) { return this.isRevoked(record.id) && !record.revoked ? { ...record, revoked: true } : record; }
   private read(id: string) {
     if (!/^[a-f0-9]{64}$/.test(id)) return null;
     const record = readRecord(join(this.dir, `${id}.json`), Consent);
@@ -212,11 +248,11 @@ export class AppConsents {
   isRevoked(id: string) { return /^[a-f0-9]{64}$/.test(id) && existsSync(join(this.tombstones, id)); }
   /** Throws what `store` would refuse with, so a caller can check before acting on the consent. */
   admit(consent: VerifiedConsent, now = Date.now()) {
-    if (this.isRevoked(consent.id)) throw new BadRequest("This consent was revoked. The owner can sign a new one.");
+    if (this.isRevoked(consent.id)) throw new BadRequest("This consent was revoked. The owner can sign a new one.", "consent_revoked");
     if (this.read(consent.id)) return;
     // Revoked consents don't count: their tombstones already refuse their signatures.
     if (this.list({ deployment: consent.deployment }).filter(r => !r.revoked && r.expiresAt > now).length >= MAX_CONSENTS_PER_DEPLOYMENT)
-      throw new BadRequest("This deployment has too many live consents. Revoke unused ones first.");
+      throw new BadRequest("This deployment has too many live consents. Revoke unused ones first.", "too_many_consents");
   }
   store(consent: VerifiedConsent, now = Date.now()) {
     this.admit(consent, now);
@@ -224,12 +260,25 @@ export class AppConsents {
     if (existing) return existing;
     privateDirectory(this.dir);
     const record = Consent.parse({ ...consent, createdAt: now, revoked: false, revokedAt: null });
-    writeAtomic(join(this.dir, `${record.id}.json`), JSON.stringify(record) + "\n", 0o600);
+    this.write(record.id, record);
     return record;
   }
   list(filter: { deployment?: string; organization?: string }) {
-    return jsonFiles(this.dir).map(file => this.read(file.slice(0, -5))).filter((r): r is ConsentRecord =>
-      r !== null && (filter.deployment === undefined || r.deployment === filter.deployment) && (filter.organization === undefined || r.organization === filter.organization));
+    return this.records().filter(r => (filter.deployment === undefined || r.deployment === filter.deployment) &&
+      (filter.organization === undefined || r.organization === filter.organization)).map(r => this.withTombstone(r));
+  }
+  /**
+   * Moves the records of consents that ended (revoked or expired) more than `after` ago into `consents-ended/`, keeping
+   * every one, so the live directory stays bounded. Tombstones stay where they are and keep refusing revoked signatures.
+   */
+  archive(now = Date.now(), after = CONSENT_ARCHIVE_AFTER_MS) {
+    // An ended record is never rewritten (`revoke` leaves an expired one's record alone), so moving it races no writer.
+    const ended = this.records().map(r => this.withTombstone(r))
+      .filter(r => Math.min(r.expiresAt, r.revoked ? r.revokedAt ?? r.expiresAt : Infinity) <= now - after);
+    if (!ended.length) return [];
+    privateDirectory(this.ended);
+    try { return ended.filter(r => moveOnce(join(this.dir, `${r.id}.json`), join(this.ended, `${r.id}.json`))).map(r => r.id); }
+    finally { consentCache.delete(resolve(this.dir)); }
   }
   /** The live consents covering this deployment, host, Organization and agent. */
   live(input: { deployment: string; host: string; organization: string; agent: string }, now = Date.now()) {
@@ -242,7 +291,8 @@ export class AppConsents {
     if (scope && (!record || record.deployment !== scope.deployment || record.host !== scope.host.toLowerCase())) return false;
     privateDirectory(this.tombstones);
     if (!this.isRevoked(id)) writeAtomic(join(this.tombstones, id), `${new Date(now).toISOString()} ${reason}\n`, 0o600);
-    if (record && !record.revokedAt) writeAtomic(join(this.dir, `${id}.json`), JSON.stringify({ ...record, revoked: true, revokedAt: now }) + "\n", 0o600);
+    // The tombstone alone ends it; the record notes when, unless it had already expired (then it's final, and archived).
+    if (record && !record.revokedAt && record.expiresAt > now) this.write(id, { ...record, revoked: true, revokedAt: now });
     return true;
   }
 }

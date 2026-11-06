@@ -9,7 +9,7 @@ import { ownerSignatureProblem } from "../owner-signature.js";
 import { appendSynced, writeAtomic } from "../synced.js";
 import type { AgentEntry } from "./config.js";
 import { forwardRpc } from "./rpc-proxy.js";
-import { privateDirectory, readRecord } from "./app-access.js";
+import { accessLog, privateDirectory, readRecord } from "./app-access.js";
 import { DaoRequests, daoRequestPage, PAGE_HEADERS } from "./app-dao.js";
 
 /**
@@ -154,7 +154,7 @@ export async function confirmRoutes(req: IncomingMessage, res: ServerResponse, p
   const problem = ownerSignatureProblem(record.intent as never, record.signer, submission.data.signedData);
   if (problem) { json(res, 400, { error: `Not submitted: ${problem}.` }); return true; }
   if (!confirms.claim(record)) { used(); return true; }
-  appendSynced(join(root, "access.jsonl"), { at: new Date().toISOString(), deployment: record.deployment, event: "confirmed",
+  appendSynced(accessLog(root), { at: new Date().toISOString(), deployment: record.deployment, event: "confirmed",
     consent: record.consent, organization: record.organization, owner: record.owner, agent: record.agent, action: record.type, correlationId: record.correlationId });
   forwardRpc(req, res, agent, "owner/submit", undefined, JSON.stringify({ json: { correlationId: record.correlationId, signedData: submission.data.signedData } }),
     `app:${record.deployment}:${record.organization}`);

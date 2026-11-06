@@ -44,13 +44,22 @@ export type GatewayAgent = z.output<typeof gatewayAgent>;
 /** Why the gateway refused: no valid session, no access to this agent, or no permission for this procedure. */
 export const GATEWAY_DENIAL_SCOPES = ["session", "agent", "procedure"] as const;
 export type GatewayDenialScope = (typeof GATEWAY_DENIAL_SCOPES)[number];
-/** The gateway's own 401/403 answer. `access` is absent from older gateways, machine routes and proxies. */
-export const gatewayDenial = z.looseObject({ error: z.string(), access: z.enum(GATEWAY_DENIAL_SCOPES).optional() });
+/**
+ * The gateway's own 401/403 answer. `access` is absent from older gateways, machine routes and proxies; `code` (an
+ * `AppGatewayCode` on app routes) from older gateways and from routes that don't name one.
+ */
+export const gatewayDenial = z.looseObject({ error: z.string(), access: z.enum(GATEWAY_DENIAL_SCOPES).optional(), code: z.string().optional() });
 
 /** The scope a gateway denial body declares, or undefined when it declares none: the caller decides its own default. */
 export function gatewayDenialScope(body: unknown): GatewayDenialScope | undefined {
   const parsed = gatewayDenial.safeParse(body);
   return parsed.success ? parsed.data.access : undefined;
+}
+
+/** The code a gateway denial body names, or undefined. */
+export function gatewayDenialCode(body: unknown): string | undefined {
+  const parsed = gatewayDenial.safeParse(body);
+  return parsed.success ? parsed.data.code : undefined;
 }
 
 // The discovery access record is the permission module's Access, both ways.

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { accessLogText } from "./fixtures/harness.js";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, request, type Server } from "node:http";
@@ -11,7 +12,8 @@ import { consentMessage, parseConsentMessage, parseSetupMessage, setupMessage } 
 import { AppConsents, AppCredentials, MAX_CONSENTS_PER_DEPLOYMENT, sweepConsentKeys, verifyConsent, verifySetup, type VerifiedConsent } from "../src/gateway/app-access.js";
 import { APP_ROOT, appRoutes, confirms, type HostedSetup } from "../src/gateway/app-routes.js";
 import { AppConfirms, confirmRoutes } from "../src/gateway/app-confirm.js";
-import { appClient } from "../src/contract/app-client.js";
+import { APP_GATEWAY_CODES } from "../src/contract/app-access.js";
+import { appClient, isDaoPrepared, isWalletPrepared, type AppPrepared } from "../src/contract/app-client.js";
 import { BadRequest, sendFailure } from "../src/http.js";
 import { daoPolicy } from "../src/chain.js";
 import { payoutPolicy } from "../src/policy.js";
@@ -162,15 +164,18 @@ async function routeHarness(t: import("node:test").TestContext) {
   return { port, state, forwarded, agent, staging, production, rpc, consent };
 }
 
+/** A refusal's status, `code` and `access`, which an app decides by. */
+const denial = (answer: { status: number; body: { code?: string; access?: string } }) => [answer.status, answer.body.code, answer.body.access];
+
 test("the app route needs the deployment's credential and a live owner consent, re-checks ownership, and forwards only reads", async t => {
   const { port, state, forwarded, agent, staging, production, rpc, consent } = await routeHarness(t);
   assert.equal((await call(port, rpc("org_1", "overview"), "POST", undefined, {})).status, 401);
-  assert.equal((await call(port, rpc("org_1", "overview"), "POST", staging, {})).status, 403, "no consent yet");
+  assert.deepEqual(denial(await call(port, rpc("org_1", "overview"), "POST", staging, {})), [403, "no_consent", "agent"], "no consent yet");
 
   const identity = await call(port, "/apps/v1/agents/payout", "GET", staging);
   assert.deepEqual(identity.body, { agent: "payout", owner: "owner.near", agentId: "provider-id", created: true, host: HOST, deployment: "staging", signer: "wallet" });
   assert.equal((await call(port, "/apps/v1/agents/payout", "GET")).status, 401);
-  assert.equal((await consent({ agentId: "earlier-agent" })).status, 409, "a consent signed for another agent identity isn't attached to this one");
+  assert.deepEqual(denial(await consent({ agentId: "earlier-agent" })), [409, "agent_changed", undefined], "a consent signed for another agent identity isn't attached to this one");
   const stored = await consent();
   assert.equal(stored.status, 201, JSON.stringify(stored.body));
   assert.equal(stored.body.consent.signature, undefined);
@@ -187,7 +192,7 @@ test("the app route needs the deployment's credential and a live owner consent, 
   assert.equal((await call(port, rpc("org_1", "overview"), "POST", staging, {}, { cookie: "s=1" })).status, 403, "browser cookie");
   assert.equal(forwarded.length, before, "nothing forwarded for a browser request");
   for (const procedure of ["owner/prepare", "owner/submit", "sweep", "compensation/list", "workOrders/list", "agreements/list", "strategy/get", "pay"])
-    assert.equal((await call(port, rpc("org_1", procedure), "POST", staging, {})).status, 403, procedure);
+    assert.deepEqual(denial(await call(port, rpc("org_1", procedure), "POST", staging, {})), [403, procedure === "owner/prepare" ? "not_allowed" : "scope", "procedure"], procedure);
   assert.equal((await call(port, rpc("org_2", "overview"), "POST", staging, {})).status, 403, "another Organization");
   assert.equal((await call(port, rpc("org_1", "overview"), "POST", production, {})).status, 403, "another deployment");
   assert.equal((await call(port, "/apps/v1/consents?organization=org_1", "GET", production)).body.consents.length, 0);
@@ -199,11 +204,11 @@ test("the app route needs the deployment's credential and a live owner consent, 
   assert.equal((await call(port, rpc("org_1", "overview"), "POST", staging, {})).status, 200, "and revokes nothing");
 
   state.providerId = "replacement";
-  assert.equal((await call(port, rpc("org_1", "overview"), "POST", staging, {})).status, 403, "a replaced agent isn't covered");
+  assert.deepEqual(denial(await call(port, rpc("org_1", "overview"), "POST", staging, {})), [403, "agent_changed", "agent"], "a replaced agent isn't covered");
   state.providerId = "provider-id";
 
   const otherOwner = await call(port, "/apps/v1/consents", "POST", staging, await signed(consentMessage(fields({ owner: "intruder.near" })), "intruder.near"));
-  assert.equal(otherOwner.status, 403, "only the configured owner can consent");
+  assert.deepEqual(denial(otherOwner), [403, "not_owner", undefined], "only the configured owner can consent");
 
   state.dao = true;
   assert.ok(await daoPolicy(agent.owner), "the mocked chain answers as a Sputnik DAO");
@@ -211,8 +216,8 @@ test("the app route needs the deployment's credential and a live owner consent, 
   state.dao = false;
 
   assert.equal((await call(port, `/apps/v1/consents/${stored.body.consent.id}`, "DELETE", staging)).status, 200);
-  assert.equal((await call(port, rpc("org_1", "overview"), "POST", staging, {})).status, 403, "revoked");
-  const calls = readFileSync(join(".app-access", "access.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+  assert.deepEqual(denial(await call(port, rpc("org_1", "overview"), "POST", staging, {})), [403, "no_consent", "agent"], "revoked");
+  const calls = accessLogText().trim().split("\n").map(line => JSON.parse(line));
   assert.deepEqual(calls.map(c => c.event), ["consent", "call", "call", "revoke"], "refused calls are not logged as calls");
   assert.equal(calls[1].path, "overview");
 });
@@ -279,7 +284,7 @@ test("the app prepares the owner actions an app may ask for; a readable intent r
   state.reply = { status: 200, body: "not json" };
   assert.equal((await prepare(edit({}))).status, 502, "an unreadable reply isn't released");
 
-  const log = readFileSync(join(".app-access", "access.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+  const log = accessLogText().trim().split("\n").map(line => JSON.parse(line));
   assert.deepEqual(log.filter(l => ["confirm", "withheld"].includes(l.event)).map(l => [l.event, l.action, l.correlationId]),
     [["confirm", "policy_update", "c-edit"], ["confirm", "agent_freeze", "c-freeze"], ["confirm", "agent_create", "c-create"], ["withheld", "agent_freeze", "c-other"]]);
 });
@@ -365,7 +370,7 @@ test("a confirm link shows the agent's record; the bytes go only to the owner's 
   assert.deepEqual([lateView.body.state, lateView.body.policy], ["expired", null]);
   assert.equal((await call(port, `${lateApi}/open`, "POST", undefined, await openingSignature(lateView.body.opening))).status, 410);
   assert.equal((await call(port, lateApi, "POST", undefined, { signedData: signDelegate() })).status, 410);
-  const log = readFileSync(join(".app-access", "access.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+  const log = accessLogText().trim().split("\n").map(line => JSON.parse(line));
   assert.deepEqual(log.filter(l => l.event === "confirmed").map(l => l.correlationId), ["c-edit"]);
 });
 
@@ -387,7 +392,7 @@ test("the app client reaches its routes with the deployment credential and keeps
   assert.deepEqual(await appClient({ base, credential: "tap_00000000-0000-4000-8000-000000000000.x", fetch: httpFetch }).identity("payout"),
     { ok: false, kind: "session", status: 401, error: "Invalid, expired or revoked app credential" });
   const noSetup = await client.setup(await signed(setupMessage(setupFields())));
-  assert.deepEqual(noSetup.ok === false && [noSetup.kind, "status" in noSetup && noSetup.status], ["forbidden", 403], "no setup on this host");
+  assert.deepEqual(noSetup.ok === false && [noSetup.kind, "status" in noSetup && noSetup.status, "code" in noSetup && noSetup.code], ["forbidden", 403, "setup_unavailable"], "no setup on this host");
 
   const body = await signed(consentMessage(fields({ scopes: ["owner", "read"] })));
   const stored = await client.consents.submit(body);
@@ -397,7 +402,7 @@ test("the app client reaches its routes with the deployment credential and keeps
   const listed = await client.consents.list("org_1");
   assert.deepEqual(listed.ok && listed.value.consents.map(c => [c.id, "signature" in c]), [[stored.value.consent.id, false]]);
   const forged = await client.consents.submit({ ...body, message: body.message.replace('"org_1"', '"org_2"') });
-  assert.deepEqual(forged.ok === false && [forged.kind, "status" in forged && forged.status], ["refused", 400], "a text other than the one signed");
+  assert.deepEqual(forged.ok === false && [forged.kind, "status" in forged && forged.status, "code" in forged && forged.code], ["refused", 400, "signature_invalid"], "a text other than the one signed");
 
   const payout = client.agent("org_1", "payout");
   state.reply.body = JSON.stringify({ json: { stage: "submitted", status: "SUCCESS" } });
@@ -408,20 +413,22 @@ test("the app client reaches its routes with the deployment credential and keeps
   state.reply.body = preparedReply("nep413");
   const readable = await payout.call("owner/prepare", { action: { type: "policy_update", expectedPolicy, changes: { budget: { daily_usd: "5", weekly_usd: null, monthly_usd: null } } }, signer: "wallet" });
   assert.equal(readable.ok && readable.value.intent?.standard, "nep413");
+  assert.ok(readable.ok && isWalletPrepared(readable.value) && !isDaoPrepared(readable.value), "a wallet's answer narrows to the wallet's");
   state.reply.body = preparedReply("nep366");
   const held = await payout.call("owner/prepare", { action: { type: "policy_update", expectedPolicy, changes: { owner_approval: false } }, signer: "wallet" });
   assert.ok(held.ok && held.value.confirm && held.value.intent === undefined, "a NEP-366 intent answers a confirm link, typed, without its bytes");
   const before = forwarded.length;
   // @ts-expect-error an app may not ask for payees at creation; the gateway refuses it too
   const payees = await payout.call("owner/prepare", { action: { type: "agent_create", owner: { type: "near", account_id: "owner.near", public_key: "k" }, payees: ["p.near"] }, signer: "wallet" });
-  assert.equal(payees.ok === false && payees.kind, "forbidden");
+  assert.deepEqual(payees.ok === false && payees.kind === "forbidden" && [payees.source, payees.scope, payees.code], ["gateway", "procedure", "not_allowed"]);
   assert.equal(forwarded.length, before);
   // @ts-expect-error `pay` is not an app procedure
   void (() => payout.call("pay", {}));
 
   assert.ok((await client.consents.revoke(stored.value.consent.id)).ok);
   assert.ok((await client.consents.revoke(stored.value.consent.id)).ok, "revoking again is harmless");
-  assert.equal((await payout.call("owner/status", { correlationId: "c" })).ok, false, "a revoked consent reaches nothing");
+  const revoked = await payout.call("owner/status", { correlationId: "c" });
+  assert.deepEqual(revoked.ok === false && revoked.kind === "forbidden" && [revoked.scope, revoked.code], ["agent", "no_consent"], "a revoked consent reaches nothing");
 });
 
 test("an agent an app set up is reachable only by that deployment and Organization, whatever consent is signed", async t => {
@@ -638,6 +645,34 @@ test("the operator sweep revokes consents whose key is gone and leaves unanswere
   assert.equal(store.isRevoked(record(3).id), false);
 });
 
+test("consents read from memory still see another process's store and revocation at once, and ended ones are archived, never lost", async t => {
+  const dir = mkdtempSync(join(tmpdir(), "app-cache-")); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const gateway = new AppConsents(dir), operator = new AppConsents(dir);
+  const live = (store: AppConsents) => store.list({}).filter(r => !r.revoked).map(r => r.organization).sort();
+  gateway.store(record(1));
+  assert.deepEqual(live(gateway), ["org_1"]);
+  operator.store(record(2));
+  assert.deepEqual(live(gateway), ["org_1", "org_2"], "a record stored elsewhere is read");
+  assert.ok(operator.revoke(record(1).id, null));
+  assert.deepEqual(live(gateway), ["org_2"], "a revocation from another process applies at once");
+  // Ended long ago: revoked, and expired. Ended recently, and live: kept.
+  const DAY = 86_400_000, now = Date.now();
+  gateway.store(record(3, { expiresAt: now + DAY }), now - 40 * DAY);
+  operator.revoke(record(3).id, null, now - 31 * DAY);
+  writeFileSync(join(dir, "consents", `${record(4).id}.json`), JSON.stringify({ ...record(4, { expiresAt: now - 31 * DAY }), createdAt: 0, revoked: false, revokedAt: null }));
+  writeFileSync(join(dir, "consents", `${record(5).id}.json`), JSON.stringify({ ...record(5, { expiresAt: now - DAY }), createdAt: 0, revoked: false, revokedAt: null }));
+  assert.deepEqual(gateway.archive(now).sort(), [record(3).id, record(4).id]);
+  assert.deepEqual(readdirSync(join(dir, "consents-ended")).sort(), [`${record(3).id}.json`, `${record(4).id}.json`]);
+  assert.deepEqual(gateway.list({}).map(r => r.organization).sort(), ["org_1", "org_2", "org_5"]);
+  assert.throws(() => gateway.store(record(3)), /was revoked/, "an archived revocation still refuses its signature");
+  assert.deepEqual(gateway.archive(now), [], "archiving again moves nothing");
+  // An ended record is final: revoking an expired consent writes only its tombstone, so archiving races no writer.
+  const expired = join(dir, "consents", `${record(5).id}.json`), text = readFileSync(expired, "utf8");
+  assert.ok(operator.revoke(record(5).id, null, now));
+  assert.equal(readFileSync(expired, "utf8"), text);
+  assert.equal(gateway.list({}).find(r => r.id === record(5).id)?.revoked, true, "the tombstone still says it's revoked");
+});
+
 test("each deployment holds a bounded number of live consents; expired or revoked ones and other deployments' don't count", async t => {
   const dir = mkdtempSync(join(tmpdir(), "app-cap-")); t.after(() => rmSync(dir, { recursive: true, force: true }));
   const store = new AppConsents(dir);
@@ -739,6 +774,24 @@ test("the call that observes a removed key is refused by the key check itself; a
   assert.equal(forwarded.length, before, "nothing forwarded");
 });
 
+test("a stop that begins while an agent call is checked answers 503, an outage, not the end of access", async t => {
+  const { port, state, staging, rpc, forwarded } = await routeHarness(t);
+  assert.equal((await call(port, "/apps/v1/consents", "POST", staging, await signed(consentMessage(fields())))).status, 201);
+  state.keys = async () => { state.stopping = true; return "FullAccess"; };
+  const before = forwarded.length;
+  const stopped = await call(port, rpc("org_1", "overview"), "POST", staging, {});
+  assert.deepEqual([stopped.status, stopped.body.error], [503, "Gateway is stopping. Nothing was forwarded."]);
+  assert.equal(forwarded.length, before);
+});
+
+test("a consent isn't stored when its deployment's credential is revoked while the signer's key is checked", async t => {
+  const { port, state, staging } = await routeHarness(t);
+  state.keys = async () => { const credentials = new AppCredentials(".app-access"); credentials.revoke(credentials.list().find(c => c.deployment === "staging")!.id); return "FullAccess"; };
+  const ended = await call(port, "/apps/v1/consents", "POST", staging, await signed(consentMessage(fields())));
+  assert.deepEqual([ended.status, ended.body.error], [403, "Access ended before storing. Nothing was stored."]);
+  assert.deepEqual(new AppConsents(".app-access").list({}), [], "a later credential for this deployment inherits nothing");
+});
+
 test("each credential has an hourly request limit, and its 429 says when to try again (#15)", async t => {
   const { port, staging } = await routeHarness(t);
   let last: Awaited<ReturnType<typeof call>> | undefined;
@@ -753,10 +806,15 @@ test("each credential has an hourly request limit, and its 429 says when to try 
     return Response.json(answered.body, { status: answered.status, headers: answered.headers["retry-after"] ? { "retry-after": String(answered.headers["retry-after"]) } : {} });
   };
   const app = appClient({ base: `http://127.0.0.1:${port}`, credential: staging, fetch: httpFetch });
-  const limited = { ok: false, kind: "rate_limited", status: 429, error: "Request limit reached", retryAfterSeconds: after };
-  assert.deepEqual(await app.identity("payout"), limited);
-  assert.deepEqual(await app.agent("org_1", "payout").call("proposals/create", { requestId: "r", legs: "strategy", expiresAt: new Date(Date.now() + 3_600_000).toISOString() }), limited);
-  assert.deepEqual(await app.agent("org_1", "payout").call("overview"), limited);
+  // The wait counts down while the calls run: each answer names the same window, a few seconds later at most.
+  const limited = (result: unknown) => {
+    const { retryAfterSeconds, ...rest } = result as { retryAfterSeconds?: number };
+    assert.deepEqual(rest, { ok: false, kind: "rate_limited", status: 429, error: "Request limit reached" });
+    assert.ok(retryAfterSeconds !== undefined && retryAfterSeconds <= after && retryAfterSeconds >= after - 5, `retryAfterSeconds ${retryAfterSeconds}, first ${after}`);
+  };
+  limited(await app.identity("payout"));
+  limited(await app.agent("org_1", "payout").call("proposals/create", { requestId: "r", legs: "strategy", expiresAt: new Date(Date.now() + 3_600_000).toISOString() }));
+  limited(await app.agent("org_1", "payout").call("overview"));
   // A proxy's 429 page isn't the gateway's answer: the routes keep their old kind for it.
   const proxied = appClient({ base: `http://127.0.0.1:${port}`, credential: staging, fetch: async () => new Response("<html>slow down</html>", { status: 429 }) });
   assert.deepEqual(await proxied.identity("payout"), { ok: false, kind: "refused", status: 429, error: "HTTP 429" });
@@ -803,4 +861,32 @@ test("under a wallet's consent, read reaches account and reconcileBooks, treasur
   assert.equal((await consent({ organization: "org_3", scopes: ["read"] })).status, 201);
   for (const procedure of ["treasury/link", "autopilot/tick"])
     assert.equal((await call(port, rpc("org_3", procedure), "POST", staging, { json: { accountId: "treasury.near" } })).status, 403, `${procedure}: needs treasury`);
+});
+
+test("every refusal code the app routes send is one the package lists, and each listed code is sent", () => {
+  const source = (file: string) => readFileSync(new URL(`../src/gateway/${file}`, import.meta.url), "utf8");
+  const sent = new Set(["invalid_request", ...[...source("app-routes.ts").matchAll(/code: "([a-z_]+)"/g)].map(m => m[1]),
+    ...["app-access.ts", "app-dao.ts"].flatMap(file => [...source(file).matchAll(/new BadRequest\([^;]*, "([a-z_]+)"\);/g)].map(m => m[1]))]);
+  assert.deepEqual([...sent].sort(), [...APP_GATEWAY_CODES].sort());
+});
+
+test("owner/prepare's answer narrows to the DAO's or the wallet's by what it carries", () => {
+  const base = { correlationId: "c", preview: { summary: "Freeze" }, expiresAt: later(0.005), digest: null };
+  const dao = { ...base, dao: { owner: "x", transaction: { receiverId: "v1.signer", actions: [] }, proposal: null, proposalAndVote: null } } as unknown as AppPrepared;
+  const linked = { ...base, confirm: { url: "https://h/confirm/x", expiresAt: later(0.005) } } as unknown as AppPrepared;
+  assert.deepEqual([isDaoPrepared(dao), isWalletPrepared(dao)], [true, false]);
+  assert.deepEqual([isDaoPrepared(linked), isWalletPrepared(linked)], [false, true]);
+  if (isDaoPrepared(dao)) assert.equal(dao.dao.transaction.receiverId, "v1.signer", "typed without probing");
+});
+
+test("the gateway's coded refusal before forwarding an agent call is refused with its code; a plain 400 stays unknown", async () => {
+  const answering = (status: number, body: string) => appClient({ base: "https://platform.test", credential: "tap_x",
+    fetch: async () => new Response(body, { status, headers: { "content-type": "application/json" } }) }).agent("org_1", "treasury");
+  const signed = { id: "p-1", signed: { message: "m", nonce: "n", publicKey: "k", signature: "s" } };
+  assert.deepEqual(await answering(400, JSON.stringify({ code: "signature_invalid", error: "Not the owner's key. Nothing was recorded." })).call("proposals/approve", signed),
+    { ok: false, kind: "refused", status: 400, code: "signature_invalid", error: "Not the owner's key. Nothing was recorded." });
+  const proxy = await answering(400, "<html>bad request</html>").call("proposals/approve", signed);
+  assert.deepEqual(proxy.ok === false && [proxy.kind, "httpStatus" in proxy && proxy.httpStatus], ["unknown", 400], "a page with no code proves nothing");
+  const older = await answering(400, JSON.stringify({ error: "An older gateway's refusal" })).call("proposals/approve", signed);
+  assert.equal(older.ok === false && older.kind, "unknown", "an older gateway names no code, so nothing changes for it");
 });

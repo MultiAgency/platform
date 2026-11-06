@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { request as httpsRequest } from 'node:https';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -171,7 +171,9 @@ test('an app server relays readable owner actions, sends NEP-366 ones to the pla
     }
     await expect.poll(async () => value(await payout.call('owner/status', { correlationId: held.correlationId })).status).toBe('SUCCESS');
     expect(stack.simulated.payoutPolicy()).toMatchObject({ revision: 4, policy: { owner_approval: false } });
-    const log = readFileSync(join(gateway, '.app-access/access.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    const logs = join(gateway, '.app-access');
+    const log = readdirSync(logs).filter(name => /^access-\d{4}-\d{2}\.jsonl$/.test(name)).sort()
+      .map(name => readFileSync(join(logs, name), 'utf8')).join('').trim().split('\n').map(line => JSON.parse(line));
     expect(log.filter(l => ['confirm', 'confirmed'].includes(l.event)).map(l => [l.event, l.correlationId]))
       .toEqual([frozen, unfrozen, held].flatMap(({ correlationId }) => [['confirm', correlationId], ['confirmed', correlationId]]));
     steps.push("a NEP-366 edit reached the app only as a confirm link; the owner signed it on the platform's page and it applied");

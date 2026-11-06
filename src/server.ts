@@ -11,6 +11,7 @@ import { crossSite, serveStatic } from "./http.js";
 import { resumeOwnerIntents, setAgentCreationHandler } from "./owner-intents.js";
 import { closeWorkOrders, resumeWorkOrders } from "./work-order-pool.js";
 import { listeningMessage } from "./gateway/agent-origin.js";
+import { moneyIdle, stopSending } from "./lock.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 
@@ -87,9 +88,15 @@ async function serveDashboard(req: IncomingMessage, res: ServerResponse) {
   await serveStatic(res, "web/dist", url.pathname, "Not found. Run `pnpm build:web` first, or use `pnpm web` in development.");
 }
 
+// A stop starts no send and lets the one in flight finish, within the gateway's 30-second grace for its agents: a send
+// cut off mid-call would stay unresolved and block every later one until reviewed.
+const SEND_GRACE_MS = 25_000;
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, async () => {
+  stopSending();
   dashboard.close(); invoices?.close();
-  await closeWorkOrders();
+  // The work-order executors drain at the same time, within the same grace, not after this process's send.
+  const [idle] = await Promise.all([moneyIdle(SEND_GRACE_MS), closeWorkOrders()]);
+  if (!idle) console.error(`A money action was still running after ${SEND_GRACE_MS / 1000} s; stopping anyway. Reconcile before relying on its outcome.`);
   await executor.close();
   process.exit(0);
 });

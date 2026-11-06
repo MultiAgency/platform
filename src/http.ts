@@ -3,7 +3,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join } from "node:path";
 
 /** A body the client got wrong: answered 400, unlike a failure on this side. */
-export class BadRequest extends Error {}
+/** A request refused as made (400), with the `code` an app decides by (`AppGatewayCode` on app routes). */
+export class BadRequest extends Error {
+  constructor(message: string, readonly code = "invalid_request") { super(message); }
+}
 
 /** A JSON answer, never cached: every one may carry a member's or payee's data. */
 export const sendJson = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) =>
@@ -29,7 +32,7 @@ export const crossSite = (req: IncomingMessage, host = req.headers.host) =>
 export function sendFailure(res: ServerResponse, error: unknown) {
   // A failure after the answer started can't change it: end it rather than crash the server.
   if (res.headersSent) return void res.end();
-  if (error instanceof BadRequest) return sendJson(res, 400, { error: error.message });
+  if (error instanceof BadRequest) return sendJson(res, 400, { code: error.code, error: error.message });
   console.error(error);
   sendJson(res, 500, { error: "Something went wrong. Try again later." });
 }

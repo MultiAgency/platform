@@ -10,7 +10,7 @@ metadata:
   purpose: 'An app server''s access to agents: credential, consents, relayed owner actions, and payout requests by requestId with recovery by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.5.2'
+  library_version: '0.5.3'
 requires:
   - getting-started
   - owner-workflows
@@ -72,10 +72,13 @@ export async function connect(app: ReturnType<typeof appClient>, host: string, d
 }
 ```
 
-Result: `{ ok: true, value: { consent: { id, scopes, expiresAt, … } } }`; keep `consent.id` with the Organization. A
-`refused` 400 means the text or signature was not accepted; 409 means the agent changed: read `identity` again and ask
-the owner to sign a new text. Later calls answer `forbidden` once the consent ends (expired, revoked, or the owner's
-signing key removed): the owner signs a new one. A 503 means a check went unanswered: read again.
+Result: `{ ok: true, value: { consent: { id, scopes, expiresAt, … } } }`; keep `consent.id` with the Organization. Decide
+by `code` (`APP_GATEWAY_CODES`), not status: `signature_invalid` or `invalid_request` means the text or signature was not
+accepted; `agent_changed`, `owner_changed` or `not_created` means the agent isn't the one the text names: read
+`identity` again and ask the owner to sign a new text. Later agent calls answer `forbidden` once the consent ends, with
+`code` `no_consent` (expired or revoked), `consent_revoked` (the owner's signing key removed) or `agent_changed` (the
+agent was replaced): the owner signs a new one. `scope` means no consent covers that procedure. `unavailable` (503: a
+check went unanswered) means send the same request again.
 
 ## Relay an owner action
 
@@ -133,8 +136,9 @@ Before an Organization has an agent, your server builds `setupMessage({ host, de
 expiresAt })` (at most an hour ahead) and the owner signs it like a consent; submit it with `app.setup(...)`. The answer
 names the Organization's own agent and a setup consent that lets you relay only its creation: `agent_create` without
 payees, naming the key that signed the setup. Then read `identity` until it is created, and ask the owner to sign a
-consent naming its `agentId`. A 409 means it already exists or the deployment reached its agent limit on the host; a
-503 means a check went unanswered: submit the same body again.
+consent naming its `agentId`. `already_created` means it already exists (ask for a consent); `setup_failed` says why
+it couldn't be set up (for example the deployment's agent limit on the host); `unavailable` means a check went
+unanswered: submit the same body again.
 
 ## A DAO owner: every signature is the DAO's vote
 

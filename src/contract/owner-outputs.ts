@@ -183,7 +183,9 @@ const holding = z.looseObject({
 });
 /** A loose copy of the strategy: Strategy itself is a stripping z.object. */
 const strategy = z.looseObject({ targetBps: z.record(z.string(), z.number()), minLegUsd: z.number(), maxCostBps: z.number(),
-  autopilot: z.looseObject({ everyMin: z.number(), maxUsd: z.number() }) });
+  autopilot: z.looseObject({ everyMin: z.number(), maxUsd: z.number() }),
+  /** Absent: no floor, or a server that predates the floor and dropped it. */
+  cashFloor: z.looseObject({ usd: z.number(), assets: z.array(z.string()) }).optional() });
 /** strategy-controls.ts snapshot. */
 const strategySnapshot = z.looseObject({ strategy, digest: z.string(), on: z.boolean() });
 /** autopilot.ts status. */

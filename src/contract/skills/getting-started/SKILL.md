@@ -10,7 +10,7 @@ metadata:
   purpose: 'Orients an app or agent author: the three clients, the identities and their server-side limits, result kinds and when to send again, and the supported surface of this package version.'
   type: lifecycle
   library: '@multiagency/sdk'
-  library_version: '0.5.2'
+  library_version: '0.5.3'
 sources:
   - 'MultiAgency/platform:src/contract/index.ts'
   - 'MultiAgency/platform:src/contract/payee-entry.ts'
@@ -54,12 +54,12 @@ it back unchanged, and never compute your own. A policy or strategy that changed
 | --- | --- | --- | --- |
 | `ok: true` | The answer, validated against this version's schema | n/a | Use `value` |
 | `session` | 401: no valid session | Yes | Sign in again (agent connection: start a new one) |
-| `forbidden` | 403: this identity may not do this | Yes | Do not retry; it is a permission, not an outage |
-| `refused` | Refused before anything was sent (optional `code`; owner results also carry the HTTP `status` and oRPC `rpcCode`) | Yes | Correct the input or state, then act again |
+| `forbidden` | 403: this identity may not do this. Through `/apps/v1` the gateway adds its `code` (`AppGatewayCode`) and, on agent calls, `scope` | Yes | Do not retry the same request; act on `code` (for example `no_consent` or `agent_changed`: ask the owner to sign a consent) |
+| `refused` | Refused before anything was sent (optional `code`, an `AppGatewayCode` on app routes; owner results also carry the HTTP `status` and oRPC `rpcCode`) | Yes | Correct the input or state, then act again. Only `agent_refused` can change by reading again |
 | `rate_limited` | 429: the gateway's request limit, before forwarding (`ownerClient`, `appClient`; `retryAfterSeconds` when given) | Yes | Send the same call again after `retryAfterSeconds`; it says nothing about access. `payeeClient` reports its limit as `refused` with code `rate_limited` |
 | `busy`, `unresolved` | Owner money actions: another action holds the lock, or an earlier one has no proven outcome | Yes | Follow existing operations, then try again |
 | `provider` | After an owner action, the provider's answer proves it refused; after a read, the provider read failed | Yes, for an action | Check the recorded outcome before acting again |
-| `unavailable` | A read failed or lost its answer | n/a (a read) | Reading again is safe |
+| `unavailable` | A read failed or lost its answer; on an app route (`appClient` identity, setup, consents, DAO requests), any request did | Nothing was done, or the same request is safe to send again | Read again; on an app route, send the same request again (below) |
 | `unknown` | An action was sent and its outcome is not known (`identity` is the input you sent) | Not known | Never send it under a new identity. Read the record by the kept identity, or send the same identity again where the procedure says that's safe (below) |
 
 **When sending again is safe.** The rule is: the same identity is safe, a new one is not. A call carrying the same
@@ -77,13 +77,18 @@ exceptions:
 `unavailable` and `unknown` may carry `httpStatus` when the answer was a plain HTTP error rather than an encoded one (a
 proxy page, or a 404 for a procedure the host doesn't have). It is a diagnostic: it doesn't prove that nothing ran. A
 `fetch` you pass in that throws (a timeout, a refused redirect, your own origin check) is a lost answer too: `unavailable`
-for a read and `unknown` for an action. A command-line helper can map these to exit codes, for example `0` for `ok`, `2`
+for a read or an app route, and `unknown` for an action on an agent. A command-line helper can map these to exit codes, for example `0` for `ok`, `2`
 for a kind that proves nothing was sent, and `3` for `unknown`, so a script never treats an unknown outcome as a failure
 it may retry.
 
+**Amounts that are `bigint`.** Token balances and amounts in some outputs arrive as `bigint` (oRPC's serializer keeps
+them exact): `overview` holdings' `public` and `confidential`, `unmanaged` rows' `amount`, and the legs and holdings in
+`rebalance` and `sweep` events. `JSON.stringify` throws on a `bigint`, so convert before sending a value on, for example
+to a browser: `JSON.stringify(value, (_key, v) => typeof v === "bigint" ? v.toString() : v)`.
+
 ## What this package version supports
 
-`@multiagency/sdk` 0.5.2, entries:
+`@multiagency/sdk` 0.5.3, entries:
 - `@multiagency/sdk`: `ownerClient` with `OwnerResult`/`OwnerFailure`, `appClient` with `AppRouteResult` and the
   consent and setup texts (`consentMessage`, `setupMessage`), `ownerOutputs` and `OwnerInputs`/`OwnerOutput`
   per procedure, `ownerCapabilities` and `mayCall` (display only), gateway discovery (`gatewayDiscovery`,

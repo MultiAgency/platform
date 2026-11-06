@@ -49,10 +49,13 @@ secret in it. It asks for:
   you switch; then ask for the old one to be revoked.
 - **Revocation:** ask the operator at once if a credential may be exposed (`app-credential revoke <id>`). The operator
   also revokes a credential that's abused or whose domain proof disappears. Revoking a credential doesn't revoke owners'
-  consents; owners revoke those, and a new credential for the same deployment acts under them again.
+  consents: a new credential for the same deployment acts under them again. A consent ends when it expires, when your
+  app revokes it (`consents.revoke`), when the operator does, or when its owner removes the key that signed it (a DAO:
+  when it votes to stop the agent). Owners have no platform page of their own to revoke one yet.
 
 ## What isn't built yet
 
 Self-registration with a wallet, self-issued sandbox and staging credentials, limits per deployment, owner-facing
-verified domains, a hosted sandbox and production app access. The plan and its order are in the workspace's
-`coordination/self-serve-developers-plan.md`.
+verified domains, a hosted sandbox and production app access. Planned order: production app access first; then a hosted
+sandbox and first-hour docs; then developer accounts with self-issued sandbox and staging credentials and limits per
+deployment; then verified domains shown to owners; then production credentials by approval.

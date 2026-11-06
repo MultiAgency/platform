@@ -28,8 +28,9 @@ policy; independently verifying the binding from its plaintext to the signed pay
   per provider docs; reset edges not observed here).
 
 Outside the envelope:
-- The strategy (allocation target, cost cap, per-run ceiling): an application rule bound to the owner's
-  approval by the grant label.
+- The strategy (allocation target, cost cap, per-run ceiling, cash floor): an application rule bound to the owner's
+  approval by the grant label. The provider's policy has no balance floor and rejects unknown fields, so the cash
+  floor is the platform's check alone (see "Cash floor" below).
 - Holdings and their market value. Spending caps never bound exposure.
 - The treasury agent's confidentiality. Per the provider docs (skills `references/policy.md`:51 at
   `2e68162`), `confidential: true` allows shield, unshield and the confidential form of each action; it
@@ -225,8 +226,16 @@ are covered in the Treasury app's `test/browser/strategy.cjs`; they are not depl
 
 ## Recovery limitation
 
-**Provider SDK 0.7.3 (locked in `pnpm-lock.yaml` 2026-10-30; 0.7.2 from 2026-10-28, 0.7.1 from 2026-10-26): documented
-refusals not adopted.** No upgrade changes a classification rule. 0.7.3's JavaScript is identical to 0.7.2's (compared 2026-10-30); its types add the dry-run
+**Provider SDK 0.8.0 (locked in `pnpm-lock.yaml` 2026-11-06; 0.7.3 from 2026-10-30, 0.7.2 from 2026-10-28, 0.7.1 from
+2026-10-26): documented refusals not adopted.** No upgrade changes a classification rule. 0.8.0 accepts any non-empty
+API key (0.7.3 refused at startup any key that isn't `naa_` and 43 characters), for the partner portal's keys: the
+provider retires keys created before the portal with `api_key_retired` (401), and answers `key_verification_unavailable`
+(503) while the portal can't be reached. Neither is a proven refusal here: a send refused either way stays unresolved
+and blocks this agent's sends until reviewed, as `invalid_api_key` does, so each host's key is replaced with a portal key
+before the provider retires the old one ([credential rotation](credential-rotation.md)). When it does was not announced:
+on 2026-11-06 at 20:53Z the live API's `invalid_api_key` detail didn't yet name the portal, as 0.8.0's changelog says
+the new API's does. 0.8.0's other changes (partner quota fields, operation proofs pinned to a witness checkpoint) touch
+nothing read here. 0.7.3's JavaScript is identical to 0.7.2's (compared 2026-10-30); its types add the dry-run
 warning code `policy_transaction_limit_exceeded` and an execution's `deposit_seen_at`, and drop `native_balance` from a
 deletion preview; none of them is read here. 0.7.2 adds `retryAfterSeconds` to `AgentApiError` (not read here) and
 types a budget window's `spent_usd` as nullable: every field is `null` for an uncapped window (provider API #51, its
@@ -792,13 +801,54 @@ strategy (`grantApproves`; a plain `treasury` grant never approves) and within t
 evidence start line names the app (`actor`). Limits: the app chooses when a pass runs, within those bounds, as the
 schedule otherwise would.
 
+### Cash floor (0.5.3, offline-tested)
+
+A strategy may carry `cashFloor: { usd, assets }` (platform#23, Treasury ADR 4): whole USD of the named assets' public
+and confidential balance that the agent's swaps may not take it under. It is bound like the rest of the strategy: the
+grant's label carries the strategy's digest, and a DAO's grant proposal lists the floor among the strategy's terms.
+`authorize` checks it on each planned swap, before its prerequisite shield and again before the swap, under the money
+lock, so it covers the autopilot (scheduled and "Run now"), `executePlan` (the owner's session, `treasury-execute`
+apps and machine credentials, the steward's plans) and proposals. A swap is refused with `cash_floor_exceeded` only
+when it lowers cash and leaves it under the floor. A swap out of a named asset counts its full input, and one into a
+named asset counts only its `minAmountOut`, both at the dispatch's fresh prices, as the per-run ceiling is valued. A
+swap that adds cash is never refused, even while cash stays under the floor: the policy's caps make recovery a series
+of small swaps. A named asset held without a fresh price refuses a swap that would lower cash
+(`valuation_unavailable`). While a floor is set, a swap without a plan-bound valuation is refused for every purpose. A
+proposal is also checked before its claim, its swaps taken in order at the observed book's prices, so a refusal that
+check foresees leaves it approved. The send's own check uses prices read later, so a price move in between can still
+refuse a swap after the claim; the claim is not undone.
+
+Without `cashFloor` the strategy serializes exactly as before, so its digest, grant suffix and grants are unchanged;
+leaving it out means no floor, never a default one. Offline: `test/authorize.test.ts` (the rule's edges),
+`test/autopilot.test.ts` (scheduled tick and "Run now"), `test/treasury-proposals.test.ts` (a `treasury-execute`
+plan, a steward plan, a proposal refused before its claim, a proposal that adds cash while under the floor),
+`test/strategy.test.ts` (digests pinned from before the field, validation), `test/app-dao.test.ts` (the grant
+proposal's terms). Each path test fails with the rule removed. A strategy saved while a swap's provider reads are in
+flight refuses that swap (`strategy_changed`), as before the floor. Not deployed or mainnet-observed.
+
+Limits:
+- The floor bounds this agent's swaps only. The owner's own withdrawals and transfers (including a `pay` under a
+  treasury grant), and money on other agents, can still take cash under it. Payout agents carry no floor.
+- After a swap succeeds, the next swap's check reads balances that are assumed to reflect it, as the plan's
+  feasibility check assumes. The provider's balance timing is not observed here.
+- Valuations use floating point, like the per-run ceiling's individual values. A stablecoin floor is in USD, so a
+  depeg moves it.
+- Rebalance planning doesn't know the floor. If the targets call for cash under it, each autopilot run sends the swaps
+  before the one that would cross it, then records that one refused (`cash_floor_exceeded`), every run, until the
+  targets or the floor change.
+- A server without this change drops `cashFloor` when it saves a strategy (the schema strips unknown fields). Apps
+  check that the strategy `strategy/save` answers carries the floor.
+- Rolling the server back to a version without this change drops a saved floor when the strategy is next loaded. The
+  strategy's digest then changes, so the autopilot and `treasury-execute` plans stop until a new grant, and open
+  proposals are invalidated. The owner's own plans run without the floor. Read from the code, not tested.
+- A DAO's proposals are public, so a DAO's floor is public once its grant proposal is filed.
+
 ### DAO owners through apps (offline- and stack-tested)
 
 A DAO-owned agent reaches an app under a consent the DAO signs by its own vote: a passed proposal calling `v1.signer`,
 found on chain by `findSignature`. Every text the DAO votes on is built by the platform (the consent and setup texts,
 `proposalText`, and the provider's owner intents for creation, the grant, its revocation, a policy edit, freeze and
-unfreeze). The app gets the proposal a member files, never a text or intent to sign
-(coordination/p5-treasury-dao-consent.md). A policy edit through an app may change any field. An off-chain edit
+unfreeze). The app gets the proposal a member files, never a text or intent to sign. A policy edit through an app may change any field. An off-chain edit
 (`destinations`, `withdrawals`, `budget`) is a readable NEP-413 message. An on-chain edit carries the policy encrypted:
 the DAO relies on the provider's preview of it, as a wallet owner does, and nothing here checks the encrypted bytes
 against the policy shown (the user's decision, 2026-11-05). Its public proposal names the changed fields only, never
@@ -842,13 +892,13 @@ Limits:
     autopilot and the consents it will end stay live until then.
 - A DAO's Treasury grant proposal says what it authorizes without a vote each time (autopilot, and plans of apps the DAO
   consented to with `treasury-execute`) and names the strategy it binds: its digest suffix and its terms (targets, cost
-  cap, the autopilot's per-run ceiling). It is a provider owner intent, so no platform page recomputes its hash: members
+  cap, the autopilot's per-run ceiling, and its cash floor when it has one). It is a provider owner intent, so no platform page recomputes its hash: members
   compare it with the `v1.signer` call's `payload_v2`, as the description says.
 - **What a DAO's votes make public.** Sputnik proposals are public and permanent, and so is every check page their
   descriptions link to:
   - the consent and setup terms: app deployment, Organization, agent and scopes
   - each proposal vote's swaps, with their amounts and floors
-  - the strategy a Treasury grant binds: targets, cost cap, minimum leg and the autopilot's per-run ceiling
+  - the strategy a Treasury grant binds: targets, cost cap, minimum leg, the autopilot's per-run ceiling and any cash floor
   - each stop
   An Organization that wants its strategy or swaps private uses a wallet owner, whose signatures stay off chain.
 - The derived key can't be removed, so the wallet's key-removal revocation has no DAO counterpart, and the operator's

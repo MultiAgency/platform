@@ -12,6 +12,64 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
+## 0.5.3
+
+- **Refusal codes from the app routes** (addition): the gateway names why it refused, and `appClient` passes it on as
+  `code` on `refused` and `forbidden`, and on a gateway `forbidden` from an agent call (`OwnerFailure` gains `code` on
+  `session` and `forbidden`). New exports: `APP_GATEWAY_CODES` and `AppGatewayCode`, grouped by what the app does next,
+  and `gatewayDenialCode`. Agent calls' 403s now also declare `scope` (`agent` or `procedure`), and the one 403 that
+  merged three cases is split: `owner_changed`, `agent_changed` (a new consent is needed) and `scope` (no consent covers
+  the procedure). A gateway's coded 4xx on an agent call (for example `signature_invalid` on a relayed proposal
+  signature) is now `refused` with its `code`, no longer `unknown`: nothing reached the agent. Older gateways send no
+  `code`, and a plain answer without one stays as before. Offline-tested.
+- **A gateway stopping during an agent call is no longer `forbidden`** (reclassification): it answered 403 "Access
+  ended before forwarding"; it now answers 503, so a read reads `unavailable` and a mutation `unknown`, with nothing
+  forwarded. `forbidden` with `access_ended` still means the credential or consent ended during the call.
+- **`AbortSignal` on the app routes** (addition): `identity`, `setup`, `consents.*` and `dao*.file`/`state` take
+  `{ signal }` (`AppRouteOptions`); an aborted call is `unavailable`.
+- **Narrowing `owner/prepare`** (addition): `isDaoPrepared` and `isWalletPrepared`, with `AppPrepared`,
+  `AppDaoPrepared` and `AppWalletPrepared`.
+- **Proposal refusal codes** (addition): `PROPOSAL_REFUSAL_CODES` and `ProposalRefusalCode` list every code the
+  proposal procedures send; the treasury-app skill lists the six it was missing.
+- **A cash floor in the strategy** (addition; platform#23, Treasury ADR 4): `strategy/save` accepts an optional
+  `cashFloor: { usd, assets }`, whole USD of the named assets' public and confidential balance. `strategy/get` and the
+  strategy snapshots type it. The platform refuses a swap that would lower that cash and leave it under the floor, on
+  every path a swap is sent: the autopilot (scheduled and "Run now"), `executePlan` and proposals. It never refuses a
+  swap that adds cash. Cash counts the named assets less what sends held for the owner's vote would take from them. A
+  refused plan stops with `cash_floor_exceeded` in its journal. A proposal is also checked before
+  its claim, so a refusal that check foresees is `not_executable` and the proposal stays approved; a price move before
+  the send can still refuse a swap after the claim. Left out, there is no floor, and a strategy saved
+  without one keeps its digest, so existing grants stay valid. A DAO's Treasury grant proposal lists the floor among
+  the strategy's terms, which makes it public. A server that predates the floor drops the field: check that the
+  strategy `strategy/save` answers carries it. Offline-tested; not deployed.
+- **Docs:** the README opens app servers with a quickstart on the platform's local stack (a consent and a read, no
+  wallet or funds), points to the credential request process for staging, and states the stack's prerequisites; its
+  example no longer fails on a holding without a price. getting-started says `unavailable` on any app route means the
+  same request is safe to send again (DAO filings included), and which outputs carry `bigint`. app-server decides
+  consent refusals by `code`. app-access.md's polling advice fits the request limit.
+  treasury-app says where the cash floor holds and where it doesn't. app-access.md and treasury-app say the strategy's
+  per-run ceiling (`autopilot.maxUsd`) binds only autopilot runs, not `treasury-execute` plans.
+
+Platform fixes in the same release, outside the package:
+- **Each hosted agent keeps its own Treasury proposals** (`.proposals/<agent id>/`). Agents of one host shared one
+  directory: an app holding consents on two agents of one Organization read both agents' proposals under either
+  consent, a `requestId` reused on the second agent was refused or withdrew the first agent's proposal, and the 32 open
+  proposals were counted across the host. Records from earlier builds stay where they are and are read by their own
+  agent only ([operations](operations.md)).
+  Offline-tested.
+- **A consent is no longer stored after its deployment's credential was revoked** during the signer's key check, which
+  a later credential under the same name would have inherited.
+- **Shutdown doesn't cut a send:** on SIGTERM an agent starts no new send (refused as busy, before its record) and waits
+  up to 25 s for the one in flight, while its work-order executors drain; a plan or proposal not yet claimed when the
+  stop begins claims nothing, so an approved proposal stays approved. An autopilot run stopped partway reports what it
+  sent. The gateway's Railway config sets `drainingSeconds: 45` (Railway's default kills at once), and invoices' 30.
+- **App access state stays bounded:** consents are read from memory and re-read only when their directory changes (5,000
+  records: 111 ms a call before, 0.2 ms after, measured locally); `app-credential archive-consents` moves consents ended
+  over 30 days ago to `consents-ended/`; the access log is one file a month (`access-YYYY-MM.jsonl`).
+- **Provider SDK 0.8.0** (was 0.7.3): accepts the partner portal's opaque API keys, which replace the provider's
+  retired ones ([credential rotation](credential-rotation.md)); none of its breaking changes touch this code.
+- **Rollback notes corrected:** DAO consent records carry no `filedAt`; only 0.4.1 and earlier refuse them.
+
 ## 0.5.2 (2026-11-05)
 
 - **More owner actions a DAO votes on through an app** (addition): `DAO_APP_ACTIONS` gains `grant_revoke` and

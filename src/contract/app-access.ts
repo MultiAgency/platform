@@ -176,3 +176,28 @@ export const appConsentStored = z.looseObject({ consent: appConsentView });
 /** `POST /apps/v1/setup`: the hosted agent's name and its setup consent (agent ID `unborn`). */
 export const appSetupStored = z.looseObject({ agent: z.string(), consent: appConsentView });
 export const appRevoked = z.looseObject({ revoked: z.literal(true) });
+
+/**
+ * Why the gateway refused an app's request: the `code` on a `refused` or `forbidden` result from the app routes, and on
+ * a gateway `forbidden` from an agent call through them. Older gateways name none. Grouped by what the app does next:
+ * - Fix the request: `invalid_request`, `not_found`, `signature_invalid`, `browser` (call from the server).
+ * - Use another route: `dao_owned` (file it for the DAO's vote), `not_dao` (the wallet signs it), `confirm_page` (the
+ *   owner signs on the platform's page), `not_created` (set the agent up first), `already_created` (ask for a consent).
+ * - Ask the owner (or DAO) to sign again, after reading the agent's identity: `agent_changed`, `owner_changed`,
+ *   `consent_ended`, `consent_revoked`, `no_consent`, `scope` (a consent with that scope), `setup_key` (create with the
+ *   key that signed the setup), `signed_expired`, `vote_lapsed`, `dao_stopped`.
+ * - Not for this app or host: `not_owner`, `not_allowed`, `setup_unavailable`, `access_ended` (its credential or consent
+ *   ended while the request was checked; nothing was stored, filed or forwarded).
+ * - Wait, then file again: `dao_requests_limited` (the deployment's DAO requests waiting for a vote, or filed in the last
+ *   day, are at their limit).
+ * - Proposals: `proposal_unanswered`, `proposal_not_open`, `expires_too_soon`.
+ * - `too_many_consents`: the deployment holds its limit of live consents; revoke unused ones first.
+ * - `setup_failed`: the agent couldn't be set up (the message says why).
+ * - `agent_refused`: the agent refused the DAO's signed verdict; reading the vote again relays the same signature, so
+ *   it may succeed once the agent's state allows it.
+ */
+export const APP_GATEWAY_CODES = ["invalid_request", "not_found", "signature_invalid", "browser", "dao_owned", "not_dao", "confirm_page",
+  "not_created", "already_created", "agent_changed", "owner_changed", "consent_ended", "consent_revoked", "no_consent", "scope", "setup_key",
+  "signed_expired", "vote_lapsed", "dao_stopped", "not_owner", "not_allowed", "setup_unavailable", "access_ended", "proposal_unanswered",
+  "proposal_not_open", "expires_too_soon", "setup_failed", "agent_refused", "too_many_consents", "dao_requests_limited"] as const;
+export type AppGatewayCode = (typeof APP_GATEWAY_CODES)[number];

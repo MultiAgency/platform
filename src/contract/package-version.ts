@@ -1,2 +1,2 @@
 /** The package name and version, independent of the wire manifest version (`payeeContract.version`). */
-export const contractPackage = { name: "@multiagency/sdk", version: "0.5.2" } as const;
+export const contractPackage = { name: "@multiagency/sdk", version: "0.5.3" } as const;

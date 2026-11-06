@@ -8,7 +8,7 @@ metadata:
   purpose: 'Treasury proposals through an app: propose by requestId, the owner signs the exact terms, execute once, recover by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.5.2'
+  library_version: '0.5.3'
 requires:
   - getting-started
   - app-server
@@ -44,7 +44,8 @@ Three consent scopes, each named in the text the owner signs:
   - Every `proposals/*` procedure.
 - `treasury-execute`, only beside `treasury`: `rebalance`, `externalPlan` and `executePlan`, five-minute plans executed
   within the policy without a signature per swap, and only while the owner's live grant binds the strategy they were
-  planned under. `sweep`, `rebalance` and `executePlan` are streams: read them with `app.agent(...).stream(path, input)`.
+  planned under. The autopilot's per-run ceiling (`autopilot.maxUsd`) doesn't bind them: it applies only to autopilot
+  runs, so `maxUsd: 0` doesn't stop these plans. `sweep`, `rebalance` and `executePlan` are streams: read them with `app.agent(...).stream(path, input)`.
 
 ## Where the limits are
 
@@ -58,6 +59,19 @@ proposal's approval is the platform's check, not the provider's. Limits your app
 order, orders per hour) are your app's rules, not a boundary: whoever holds the agent's treasury grant can act without
 them. To change a limit, the owner signs a policy update. What each limit is known to guarantee:
 [enforcement, "The envelope"](https://github.com/MultiAgency/platform/blob/main/docs/enforcement.md#the-envelope).
+
+A cash floor is the one the platform holds for you in the strategy: `cashFloor: { usd, assets }` in `strategy/save`,
+whole USD of the public and confidential balance of `assets` (for example `[USDC]`). The platform refuses a swap that
+would lower that cash and leave it under `usd`, from every path: the autopilot, "Run now", `executePlan`, proposals.
+It never refuses a swap that adds cash, even while cash stays under the floor. A swap out of a named asset counts its
+full input, and one into a named asset counts only its floor (`minAmountOut`), at fresh prices. A refused plan stops
+with `cash_floor_exceeded` in its journal and a `rejected` problem. A proposal is also checked before its claim, at the
+prices read then: a refusal that check foresees is `not_executable` and the proposal stays approved. A price move
+between that check and the send can still refuse a swap after the claim.
+Leave `cashFloor` out for no floor: there is no default, and a strategy saved without one keeps its digest, so the
+grants that bind it stay valid. A floor is part of the strategy, so setting, changing or removing one needs a new grant.
+A server that predates the floor drops the field silently: check that the strategy `strategy/save` answers carries
+your `cashFloor`. It doesn't cover money moved any other way: the owner's own withdrawals and payments, or other agents.
 
 ## Propose, once per requestId
 
@@ -93,10 +107,14 @@ export async function approve(app: ReturnType<typeof appClient>, organization: s
 Result: `{ ok: true, value: proposal }` with `state` `proposed`, then `approved`. The text names each swap with its
 floor (the least it may return), the policy revision and strategy it was proposed under, the expiry and the
 proposal's sha256; the host is the NEP-413 recipient. Approving records the signature and sends nothing. Refusals carry
-`code`: `request_conflict` (another request under that `requestId`), `expiry_invalid`, `too_many_proposals`,
-`not_proposable` (a provider warning, an output the policy forbids, a floor above the quote, cost over the strategy's
-limit, or a balance short: the message says which), `signature_invalid`, `invalidated` (the policy, strategy or agent
-changed since: propose again), `not_open`, `expired`, `withdrawn` (made under a consent that has since ended). The owner
+`code` (`PROPOSAL_REFUSAL_CODES`): `not_found` (no such proposal from this app), `request_conflict` (another request
+under that `requestId`), `expiry_invalid`, `too_many_proposals` (the agent's 32 open proposals), `nothing_to_propose`
+(`legs: "strategy"` picked no leg worth its cost), `not_proposable` (a provider warning, an output the policy forbids, a
+floor above the quote, cost over the strategy's limit, or a balance short: the message says which),
+`signature_invalid`, `already_approved` (another signature approved it), `policy_not_in_force` (the policy isn't
+enforced now; the approval wasn't recorded), `invalidated` (the policy, strategy or agent changed since: propose
+again), `not_open`, `expired`, `withdrawn` (made under a consent that has since ended). Executing adds `not_approved`
+and `not_executable` (not now: the message says why, and the proposal stays approved unless it says otherwise). The owner
 rejects with `proposalText(proposal, "reject")` and `proposals/reject`; your app withdraws with `proposals/withdraw`.
 
 ## Execute once, and follow it
@@ -157,7 +175,8 @@ of reach by then: execution is refused `not_executable` and the proposal stays a
 
 Unattended swaps are the DAO's grant vote: the `treasury` grant, prepared with `owner/prepare` and `signer: "dao"`,
 binds the saved strategy. Its proposal says it authorizes swaps without a vote each time and names that strategy (its
-digest suffix, targets, cost cap and the autopilot's per-run ceiling); show members the same terms from `strategy/get`
+digest suffix, targets, cost cap, the autopilot's per-run ceiling and any cash floor, which the proposal makes
+public); show members the same terms from `strategy/get`
 before they vote. Under it, autopilot runs once your app turns it on (`autopilot/enable`), and with `treasury-execute`
 (only if the DAO voted it into its consent) your plans run. Saving another strategy needs a new grant vote, and
 invalidates open proposals.

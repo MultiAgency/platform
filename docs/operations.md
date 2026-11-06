@@ -21,12 +21,22 @@ machine credentials; `.app-access/` holds app service credentials (hashed), owne
 never delete: losing one lets that consent be stored again), held confirm-page actions (`confirm/`, one record per link,
 named by its token's hash, and a `.claim` file once a submission was made; an older build ignores them), DAO requests
 (`dao-requests/`, one record per request a DAO votes on: consent, setup, proposal vote or stop; additive, no migration;
-an earlier build can't read some of them and 0.4.1 never looks, see app access, "Rolling back") and the access log; run `pnpm app-credential check-keys`
-on a schedule so a removed owner key ends its consents even when no call observes it. Consents belong to the deployment
+an earlier build can't read some of them and 0.4.1 never looks, see app access, "Rolling back"), ended consents' records
+(`consents-ended/`, from 0.5.3) and the access log, one file a month (`access-YYYY-MM.jsonl`, from 0.5.3; earlier builds
+wrote `access.jsonl`). Run `pnpm app-credential check-keys` on a schedule so a removed owner key ends its consents even
+when no call observes it, and `pnpm app-credential archive-consents` (weekly is enough) so ended consents' records leave
+the directory every app call reads. A month's access log is complete once the month ends: compress or move it off the
+volume then, never a current one. An earlier build ignores `consents-ended/`, and its consents stay ended there. Consents belong to the deployment
 name: a credential issued under an existing deployment name acts on all of its consents, so use a new name for an
-app that shouldn't inherit them; `.hosted/` the hosted agent registry; `.proposals/` holds Treasury proposals (each proposal, the
-owner's approval, and one final record: claimed for execution with its plan, or closed; never delete: a lost final record
-lets an approved proposal execute again; an older build ignores the directory, and its open proposals wait unexecuted). Stop writers before copying state; never start the destination before stopping the
+app that shouldn't inherit them; `.hosted/` the hosted agent registry; `.proposals/<agent id>/` holds each agent's Treasury proposals
+(each proposal, the owner's approval, and one final record: claimed for execution with its plan, or closed; never
+delete: a lost final record lets an approved proposal execute again; a build before 0.4.0 ignores the directory, and its
+open proposals wait unexecuted). Builds before 0.5.3 kept every agent's proposals directly in `.proposals/`, shared by
+the hosted agents of one host. From 0.5.3 those stay where they are, never moved: each agent reads its own there (by the
+agent id each records) and writes their approval and final record beside them, and writes new proposals in its own
+directory. Rolling back to a build before 0.5.3 reads the older proposals as before, but not the newer ones: those wait
+unexecuted, and a `requestId` an app sends again then makes a new proposal there, which needs the owner's approval
+again. Rolling forward, an agent's own directory wins over such a duplicate. Stop writers before copying state; never start the destination before stopping the
 source. The lease coordinates processes on one host only.
 
 ## Work-order executors
@@ -127,7 +137,13 @@ here is migrated yet; deploys after that date need it. The files every deploy us
 | `deploy/railway.gateway.json` | the root `railway.json` of the `dao` package (`scripts/package-shared-frontends.mjs`) | `dao` (proto.multiagency.ai) |
 | `deploy/railway.gateway.json` | the root `railway.json` of the `platform` package (`scripts/package-platform.mjs`) | platform staging (api.dev.multiagency.ai); production would use the same package |
 
-Each selects its Dockerfile, one replica, healthcheck `/health` and restart on failure (up to 5 retries).
+Each selects its Dockerfile, one replica, healthcheck `/health` and restart on failure (up to 5 retries). Each also
+sets `drainingSeconds` (45 for the gateway, 30 for invoices): Railway's default sends SIGKILL right after SIGTERM, which
+would cut a send in flight and leave it unresolved. On SIGTERM an agent server starts no new send and waits up to 25
+seconds for the one running (`stopSending`, `moneyIdle` in `src/lock.ts`); the gateway allows its agents 30 seconds,
+then up to 5 more (architecture.md). With a volume, Railway never runs the old and new deployment together
+(docs.railway.com/reference/volumes, read 2026-11-06), so a deploy has a short downtime and no second executor. Whether
+`railway config migrate` keeps `drainingSeconds` is unverified.
 `test/build-context.test.ts` pins the Dockerfile selection and the packaging. The Infrastructure as Code equivalent and
 whether `railway config migrate` reproduces these settings are unverified.
 

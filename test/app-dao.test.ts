@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { accessLogText } from "./fixtures/harness.js";
 import { createServer, request, type Server } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { writeAtomic } from "../src/synced.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -210,7 +212,7 @@ test("the consent is stored once the DAO's key signs its exact hash; it then rea
 
   assert.equal((await call(port, `/apps/v1/consents/${signed.body.consent.id}`, "DELETE", staging)).status, 200);
   assert.equal((await call(port, rpc("overview"), "POST", staging, {})).status, 403, "revoked");
-  const log = readFileSync(join(".app-access", "access.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+  const log = accessLogText().trim().split("\n").map(line => JSON.parse(line));
   assert.deepEqual(log.filter(e => e.event !== "call").map(e => e.event), ["dao-consent-filed", "consent", "revoke"]);
   assert.equal(log.find(e => e.event === "consent").signer, "dao");
 });
@@ -502,6 +504,11 @@ test("a DAO that votes treasury-execute into its consent lets the app run plans;
   assert.ok(grant.includes(`Strategy ${suffix}: targets USDC 50%, wNEAR 25%, ETH 25%; each swap costs at most 2.5% of its input`), grant);
   assert.match(grant, /autopilot runs every 60 min and executes at most \$0 per run/);
   assert.doesNotMatch(grant, /dashboard/, "a DAO voting on an app's request has no dashboard to check it on");
+  assert.doesNotMatch(grant, /cash floor/, "without a floor the terms read as before");
+  const { ASSETS } = await import("../src/policy.js");
+  const floored = { ...DEFAULT_STRATEGY, cashFloor: { usd: 500, assets: [ASSETS.USDC] } };
+  const withFloor = proposalDescription({ ...base, label: `treasury:${strategyLabelSuffix(floored)}`, strategy: floored });
+  assert.match(withFloor, /per run; cash floor \$500 in USDC: a swap that would take these under it is refused, one that adds to them never is/);
   const changed = proposalDescription({ ...base, label: `treasury:${suffix}`, strategy: { ...DEFAULT_STRATEGY, maxCostBps: 999 } });
   assert.match(changed, /the saved strategy changed after this grant was prepared/, "terms only for the strategy the label binds");
   assert.match(proposalDescription({ ...base, label: `treasury:${suffix}` }), /its terms couldn't be read when this was filed/);
@@ -723,7 +730,7 @@ test("the stop page names the DAO, reads nothing for a pair not configured here,
   assert.equal((await page(port, "/confirm/dao/stop/treasury")).status, 404, "the old path that named only the agent");
   state.policyDown = false;
   assert.equal((await page(port, STOP, "HEAD")).status, 405, "a HEAD files nothing");
-  assert.equal(readFileSync(join(".app-access", "access.jsonl"), { encoding: "utf8", flag: "a+" }), "", "nothing logged");
+  assert.equal(accessLogText(), "", "nothing logged");
   const keys: string[] = [];
   state.mayOpen = key => { keys.push(key); return true; };
   await page(port, STOP);
@@ -916,11 +923,11 @@ test("under a DAO consent, owner actions need treasury, consents of another sign
   // Votes are filed only under a DAO consent naming the agent's current ID.
   const treasury = await consented();
   const record = JSON.parse(readFileSync(join(dir, `${treasury}.json`), "utf8"));
-  writeFileSync(join(dir, `${treasury}.json`), JSON.stringify({ ...record, agentId: "earlier" }));
+  writeAtomic(join(dir, `${treasury}.json`), JSON.stringify({ ...record, agentId: "earlier" }));
   state.replies["/rpc/proposals/get"] = { status: 200, json: PROPOSAL };
   const ask = () => call(port, "/apps/v1/dao-votes", "POST", staging, { organization: "org_1", agent: "treasury", proposal: "p-1", verdict: "approve" });
   assert.equal((await ask()).status, 403, "a consent for an earlier agent ID");
-  writeFileSync(join(dir, `${treasury}.json`), JSON.stringify(record));
+  writeAtomic(join(dir, `${treasury}.json`), JSON.stringify(record));
 
   // The relay re-checks the DAO's derived key against the one the vote was filed with.
   const ballot = (await ask()).body.request;

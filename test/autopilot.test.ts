@@ -11,7 +11,7 @@ import { dismiss, post, readInbox } from "../src/inbox.js";
 import { prepareInvoice } from "../src/invoice-store.js";
 import { blocksDispatch, readOps, opsLog } from "../src/ops.js";
 import { ASSETS, treasuryPolicy } from "../src/policy.js";
-import { loadStrategy } from "../src/strategy.js";
+import { loadStrategy, saveStrategy } from "../src/strategy.js";
 import { strategyDigest, strategyLabelSuffix } from "../src/strategy-digest.js";
 import { enableSchedule, saveReviewedStrategy } from "../src/strategy-controls.js";
 import { prepare, submit } from "../src/owner-intents.js";
@@ -487,3 +487,23 @@ test("a warned leg drops out like a costly one: the rest of the rebalance still 
   assert.match(report, /swaps left out: .*policy_asset_denied/);
   assert.match(report, /step 1: SUCCESS/);
 });
+
+for (const trigger of ["schedule", "operator"] as const) {
+  const name = trigger === "schedule" ? "a scheduled tick" : "Run now";
+  test(`${name} sends no swap that would take the strategy's cash under its floor`, async () => {
+    limit(100);
+    // 100 USDC; the rebalance spends 50 of it in two swaps. A $60 floor refuses the one that would cross it.
+    saveStrategy({ ...loadStrategy(), cashFloor: { usd: 60, assets: [ASSETS.USDC] } });
+    await tick(trigger);
+    assert.ok(sends.length <= 1, "at most the swap that keeps cash at or above the floor is sent");
+    assert.ok(book[ASSETS.USDC]!.confidential >= 60n);
+    assert.equal(readOps().at(-1)?.refused, "cash_floor_exceeded");
+  });
+  test(`${name} sends a rebalance that lands exactly on the strategy's cash floor`, async () => {
+    limit(100);
+    saveStrategy({ ...loadStrategy(), cashFloor: { usd: 50, assets: [ASSETS.USDC] } });
+    await tick(trigger);
+    assert.equal(sends.length, 2);
+    assert.equal(book[ASSETS.USDC]!.confidential, 50n);
+  });
+}

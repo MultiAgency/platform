@@ -21,6 +21,8 @@ test("every Dockerfile names what it runs: no root default, and each config sele
   assert.match(pack, /copy\(join\(root, 'Dockerfile\.gateway'\), join\(output, 'Dockerfile'\)\)/);
   assert.match(pack, /copy\(join\(root, 'deploy\/railway\.gateway\.json'\), join\(output, 'railway\.json'\)\)/);
   assert.equal(JSON.parse(readFileSync("deploy/railway.gateway.json", "utf8")).build.dockerfilePath, "Dockerfile");
+  // Railway's default is SIGKILL at once; the gateway needs 30 s for its children, then up to 5 s more (architecture.md).
+  assert.ok(JSON.parse(readFileSync("deploy/railway.gateway.json", "utf8")).deploy.drainingSeconds > 35, "deploy grace exceeds the gateway's shutdown bound");
 });
 
 test("every gateway configuration the operations and staging guides deploy is in a package (the prototype's or the platform's)", () => {

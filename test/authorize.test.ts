@@ -41,8 +41,8 @@ const pay = (recipient = "payee.near", amount = USDC(1), asset: string = ASSETS.
 
 function facts(purpose: Purpose, change: Record<string, unknown> = {}): never {
   const base = {
-    treasury: { ...common(treasury, "treasury:anything"), plan: null, strategy, tokens },
-    autopilot: { ...common(treasury, `treasury:${strategyLabelSuffix(strategy)}`), plan: null, strategy, tokens, submittedSwapValues: [] },
+    treasury: { ...common(treasury, "treasury:anything"), plan: null, strategy, tokens, cash: null },
+    autopilot: { ...common(treasury, `treasury:${strategyLabelSuffix(strategy)}`), plan: null, strategy, tokens, cash: null, submittedSwapValues: [] },
     payout: { ...common(payout, "payout"), available: USDC(100), heldPayouts: [] },
     invoice: { ...common(payout, "invoices"), available: USDC(100) },
     approval: common(payout, null),
@@ -235,4 +235,60 @@ test("automatic swaps require known cumulative plan value, while manual swaps an
   }
   assert.equal(code("autopilot", swap()), "valuation_unavailable", "no plan cannot imply an unused ceiling");
   assert.equal(code("autopilot", shield, { submittedSwapValues: null }), "ok", "a sweep does not consume the swap ceiling");
+});
+
+test("a cash floor refuses a swap that lowers cash and leaves it under the floor, never one that adds cash", () => {
+  const usdcFloor = { usd: 100, assets: [ASSETS.USDC] };
+  const floored = (cashFloor: { usd: number; assets: string[] } | undefined) => cashFloor ? { ...strategy, cashFloor } : strategy;
+  const withEth = timedPrices([
+    { asset_id: ASSETS.USDC, symbol: "USDC", decimals: 6, price: 1 },
+    { asset_id: ASSETS.wNEAR, symbol: "wNEAR", decimals: 24, price: 2 },
+    { asset_id: ASSETS.ETH, symbol: "ETH", decimals: 18, price: 4 },
+  ], NOW) as Facts["treasury"]["tokens"];
+  // Spends $10 of USDC for at least $9.80 of wNEAR; buys at least $1.96 of USDC with $2 of wNEAR; $2 of wNEAR for $1.96 of ETH.
+  const spend = { type: "swap" as const, from: ASSETS.USDC, to: ASSETS.wNEAR, amount: USDC(10), amountOut: NEAR(5), minAmountOut: (49n * 10n ** 23n).toString(), costBps: 200 };
+  const buy = { type: "swap" as const, from: ASSETS.wNEAR, to: ASSETS.USDC, amount: NEAR(1), amountOut: USDC(2), minAmountOut: String(1_960_000), costBps: 200 };
+  const neither = { type: "swap" as const, from: ASSETS.wNEAR, to: ASSETS.ETH, amount: NEAR(1), amountOut: String(5n * 10n ** 17n), minAmountOut: String(49n * 10n ** 16n), costBps: 200 };
+  type SwapLeg = { type: "swap"; from: string; to: string; amount: string; amountOut: string; minAmountOut: string; costBps: number };
+  const judge = (purpose: "treasury" | "autopilot", leg: SwapLeg, cashFloor: { usd: number; assets: string[] } | undefined,
+    cash: Record<string, string> | null, change: Record<string, unknown> = {}, action: Action = swap()) => {
+    const s = floored(cashFloor);
+    const plan = { agentId: process.env.AGENT_ID!, expiresAt: new Date(NOW + 60_000).toISOString(),
+      policyRevision: 11, policyDigest: mandateDigest(treasury), strategyDigest: strategyDigest(s) } as Plan;
+    const label = purpose === "autopilot" ? { grant: grant(`treasury:${strategyLabelSuffix(s)}`) } : {};
+    return code(purpose, action, { plan: { plan, leg }, strategy: s, tokens: withEth, cash, ...label, ...change });
+  };
+  const usdc = (whole: number) => ({ [ASSETS.USDC]: USDC(whole) });
+  const shield: Action = { method: "shield", request: { asset: ASSETS.USDC, amount: USDC(10) } };
+  for (const purpose of ["treasury", "autopilot"] as const) {
+    // Lowers cash from above the floor to under it: refused, before its prerequisite shield as well as before the swap.
+    assert.equal(judge(purpose, spend, usdcFloor, usdc(105)), "cash_floor_exceeded", purpose);
+    assert.equal(judge(purpose, spend, usdcFloor, usdc(105), {}, shield), "cash_floor_exceeded", purpose);
+    // Lowers cash while already under the floor: refused.
+    assert.equal(judge(purpose, spend, usdcFloor, usdc(90)), "cash_floor_exceeded", purpose);
+    // Lands exactly on the floor, or stays above it: allowed.
+    assert.equal(judge(purpose, spend, usdcFloor, usdc(110)), "ok", purpose);
+    assert.equal(judge(purpose, spend, usdcFloor, usdc(500)), "ok", purpose);
+    // Adds cash while under the floor: allowed, and needs no cash reading.
+    assert.equal(judge(purpose, buy, usdcFloor, usdc(50)), "ok", purpose);
+    assert.equal(judge(purpose, buy, usdcFloor, null), "ok", purpose);
+    // Between two named assets, only the swap's cost lowers cash.
+    const both = { usd: 100, assets: [ASSETS.USDC, ASSETS.wNEAR] };
+    assert.equal(judge(purpose, spend, both, { ...usdc(80), [ASSETS.wNEAR]: NEAR(11) }), "ok", purpose);
+    assert.equal(judge(purpose, spend, both, { ...usdc(80), [ASSETS.wNEAR]: (1005n * 10n ** 22n).toString() }), "cash_floor_exceeded", purpose);
+    // Between two assets outside the floor: cash doesn't change.
+    assert.equal(judge(purpose, neither, usdcFloor, usdc(0)), "ok", purpose);
+    // Cash that can't be valued refuses a swap that would lower it; an asset not held needs no price.
+    assert.equal(judge(purpose, spend, usdcFloor, null), "valuation_unavailable", purpose);
+    const usdcEth = { usd: 100, assets: [ASSETS.ETH, ASSETS.USDC] };
+    const staleEth = withEth.map(t => t.asset_id === ASSETS.ETH ? { ...t, price_expires_at: new Date(NOW).toISOString() } : t);
+    assert.equal(judge(purpose, spend, usdcEth, { ...usdc(500), [ASSETS.ETH]: String(10n ** 18n) }, { tokens: staleEth }), "valuation_unavailable", purpose);
+    assert.equal(judge(purpose, spend, usdcEth, { ...usdc(500), [ASSETS.ETH]: "0" }, { tokens: staleEth }), "ok", purpose);
+    // Without a floor, nothing changes.
+    assert.equal(judge(purpose, spend, undefined, null), "ok", purpose);
+  }
+  // Under a floor, a swap without a plan-bound valuation is refused for every purpose; without one, a manual swap isn't.
+  assert.equal(code("treasury", swap(), { strategy: floored(usdcFloor) }), "valuation_unavailable");
+  assert.equal(code("treasury", swap()), "ok");
+  assert.equal(code("treasury", shield, { strategy: floored(usdcFloor) }), "ok", "a sweep's shield doesn't move cash");
 });

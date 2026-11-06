@@ -154,12 +154,14 @@ in the SDK builds the transfer), for a wallet owner the linked treasury account 
 its swaps run only after the owner signs each proposal's exact terms (`proposalText`), a check the platform makes, not
 the provider. With `treasury-execute` as well, it can prepare and execute plans within the policy and the strategy's
 cost limit without a signature per swap, only while the owner's live grant binds the plan's strategy
-([enforcement](enforcement.md#treasury-proposals-offline--and-stack-tested)). Scopes are separate: a consent carries each it needs. Agreements, invoices, compensation and work-order records are not
+([enforcement](enforcement.md#treasury-proposals-offline--and-stack-tested)). The strategy's per-run ceiling
+(`autopilot.maxUsd`) binds only autopilot runs (purpose `autopilot`, `src/authorize.ts`); these plans are judged as
+purpose `treasury`, so `maxUsd: 0` doesn't stop them. Scopes are separate: a consent carries each it needs. Agreements, invoices, compensation and work-order records are not
 reachable. Each
-consent, call and revocation is appended to `.app-access/access.jsonl`.
+consent, call and revocation is appended to `.app-access/access-YYYY-MM.jsonl`, one file per month (UTC; builds before 0.5.3 wrote one `access.jsonl`).
 
 DAO owners: a DAO's consent is signed by its own vote (`POST /apps/v1/dao-consents`, then `GET /apps/v1/dao-consents/<hash>`
-until the DAO's signature is found; coordination/p5-treasury-dao-consent.md). It carries only `read`, `treasury` and,
+until the DAO's signature is found). It carries only `read`, `treasury` and,
 as the DAO's opt-in, `treasury-execute`, and each call re-reads that the agent is still owned by the DAO's derived
 account. The DAO's grant vote is what authorizes unattended swaps (autopilot, and with `treasury-execute` the app's
 plans), within the strategy it binds and the DAO's signed policy; the grant's proposal says so. The platform authorizes the app, not a member: the app gates its own members with the
@@ -201,9 +203,9 @@ on 2026-11-05, where the DAO funded its agent with the calls `fundingTransaction
 
 Rolling back: records written from 0.5.0 on carry fields that earlier builds refuse to read, and one refused record
 makes every app route answer an error:
-- **DAO consents** in `.app-access/consents/` carry `signer: "dao"` and `filedAt`. Every earlier build refuses
-  `filedAt`, and 0.4.1 and earlier also refuse `signer`. Move the files whose record has `"signer":"dao"` out of
-  `consents/` before rolling back (losing DAO access only). Wallet consents are written as before and stay readable.
+- **DAO consents** in `.app-access/consents/` carry `signer: "dao"`, which 0.4.1 and earlier refuse (0.5.0 and later
+  read it). Before rolling back to 0.4.1 or earlier, move the files whose record has `"signer":"dao"` out of
+  `consents/` (losing DAO access only). Wallet consents are written as before and stay readable.
 - **DAO requests** in `.app-access/dao-requests/`: a stop's `lapsed` and a consent request's `stoppedBy` are refused by
   088239e and before. Remove those fields, or keep the directory out of the earlier build (0.4.1 never reads it). Stop
 proposals filed by those earlier builds link `/confirm/dao/stop/<agent>`, which now answers 404: open
@@ -221,8 +223,10 @@ resends, and nothing an app calls is needed for that. An app follows that work t
   - `owner/status` by `correlationId` for an owner action
 
   It never resends while that record reads `unknown`, `executing` or `processing`. `recover` stays owner-session only
-  (platform#14). Polling `unresolved` every 10–30 seconds is enough, and keeps within the deployment's 1,200 calls an
-  hour.
+  (platform#14). Poll only while a record is unresolved, and budget the deployment's polls as a whole:
+  its 1,200 calls an hour are 20 a minute across all its agents and every other call. One poll a minute per open record
+  fits about 15 agents with room for other calls; every 10 seconds fits only 3. On `rate_limited`, wait
+  `retryAfterSeconds`.
 
 The limit is per app credential, 1,200 requests an hour across every owner and Organization of the deployment. Over it,
 the gateway answers 429 before forwarding anything, with `Retry-After` (delay-seconds until the oldest request leaves
@@ -233,7 +237,7 @@ keeps its earlier kind: `refused` on the app routes, `unavailable` or `unknown` 
 Offline-tested (`test/app-access.test.ts`, `test/contract-owner.test.ts`).
 
 DAO requests are bounded per deployment: at most 64 waiting for a vote and 256 filed a day. A finished one (completed,
-ended by a stop, lapsed with no signature found, or past what it signed) is removed 30 days later; `access.jsonl` keeps
+ended by a stop, lapsed with no signature found, or past what it signed) is removed 30 days later; the access log keeps
 its history, and reading it after that answers 404. A signature found once is recorded and completes the request on a
 later read until what the DAO signed expires (the consent's, setup's or proposal's `expiresAt`), never after.
 

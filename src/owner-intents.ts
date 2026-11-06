@@ -394,6 +394,8 @@ const strategyTerms = (strategy: Strategy) => [
   `each swap costs at most ${strategy.maxCostBps / 100}% of its input`,
   `drift under $${strategy.minLegUsd} is left alone`,
   `autopilot runs every ${strategy.autopilot.everyMin} min and executes at most $${strategy.autopilot.maxUsd} per run`,
+  ...(strategy.cashFloor ? [`cash floor $${strategy.cashFloor.usd} in ${strategy.cashFloor.assets.map((asset) => assetNames.get(asset) ?? asset).join(" and ")}: ` +
+    "a swap that would take these under it is refused, one that adds to them never is"] : []),
 ].join("; ");
 
 /**

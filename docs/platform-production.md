@@ -10,14 +10,17 @@ unchanged by it.
 
 | Item | State | What it needs |
 |---|---|---|
-| A release candidate on the commit to ship | 0.5.2's candidate is the one to ship | Every gate passed on Node 24; record its digest |
-| The same build observed on staging | staging runs earlier builds (`3c085b20`) | Redeploy staging from the same candidate first; read-only checks, then one consent and one read on staging |
-| Its own credentials | none issued | A new provider key for production from the partner account, a new FastNEAR key and a new `SESSION_SECRET`. None reused from `dao`, so the outstanding [credential rotation](credential-rotation.md) for `dao` doesn't touch this service; that rotation still needs doing |
+| A release candidate on the commit to ship | 0.5.3 is the build to ship: it has the shutdown grace, consent archiving, the monthly access log and provider SDK 0.8.0 (needed for a partner portal key) | 0.5.3's candidate, every gate passed on Node 24; record its digest |
+| The same build observed on staging | staging runs 0.5.2 (`5975d56f`, 2026-11-06; read-only checks passed) | Redeploy staging from 0.5.3's candidate, run the read-only checks, then one consent and one read |
+| Its own credentials | none issued | A new provider key for production from the partner portal (keys from before the portal are being retired: [credential rotation](credential-rotation.md)), a new FastNEAR key and a new `SESSION_SECRET`. None reused from `dao`, so the outstanding [credential rotation](credential-rotation.md) for `dao` doesn't touch this service; that rotation still needs doing |
 | Railway config | `railway.json` still works until 2026-12-01 | A first deploy before then works as staging's did; any deploy after needs the migration ([operations](operations.md#railway-config-as-code-ends-2026-12-01)) |
 | Treasury setup on production | `deploy/platform.json` sets up Payables only | A decision: add `treasury` to `appSetup` (DAO setup through apps is mainnet-observed on staging), or keep Payables only at first |
 | Developer credentials | operator-issued ([developer access](developer-access.md)) | The first production credentials: the dashboard's and Treasury's, then requests by approval |
 | Rollback | a new service, so nothing to roll back to | Stop or remove the service; its state stays on its own volume. For later releases, redeploy the previous image; never delete or restore backend records |
-| Monitoring | `pnpm smoke` reads proto and invoices | Add `api.multiagency.ai`'s read-only checks to it, or run them after each deploy |
+| Monitoring | `pnpm smoke` reads proto and invoices | Add `api.multiagency.ai`'s read-only checks to it, or run them after each deploy. `/health` is the gateway's liveness only: it stays 200 while an agent restarts or crash-loops, so watch the service's logs and restarts too |
+| Memory | not sized | Each hosted agent is its own Node process: loading one agent's code took about 237 MB RSS (measured 2026-11-06 on macOS arm64, not on Railway). At the cap of 32 hosted agents that's about 7.6 GB beside the gateway. Set the service's memory limit for the agents you expect, and watch its usage on staging first |
+| State growth | ended consents and the access log grow with use | Run `pnpm app-credential archive-consents` weekly and `check-keys` on a schedule; move each finished month's `access-YYYY-MM.jsonl` off the volume; watch the volume's use (a full `/data` refuses every send and app call) |
+| Shutdown grace | `drainingSeconds: 45` in the package's `railway.json` | Nothing: an agent stops sending on SIGTERM and waits up to 25 s for a send in flight. Check after the first deploy that the old deployment stopped cleanly (its log shows no "still running" line) |
 
 ## Steps
 

@@ -192,13 +192,14 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 - what the provider answers for a DAO-owned hosted agent
 
 **Before starting**
-- **Staging runs 0.5.1's `platform` package with the proposal-hash fix.** Since about 2026-11-05T04:12Z: candidate
-  `956a0e55`, commit `8ce51c2`, Railway deployment `3c085b20`, image `sha256:1870fb68…`, with
-  `deploy/platform-staging.json`, whose `appSetup` lists `treasury`. Before that, 0.5.1 from about 02:53Z (candidate
+- **Staging runs 0.5.2's `platform` package.** Since 2026-11-06 (checked at 15:44Z): candidate `d33f8f9b`, commit
+  `ce5fec6`, Railway deployment `5975d56f`, with `deploy/platform-staging.json`, whose `appSetup` lists `treasury`.
+  Before that, 0.5.1 with the proposal-hash fix from about 2026-11-05T04:12Z (candidate `956a0e55`, commit `8ce51c2`,
+  deployment `3c085b20`, image `sha256:1870fb68…`), 0.5.1 from about 02:53Z (candidate
   `2b941c69`, commit `2223d11`, deployment `f417fc3a`, image `sha256:9fa854c9…`), and 0.5.0 from 2026-11-04T21:46Z
   (candidate `0263df8e`, commit `6ba0831`, deployment `bc635cb7`, image `sha256:5994c8f6…`).
 
-  Read-only checks right after each deploy (both passed):
+  Read-only checks right after each deploy (all passed):
   - `/health` gives 200.
   - `/apps/v1/agents/x` gives 401 without a credential, and 403 with a browser `Origin`.
   - `/`, `/gw/challenge` and `/a/x/access` give 404.

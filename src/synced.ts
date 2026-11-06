@@ -1,4 +1,4 @@
-import { closeSync, linkSync, mkdirSync, fstatSync, fsyncSync, openSync, readSync, statSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, linkSync, mkdirSync, fstatSync, fsyncSync, openSync, readFileSync, readSync, statSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 /** Persist one directory entry; filesystem sync failures propagate. */
@@ -43,6 +43,27 @@ export function createOnce(path: string, text: string): boolean {
     throw error;
   } finally { rmSync(tmp, { force: true }); }
   syncParent(path);
+  return true;
+}
+
+/**
+ * Moves a file into another directory without ever replacing one: linked into place, then removed. Run again after a
+ * crash it finishes the move. A different file already at the destination throws; nothing at the source returns false.
+ */
+export function moveOnce(from: string, to: string): boolean {
+  try { linkSync(from, to); }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return false;
+    if (code !== "EEXIST") throw error;
+    let same: boolean;
+    try { same = readFileSync(from).equals(readFileSync(to)); }
+    catch (read) { if ((read as NodeJS.ErrnoException).code === "ENOENT") return false; throw read; }
+    if (!same) throw new Error(`${to} already exists and differs from ${from}; investigate before continuing`);
+  }
+  syncParent(to);
+  rmSync(from, { force: true });
+  syncParent(from);
   return true;
 }
 

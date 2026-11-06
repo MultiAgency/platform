@@ -116,7 +116,7 @@ if (!stored.ok) throw new Error(`consent: ${JSON.stringify(stored)}`);
 // 2. Call the agent within that consent.
 const overview = await app.agent("org_1", agent).call("overview");
 if (!overview.ok) throw new Error(`overview: ${JSON.stringify(overview)}`);
-console.log("agent", overview.value.agentId, "holds", overview.value.book.map(h => `${h.symbol} ${h.usd.toFixed(2)} USD`).join(", "));
+console.log("agent", overview.value.agentId, "holds", overview.value.book.map(h => `${h.symbol} ${h.usd === null ? "(no price)" : `${h.usd.toFixed(2)} USD`}`).join(", "));
 ```
 
 Run it with the stack's certificate trusted:

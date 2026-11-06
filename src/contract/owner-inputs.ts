@@ -8,7 +8,12 @@ import type { depositInput, executePlanInput, ownerAction, ownerPrepareInput, ow
  * (owner-contract.ts) take their types from its schemas; test/contract-owner.test.ts proves each type equals the router's.
  */
 type ReviewedPolicy = { revision: number; digest: string };
-type Strategy = { targetBps: Record<string, number>; minLegUsd: number; maxCostBps: number; autopilot: { everyMin: number; maxUsd: number } };
+/**
+ * `cashFloor`: whole USD the agent's swaps may not take the public and confidential balance of `assets` under. Left
+ * out, there is no floor. A server that predates the floor drops it: check the saved strategy `strategy/save` answers.
+ */
+type Strategy = { targetBps: Record<string, number>; minLegUsd: number; maxCostBps: number; autopilot: { everyMin: number; maxUsd: number };
+  cashFloor?: { usd: number; assets: string[] } };
 /** An owner action to prepare for signature, as the contract accepts it. */
 export type OwnerAction = z.input<typeof ownerAction>;
 type In<T extends z.ZodType> = z.input<T>;

@@ -3,7 +3,7 @@ import { retryAfterSeconds } from "./retry-after.js";
 import type { z } from "zod";
 import { ownerOutputs, ownerStreams } from "./owner-outputs.js";
 import type { OwnerInputs } from "./owner-inputs.js";
-import { gatewayDenialScope, type GatewayDenialScope } from "./gateway.js";
+import { gatewayDenialCode, gatewayDenialScope, type GatewayDenialScope } from "./gateway.js";
 import { READS } from "./permissions.js";
 
 export type OwnerProcedure = keyof typeof ownerOutputs & keyof OwnerInputs;
@@ -18,9 +18,11 @@ export type OwnerCallOptions = { signal?: AbortSignal };
 /**
  * Recovery is decided by `kind`, never by message text.
  * - `session` (401) / `forbidden` (403): from the status alone, with the `source` that refused. A gateway denial adds the `scope` it declares (no
- *   session, no access to this agent, or no permission for this procedure); without one, the caller picks its default.
+ *   session, no access to this agent, or no permission for this procedure), and through `/apps/v1` its `code`
+ *   (`AppGatewayCode`); without them, the caller picks its default.
  * - `unresolved` / `busy`: refused before anything was sent; follow existing operations, then try again.
- * - `refused`: the platform refused before sending (with `code` when it names a reason).
+ * - `refused`: the platform refused before sending (with `code` when it names a reason), the agent or, through
+ *   `/apps/v1`, the gateway before forwarding (a 4xx naming an `AppGatewayCode`).
  * - `provider`: the provider refused or failed; check the recorded outcome before retrying.
  * - `rate_limited` (429): the gateway's request limit refused the call before forwarding it; nothing happened. Send the
  *   same call again after `retryAfterSeconds` when the gateway gave it. A 429 that isn't the gateway's JSON answer (a
@@ -32,8 +34,8 @@ export type OwnerCallOptions = { signal?: AbortSignal };
  * `unknown`, for diagnosis only: nothing in it proves the handler didn't run, so it never becomes `refused`.
  */
 export type OwnerFailure =
-  | { ok: false; kind: "session"; status: 401; error: string; source?: DenialSource; scope?: GatewayDenialScope }
-  | { ok: false; kind: "forbidden"; status: 403; error: string; source?: DenialSource; scope?: GatewayDenialScope }
+  | { ok: false; kind: "session"; status: 401; error: string; source?: DenialSource; scope?: GatewayDenialScope; code?: string }
+  | { ok: false; kind: "forbidden"; status: 403; error: string; source?: DenialSource; scope?: GatewayDenialScope; code?: string }
   | { ok: false; kind: "unresolved" | "busy"; error: string }
   | { ok: false; kind: "refused"; error: string; code?: string; status?: number; rpcCode?: string }
   | { ok: false; kind: "provider"; error: string; code?: string; details: RefusalDetails }
@@ -56,7 +58,8 @@ const isRpcError = (error: unknown): error is Pick<ORPCError<string, unknown>, "
   error instanceof ORPCError || (error instanceof Error && error.name === "ORPCError" && typeof (error as { code?: unknown }).code === "string");
 /** A non-2xx answer that isn't an encoded oRPC error. */
 class PlainAnswer extends Error { constructor(readonly status: number) { super(`HTTP ${status}`); } }
-class GatewayDenial extends Error { constructor(readonly status: 401 | 403, message: string, readonly scope?: GatewayDenialScope) { super(message); } }
+class GatewayDenial extends Error { constructor(readonly status: 401 | 403, message: string, readonly scope?: GatewayDenialScope, readonly code?: string) { super(message); } }
+class GatewayRefusal extends Error { constructor(readonly status: number, message: string, readonly code: string) { super(message); } }
 class GatewayLimit extends Error { constructor(message: string, readonly retryAfterSeconds?: number) { super(message); } }
 type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -87,8 +90,13 @@ export function ownerClient({ base = "", fetch: send = globalThis.fetch }: { bas
     const body = await response.clone().json().catch(() => null) as { error?: unknown; json?: { code?: unknown } } | null;
     if (typeof body?.json?.code === "string") return response;
     if (response.status === 401 || response.status === 403)
-      throw new GatewayDenial(response.status, typeof body?.error === "string" ? body.error : response.status === 401 ? "Sign in again." : "This account may not do that.", gatewayDenialScope(body));
+      throw new GatewayDenial(response.status, typeof body?.error === "string" ? body.error : response.status === 401 ? "Sign in again." : "This account may not do that.", gatewayDenialScope(body), gatewayDenialCode(body));
     if (response.status === 429 && typeof body?.error === "string") throw new GatewayLimit(body.error, retryAfterSeconds(response.headers));
+    // The gateway's own refusal before forwarding names its `code` (from 0.5.3): nothing reached the agent. A plain
+    // answer without one (a proxy page, an older gateway) proves nothing and stays lost.
+    const code = (body as { code?: unknown } | null)?.code;
+    if (response.status >= 400 && response.status < 500 && typeof body?.error === "string" && typeof code === "string")
+      throw new GatewayRefusal(response.status, body.error, code);
     throw new PlainAnswer(response.status);
   }
 
@@ -96,10 +104,11 @@ export function ownerClient({ base = "", fetch: send = globalThis.fetch }: { bas
     const mutation = !READS.has(path);
     const lost: OwnerFailure = mutation ? { ok: false, kind: "unknown", procedure: path, identity } : { ok: false, kind: "unavailable" };
     if (error instanceof GatewayDenial) {
-      const scope = error.scope && { scope: error.scope };
-      return error.status === 401 ? { ok: false, kind: "session", status: 401, error: error.message, source: "gateway", ...scope }
-        : { ok: false, kind: "forbidden", status: 403, error: error.message, source: "gateway", ...scope };
+      const named = { ...(error.scope && { scope: error.scope }), ...(error.code !== undefined && { code: error.code }) };
+      return error.status === 401 ? { ok: false, kind: "session", status: 401, error: error.message, source: "gateway", ...named }
+        : { ok: false, kind: "forbidden", status: 403, error: error.message, source: "gateway", ...named };
     }
+    if (error instanceof GatewayRefusal) return { ok: false, kind: "refused", error: error.message, code: error.code, status: error.status };
     if (error instanceof GatewayLimit)
       return { ok: false, kind: "rate_limited", status: 429, error: error.message, ...(error.retryAfterSeconds !== undefined && { retryAfterSeconds: error.retryAfterSeconds }) };
     if (error instanceof PlainAnswer) return error.status > 0 ? { ...lost, httpStatus: error.status } : lost;

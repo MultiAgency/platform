@@ -14,6 +14,11 @@ export const MAX_PROPOSAL_MS = 7 * 86_400_000;
 /** Proposals per agent neither claimed nor closed; another is refused. */
 export const MAX_OPEN_PROPOSALS = 32;
 export const MAX_PROPOSAL_LEGS = 8;
+/** A proposal procedure's refusal `code` (a `refused` result). */
+export const PROPOSAL_REFUSAL_CODES = ["not_found", "request_conflict", "expiry_invalid", "too_many_proposals", "nothing_to_propose",
+  "not_proposable", "signature_invalid", "already_approved", "policy_not_in_force", "invalidated", "not_open", "not_approved",
+  "not_executable", "expired", "withdrawn"] as const;
+export type ProposalRefusalCode = (typeof PROPOSAL_REFUSAL_CODES)[number];
 
 /** The platform's assets as the owner's text names them. */
 export const PROPOSAL_TOKENS: Record<string, { symbol: string; decimals: number }> = {

@@ -1,6 +1,6 @@
 import { dispatch, LocalRefusal, type Sending } from "../agent.js";
 import type { Holding } from "../holdings.js";
-import { acquireMoneyLock } from "../lock.js";
+import { acquireMoneyLock, assertNotStopping, Stopping } from "../lock.js";
 import { usdValue } from "../value.js";
 import { blockingWarnings, executeLeg, quoteLeg, warnedReason } from "../treasury.js";
 import type { Plan, PlannedAction } from "./model.js";
@@ -22,7 +22,7 @@ export type PlanEvent =
       failureCode: string | null | undefined;
     };
 
-const PLAN_REFUSALS = new Set(["plan_expired", "plan_agent_changed", "strategy_changed", "plan_policy_changed", "swap_cost_exceeded", "valuation_unavailable", "autopilot_limit_exceeded"]);
+const PLAN_REFUSALS = new Set(["plan_expired", "plan_agent_changed", "strategy_changed", "plan_policy_changed", "swap_cost_exceeded", "valuation_unavailable", "autopilot_limit_exceeded", "cash_floor_exceeded"]);
 
 const legFor = (book: Holding[], action: Extract<PlannedAction, { type: "swap" }>) => {
   const from = book.find((h) => h.asset === action.from)!;
@@ -68,7 +68,9 @@ export async function* executePlan(id: string, now = () => new Date(), { autopil
     const owed = beforeClaim ? await beforeClaim(plan, observed) : [];
     if (owed.length > 0) { yield { type: "rejected", problems: owed }; return; }
 
-    // Claimed before the first action: a plan runs at most once, even if it stops partway.
+    // Claimed before the first action: a plan runs at most once, even if it stops partway. A server told to stop while
+    // the checks above ran claims nothing, so a proposal it would execute stays approved.
+    assertNotStopping();
     if (!claimPlan(id)) {
       yield { type: "rejected", problems: ["the plan was already executed"] };
       return;
@@ -100,8 +102,9 @@ export async function* executePlan(id: string, now = () => new Date(), { autopil
       if (swapped.status !== "SUCCESS") return;
     }
   } catch (error) {
-    // `authorize` refuses a send whose plan no longer holds; the refusal is logged and the plan stops.
-    if (!(error instanceof LocalRefusal && PLAN_REFUSALS.has(error.code))) throw error;
+    // `authorize` refuses a send whose plan no longer holds; the refusal is logged and the plan stops. A server told to
+    // stop refuses the next send before its record: the plan stops there too, with what it sent already reported.
+    if (!(error instanceof Stopping || (error instanceof LocalRefusal && PLAN_REFUSALS.has(error.code)))) throw error;
     yield { type: "rejected", problems: [error.message] };
   } finally {
     await lock.release();

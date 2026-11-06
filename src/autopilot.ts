@@ -5,7 +5,7 @@ import { api } from "./api.js";
 import { agentId, saveEnv } from "./env.js";
 import { post, readInbox } from "./inbox.js";
 import { liveGrant } from "./grants.js";
-import { MoneyLockBusy } from "./lock.js";
+import { MoneyLockBusy, Stopping } from "./lock.js";
 import { blocksDispatch, provenRefusal } from "./ops.js";
 import { executePlan } from "./plans.js";
 import { context, newTickId, observe, recordEnd, recordStart, type TickEnd, type TickStart } from "./evidence.js";
@@ -119,6 +119,8 @@ async function run(found: Found, progress: (event: ProgressEvent) => void): Prom
   const strategyChanged = () => strategyDigest(loadStrategy()) !== expectedStrategy;
   const done = (text: string) => post("run", text).text;
   const changed = () => done("Skipped: the strategy changed during this tick. Review it again on the next run.");
+  // What this tick did, in order; also what a stop partway through reports it did before stopping.
+  const report: string[] = [];
   try {
     const { policy } = await api.getPolicy(agentId());
     if (!policy) return done("Skipped: the agent's policy is not applied yet.");
@@ -134,7 +136,6 @@ async function run(found: Found, progress: (event: ProgressEvent) => void): Prom
       return done("Skipped: unresolved money actions.");
     }
 
-    const report: string[] = [];
     // Every send, a sweep's shield included, needs the owner's grant for the strategy in force.
     const approved = await mandateApproved(strategy);
     if (strategyChanged()) return changed();
@@ -209,6 +210,7 @@ async function run(found: Found, progress: (event: ProgressEvent) => void): Prom
     }
     return done(report.length ? report.join(", ") : "Nothing to do.");
   } catch (error) {
+    if (error instanceof Stopping) return done(report.length ? `${report.join(", ")}; then stopped: ${error.message}` : `Skipped: ${error.message}`);
     if (error instanceof MoneyLockBusy) return done("Skipped: another money action was running.");
     found.refusal = error instanceof LocalRefusal ? error.code : provenRefusal(error) ?? null;
     const message = error instanceof Error ? error.message : String(error);

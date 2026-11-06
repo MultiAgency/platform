@@ -10,7 +10,7 @@ import { nep413Hash, verifyEd25519 } from "../nep413.js";
 import type { Router } from "../router.js";
 import { clientAddress, hourlyLimit } from "../signin.js";
 import { appendSynced } from "../synced.js";
-import { AppConsents, UNBORN } from "./app-access.js";
+import { accessLog, AppConsents, UNBORN } from "./app-access.js";
 import { chainDaoVotes, checkUrl, daoStopText, DaoRequests, type DaoStopRequest, type DaoVotes, escape, page, PAGE_HEADERS, row } from "./app-dao.js";
 import { agentOrigin } from "./agent-origin.js";
 import type { AgentEntry } from "./config.js";
@@ -99,7 +99,7 @@ async function openStop(send: (status: number, body: string) => boolean, host: s
   const nonce = randomBytes(32), id = nep413Hash(message, nonce, host).toString("hex");
   const filed = requests.fileStop({ id, host, dao: agent.owner, agent: agent.name, agentId: authority.agentId, expiresAt: now + STOP_MS,
     createdAt: now, message, nonce: nonce.toString("base64"), signer: { account_id: authority.signer.account_id, public_key: authority.signer.public_key }, since }, now);
-  appendSynced(join(root, "access.jsonl"), { at: new Date(now).toISOString(), event: "dao-stop-filed", request: id, owner: agent.owner, agent: agent.name });
+  appendSynced(accessLog(root), { at: new Date(now).toISOString(), event: "dao-stop-filed", request: id, owner: agent.owner, agent: agent.name });
   return send(200, filedPageOf(filed, latest));
 }
 
@@ -122,7 +122,7 @@ async function apply(root: string, requests: DaoRequests, consents: AppConsents,
   let autopilotOff = current !== record.agentId;
   if (!autopilotOff) try { await stopAutopilot(agent, record.dao); autopilotOff = true; } catch { autopilotOff = false; }
   const done = requests.stopped(record.id, { at: cutoff, revoked, autopilotOff });
-  appendSynced(join(root, "access.jsonl"), { at: new Date(now).toISOString(), event: "dao-stop", request: record.id, owner: record.dao, agent: record.agent, revoked, autopilotOff });
+  appendSynced(accessLog(root), { at: new Date(now).toISOString(), event: "dao-stop", request: record.id, owner: record.dao, agent: record.agent, revoked, autopilotOff });
   return done;
 }
 

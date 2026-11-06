@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
 import { afterEach, beforeEach, mock, test } from "node:test";
 import { RPCSerializer } from "@orpc/client";
@@ -10,15 +12,17 @@ import { freshDirectory, offline } from "./fixtures/harness.js";
 import { api } from "../src/api.js";
 import { appScopesCover } from "../src/contract/app-access.js";
 import { appConsent } from "../src/contract/app-consent.js";
-import { MAX_OPEN_PROPOSALS, proposalText, tokenAmount, type ProposalView } from "../src/contract/treasury-proposals.js";
+import { MAX_OPEN_PROPOSALS, PROPOSAL_REFUSAL_CODES, proposalText, tokenAmount, type ProposalView } from "../src/contract/treasury-proposals.js";
 import { proposalSignatureProblem } from "../src/gateway/app-access.js";
-import { readOps } from "../src/ops.js";
+import { opsLog, readOps } from "../src/ops.js";
 import { executePlan, savePlan, observe, type PlanEvent } from "../src/plans.js";
 import { strategyGrantProblems } from "../src/planning/strategy-grant.js";
 import { ASSETS, treasuryPolicy } from "../src/policy.js";
 import { approveProposal, createProposal, executeProposal, getProposal, listProposals, rejectProposal, withdrawProposal } from "../src/proposals/service.js";
 import { claim, close } from "../src/proposals/store.js";
 import { PublicError } from "../src/public-error.js";
+import { moveOnce } from "../src/synced.js";
+import { resumeSendingForTests, stopSending } from "../src/lock.js";
 import { treasuryRoutes } from "../src/rpc/treasury.js";
 import { loadStrategy, saveStrategy } from "../src/strategy.js";
 
@@ -298,6 +302,31 @@ test("open proposals are limited per agent", async () => {
   await assert.rejects(propose("one-more", { legs: [{ from: usdc, to: wnear, amount: "1" }] }), refusedWith("too_many_proposals"));
 });
 
+/** Hosted agents run side by side in one state directory: switching `AGENT_ID` is another agent's process there. */
+async function asAgent<T>(id: string, run: () => Promise<T> | T) {
+  const before = process.env.AGENT_ID;
+  process.env.AGENT_ID = id;
+  try { return await run(); } finally { process.env.AGENT_ID = before; }
+}
+
+test("agents sharing a state directory share no proposals: not their list, their requestIds or their limit", async () => {
+  const other = "b".repeat(64);
+  const mineOnA = await propose("weekly");
+  // The same app and Organization, holding a consent on another owner's agent, reusing the requestId.
+  const onB = await asAgent(other, () => createProposal(ended, { requestId: "weekly", legs: [{ from: usdc, to: wnear, amount: "15" }], expiresAt: inAnHour() }));
+  assert.equal(onB.state, "proposed");
+  assert.equal(onB.agentId, other);
+  assert.equal((await getProposal(app, { id: mineOnA.id })).state, "proposed", "the first agent's proposal isn't withdrawn");
+  assert.deepEqual(listProposals(app).proposals.map(p => p.agentId), [mineOnA.agentId], "each agent lists only its own");
+  assert.deepEqual(await asAgent(other, () => listProposals(ended).proposals.map(p => p.agentId)), [other]);
+  // Another deployment filling one agent's limit leaves the other agent's untouched.
+  const crowd = { ...app, actor: "app:another-app:org_9" };
+  for (let i = 1; i < MAX_OPEN_PROPOSALS; i++)
+    await createProposal(crowd, { requestId: `r${i}`, legs: [{ from: usdc, to: wnear, amount: "1" }], expiresAt: inAnHour() });
+  await assert.rejects(propose("one-more", { legs: [{ from: usdc, to: wnear, amount: "1" }] }), refusedWith("too_many_proposals"));
+  assert.equal((await asAgent(other, () => createProposal(ended, { requestId: "next", legs: [{ from: usdc, to: wnear, amount: "1" }], expiresAt: inAnHour() }))).state, "proposed");
+});
+
 test("scopes: treasury covers proposals, treasury-execute adds plans only beside treasury, and a consent can't name it alone", () => {
   assert.equal(appScopesCover(["treasury"], "proposals/execute"), true);
   assert.equal(appScopesCover(["treasury"], "executePlan"), false);
@@ -349,4 +378,152 @@ test("a swap the provider holds for the owner's vote reads unknown, saying so, a
   assert.match(held.reason!, /held by the provider for the owner's vote/);
   assert.equal((await executeProposal(app, { id: proposal.id })).state, "unknown");
   assert.deepEqual(sends, ["swap"]);
+});
+
+test("proposals from before 0.5.3 are read where they are, by their own agent only, and never moved", async () => {
+  const [first, second] = ["e".repeat(64), "f".repeat(64)];
+  const approved = await asAgent(first, async () => { const p = await propose("approved"); await approve(p); return p; });
+  const until = inAnHour();
+  const open = await asAgent(first, () => propose("open", { expiresAt: until }));
+  const theirs = await asAgent(second, () => propose("theirs"));
+  // The layout of earlier builds: every agent's files directly in `.proposals/`.
+  for (const agent of [first, second])
+    for (const name of readdirSync(join(".proposals", agent))) renameSync(join(".proposals", agent, name), join(".proposals", name));
+  const flat = () => readdirSync(".proposals").filter(name => name.endsWith(".json")).sort();
+  const before = flat();
+  assert.deepEqual(await asAgent(first, () => listProposals(app).proposals.map(p => [p.id, p.state]).sort()),
+    [[approved.id, "approved"], [open.id, "proposed"]].sort(), "each agent reads its own, in place");
+  assert.deepEqual(await asAgent(second, () => listProposals(app).proposals.map(p => p.id)), [theirs.id]);
+  // Its requestId still answers the stored proposal, and acting on it writes beside it, where an earlier build reads it.
+  assert.equal((await asAgent(first, () => propose("open", { expiresAt: until }))).id, open.id);
+  assert.equal(await asAgent(first, () => withdrawProposal(app, { id: open.id }).state), "withdrawn");
+  assert.ok(existsSync(join(".proposals", `${open.id}.final.json`)), "the final record sits beside the proposal");
+  assert.deepEqual(flat().filter(name => !name.endsWith(".final.json")), before, "nothing moved");
+  // The same requestId on another agent is that agent's own proposal, in its own directory.
+  const elsewhere = await asAgent(second, () => propose("open"));
+  assert.equal(elsewhere.id, open.id, "same app and requestId, so the same id");
+  assert.equal(elsewhere.state, "proposed");
+  assert.ok(existsSync(join(".proposals", second, `${open.id}.json`)));
+  assert.equal(await asAgent(first, () => getProposal(app, { id: open.id }).state), "withdrawn", "the first agent's is untouched");
+});
+
+test("moving a record never replaces a different one", () => {
+  mkdirSync("to");
+  writeFileSync("a", "same"); writeFileSync(join("to", "a"), "same");
+  assert.equal(moveOnce("a", join("to", "a")), true, "a move a crash cut short finishes");
+  assert.equal(existsSync("a"), false);
+  assert.equal(moveOnce("a", join("to", "a")), false);
+  writeFileSync("b", "one"); writeFileSync(join("to", "b"), "other");
+  assert.throws(() => moveOnce("b", join("to", "b")), /differs/);
+  assert.equal(readFileSync(join("to", "b"), "utf8"), "other");
+  assert.equal(readFileSync("b", "utf8"), "one");
+});
+
+test("every proposal refusal code the agent sends is one the package lists, and each listed code is sent", () => {
+  const source = readFileSync(new URL("../src/proposals/service.ts", import.meta.url), "utf8");
+  const sent = new Set([...source.matchAll(/refused\("([a-z_]+)"|code: "([a-z_]+)"/g)].map(m => m[1] ?? m[2]));
+  assert.deepEqual([...sent].sort(), [...PROPOSAL_REFUSAL_CODES].sort());
+});
+
+/** A $90 cash floor in USDC; the book holds 100 USDC, so spending more than 10 of it crosses the floor. */
+const floorAt90 = () => saveStrategy({ ...loadStrategy(), cashFloor: { usd: 90, assets: [usdc] } });
+const spendUsdc = (amount: string) => ({ type: "swap" as const, from: usdc, to: wnear, amount, amountOut: amount, minAmountOut: amount, costBps: 0 });
+const runPlan = async (id: string, options: Parameters<typeof executePlan>[2] = {}) => {
+  const events: PlanEvent[] = [];
+  for await (const e of executePlan(id, undefined, options)) events.push(e);
+  return events;
+};
+
+test("an app's plan under treasury-execute sends no swap that would take the strategy's cash under its floor", async () => {
+  floorAt90();
+  const { snapshot } = await observe();
+  const refused = await runPlan(savePlan(snapshot, "external", "t", [spendUsdc("15")]).id, { beforeClaim: strategyGrantProblems });
+  assert.equal(refused.at(-1)?.type, "rejected");
+  assert.match((refused.at(-1) as Extract<PlanEvent, { type: "rejected" }>).problems.join(), /cash under its floor/);
+  assert.deepEqual(sends, []);
+  assert.equal(readOps().at(-1)?.refused, "cash_floor_exceeded");
+  // Landing exactly on the floor is allowed.
+  assert.equal((await runPlan(savePlan(snapshot, "external", "t", [spendUsdc("10")]).id, { beforeClaim: strategyGrantProblems })).at(-1)?.type, "action");
+  assert.deepEqual(sends, ["swap"]);
+});
+
+test("a plan the steward proposed sends no swap that would take the strategy's cash under its floor", async () => {
+  floorAt90();
+  const { snapshot } = await observe();
+  const refused = await runPlan(savePlan(snapshot, "steward", "keep less USDC", [spendUsdc("15")]).id);
+  assert.equal(refused.at(-1)?.type, "rejected");
+  assert.deepEqual(sends, []);
+  assert.equal(readOps().at(-1)?.refused, "cash_floor_exceeded");
+});
+
+test("an approved proposal that would take cash under the floor is refused before its claim and stays approved", async () => {
+  floorAt90();
+  const proposal = await propose("floor");
+  await approve(proposal);
+  await assert.rejects(executeProposal(app, { id: proposal.id }),
+    (error: unknown) => refusedWith("not_executable")(error) && /cash under its floor/.test((error as Error).message));
+  assert.equal(getProposal(app, { id: proposal.id }).state, "approved");
+  assert.deepEqual(sends, []); assert.deepEqual(readOps(), []);
+});
+
+test("a strategy saved while a swap's provider reads are in flight refuses the swap", async () => {
+  const { snapshot } = await observe();
+  const plan = savePlan(snapshot, "external", "t", [spendUsdc("15")]);
+  // The owner adds a floor between the plan's checks and the send: the reads dispatch makes see the new strategy.
+  const grants = api.listGrants;
+  mock.method(api, "listGrants", async (...args: Parameters<typeof api.listGrants>) => { floorAt90(); return grants(...args); });
+  assert.equal((await runPlan(plan.id)).at(-1)?.type, "rejected");
+  assert.deepEqual(sends, []);
+  assert.equal(readOps().at(-1)?.refused, "strategy_changed");
+});
+
+test("cash committed to a send held for the owner's vote doesn't count toward the floor", async () => {
+  floorAt90();
+  const { snapshot } = await observe();
+  // A 10 USDC swap held for the owner's approval: the reported balance still includes it.
+  mkdirSync(".ops", { recursive: true });
+  writeFileSync(opsLog(), [
+    JSON.stringify({ at: "2026-11-06T00:00:00Z", idempotencyKey: "held", kind: "treasury", method: "swap", request: { origin_asset: usdc, destination_asset: wnear, amount: "10" } }),
+    JSON.stringify({ idempotencyKey: "held", correlation_id: "op_held", status: "PENDING_APPROVAL" }), ""].join("\n"));
+  // 100 USDC less the 10 held leaves 90: spending 5 more would take it to 85.
+  const refused = await runPlan(savePlan(snapshot, "external", "t", [spendUsdc("5")]).id, { beforeClaim: strategyGrantProblems });
+  assert.equal(refused.at(-1)?.type, "rejected");
+  assert.equal(readOps().at(-1)?.refused, "cash_floor_exceeded");
+  assert.deepEqual(sends, []);
+});
+
+test("while cash is under the floor, a proposal that adds cash still executes", async () => {
+  book[usdc]!.confidential = 50n;
+  floorAt90();
+  const proposal = await propose("refill", { legs: [{ from: wnear, to: usdc, amount: "10" }] });
+  await approve(proposal);
+  await executeProposal(app, { id: proposal.id });
+  assert.deepEqual(sends, ["swap"]);
+  assert.equal(book[usdc]!.confidential, 60n);
+});
+
+test("an approved proposal that held sends would take under the floor is refused before its claim and stays approved", async () => {
+  floorAt90();
+  mkdirSync(".ops", { recursive: true });
+  writeFileSync(opsLog(), [
+    JSON.stringify({ at: "2026-11-06T00:00:00Z", idempotencyKey: "held", kind: "payout", method: "transfer", request: { asset: usdc, amount: "10", recipient: "p.near" } }),
+    JSON.stringify({ idempotencyKey: "held", correlation_id: "op_held", status: "PENDING_APPROVAL" }), ""].join("\n"));
+  const proposal = await propose("after-held", { legs: [{ from: usdc, to: wnear, amount: "5" }] });
+  await approve(proposal);
+  await assert.rejects(executeProposal(app, { id: proposal.id }), refusedWith("not_executable"));
+  assert.equal(getProposal(app, { id: proposal.id }).state, "approved");
+  assert.deepEqual(sends, []);
+});
+
+test("a stop during an approved proposal's last checks claims nothing, so it stays approved for after the restart", async () => {
+  const proposal = await propose("restart");
+  await approve(proposal);
+  // The server is told to stop while the proposal's grant is read, just before its claim.
+  const grants = api.listGrants;
+  mock.method(api, "listGrants", async (...args: Parameters<typeof api.listGrants>) => { stopSending(); return grants(...args); });
+  try {
+    await assert.rejects(executeProposal(app, { id: proposal.id }), (error: unknown) => refusedWith("not_executable")(error) && /stopping/.test((error as Error).message));
+    assert.equal(getProposal(app, { id: proposal.id }).state, "approved");
+    assert.deepEqual(sends, []);
+  } finally { resumeSendingForTests(); }
 });

@@ -255,14 +255,14 @@ export class DaoRequests {
   }
   /**
    * Throws what `file` would refuse with, so a caller can check before reading the chain. Removes requests finished more
-   * than `DAO_REQUEST_RETENTION_MS` ago first (`access.jsonl` keeps their history), so the records stay bounded.
+   * than `DAO_REQUEST_RETENTION_MS` ago first (the access log, `accessLog`, keeps their history), so the records stay bounded.
    */
   admit(deployment: string, now = Date.now()) {
     const kept = this.prune(now).filter(r => r.deployment === deployment);
     if (kept.filter(r => !settled(r) && r.votingUntil > now).length >= MAX_PENDING_DAO_REQUESTS)
-      throw new BadRequest("This deployment has too many DAO requests waiting for a vote. Let some pass or lapse first.");
+      throw new BadRequest("This deployment has too many DAO requests waiting for a vote. Let some pass or lapse first.", "dao_requests_limited");
     if (kept.filter(r => r.createdAt > now - DAY).length >= MAX_DAO_REQUESTS_PER_DAY)
-      throw new BadRequest(`This deployment filed ${MAX_DAO_REQUESTS_PER_DAY} DAO requests in the last day. File again later.`);
+      throw new BadRequest(`This deployment filed ${MAX_DAO_REQUESTS_PER_DAY} DAO requests in the last day. File again later.`, "dao_requests_limited");
   }
   /** Removes finished requests past retention; answers the rest. */
   private prune(now: number) {
