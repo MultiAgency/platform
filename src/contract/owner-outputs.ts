@@ -392,7 +392,8 @@ export const treasuryGetOutput = z.looseObject({
     members: z.array(z.string()),
     approvers: z.array(z.looseObject({ role: z.string(), threshold: z.string() })),
   }).nullable(),
-  balances: z.looseObject({ near: z.string(), usdc: z.string() }),
+  /** Raw integer strings: `near` in yoctoNEAR (24 decimals, the account's whole balance including storage), `usdc` at 6 decimals. */
+  balances: z.looseObject({ near: z.string().regex(/^\d+$/), usdc: z.string().regex(/^\d+$/) }),
   confidential: z.boolean(),
   payees: z.array(z.looseObject({ address: z.string(), proposalId: z.number(), description: z.string() })),
 }).nullable();

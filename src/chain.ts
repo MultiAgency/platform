@@ -67,15 +67,16 @@ export async function isDao(accountId: string) {
 
 /**
  * The account the agent works for: its balances and, for a DAO, the council that votes on
- * funding and payee agreements.
+ * funding and payee agreements. Both balances are raw integer strings, as every amount on the wire: `near` is the
+ * account's yoctoNEAR (`view_account` `amount`, including what storage reserves), `usdc` its USDC at 6 decimals.
  */
 export async function describeTreasury(accountId: string) {
-  const [policy, near_, usdc] = await Promise.all([
+  const [policy, account, usdc] = await Promise.all([
     daoPolicy(accountId),
-    near.getBalance(accountId),
+    near.rpc.getAccount(accountId),
     near.view<string>(contractOf(ASSETS.USDC), "ft_balance_of", { account_id: accountId }),
   ]);
-  return { accountId, dao: policy && council(policy), balances: { near: near_, usdc: usdc ?? "0" } };
+  return { accountId, dao: policy && council(policy), balances: { near: account.amount, usdc: usdc ?? "0" } };
 }
 
 /** A DAO's members, and who approves a FunctionCall proposal (how funding is filed) with how many votes. */
