@@ -238,6 +238,10 @@ Each line is a gap; the linked page says how the rest is known. The
 - `MultiAgency/payables` and `MultiAgency/treasury-prototype` (not archived) still carry their own copies of the
   gateway and money path, so a fix here doesn't reach them; Payables' frontend still imports from its copy. The
   Treasury app (`MultiAgency/treasury`) is to replace the prototype and this platform's Treasury pages.
+- The `dao` package's Treasury frontend (treasury.multiagency.ai) prints `treasury/get`'s `balances.near` as received,
+  so from 0.5.3 its Funding line shows raw yoctoNEAR. 0.5.3 deploys only the headless `platform` gateway; the `dao`
+  service isn't redeployed with it. Moving the `dao` package's Treasury input to `MultiAgency/treasury`, or removing
+  it, is planned separately.
 - A new prototype must reuse a fixed host `demo` value and agent area; owner-app `contract.json` is checked at runtime
   only on hosts served by the shared release server (offline E2E, not deployed). See the
   [integration path](docs/integration-path.md#gaps).

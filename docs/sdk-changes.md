@@ -42,7 +42,11 @@ platform-only fixes are listed separately.
   without one keeps its digest, so existing grants stay valid. A DAO's Treasury grant proposal lists the floor among
   the strategy's terms, which makes it public. A server that predates the floor drops the field: check that the
   strategy `strategy/save` answers carries it. Offline-tested; not deployed.
-- **`treasury/get` balances are raw** (fix; narrows the output): `balances.near` was near-kit's formatted NEAR with
+- **`treasury/get` balances are raw** (**Breaking for apps that display `balances.near`**; narrows the output): by the
+  rule above this would bump the minor version; it ships in a patch because its only consumers are MultiAgency's own
+  Treasury frontends. The change is on the server, so a pinned SDK doesn't shield an app: every app sees raw yoctoNEAR
+  once its host runs 0.5.3. The Treasury app formats it from its next release; the `dao` package's Treasury pages don't
+  (README, "Not done yet"). `balances.near` was near-kit's formatted NEAR with
   two decimals (`"305.53"`); it is now the account's yoctoNEAR as an integer string (`view_account` `amount`, including
   what storage reserves), like `balances.usdc` (6 decimals) and every other amount on the wire. The schema accepts only
   integer strings for both and states their units. An app that shows `balances.near` as received must format it with 24
