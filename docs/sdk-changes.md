@@ -12,7 +12,7 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
-## 0.5.3
+## 0.5.3 (2026-11-06)
 
 - **Refusal codes from the app routes** (addition): the gateway names why it refused, and `appClient` passes it on as
   `code` on `refused` and `forbidden`, and on a gateway `forbidden` from an agent call (`OwnerFailure` gains `code` on
