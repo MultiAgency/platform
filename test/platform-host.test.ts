@@ -10,7 +10,7 @@ import { randomBytes } from "node:crypto";
 import { generateKey, Near, type PrivateKey } from "near-kit";
 import { setupMessage } from "../src/contract/app-consent.js";
 import { AppCredentials } from "../src/gateway/app-access.js";
-import { AppConfirms } from "../src/gateway/app-confirm.js";
+import { AppConfirms, confirmAssets } from "../src/gateway/app-confirm.js";
 import { sessions } from "../src/signin.js";
 import { holdHostedPorts } from "./fixtures/hosted-ports.js";
 
@@ -169,15 +169,18 @@ test("the platform package carries the gateway and the confirm entry's files onl
       confirm: { html: ["/confirm.html"], initial: { js: ["/static/js/lib.3.js", "/static/js/confirm.2.js"], css: ["/static/css/c.4.css"] }, assets: ["/static/font/f.5.woff2"] } } }));
     execFileSync(process.execPath, [join(process.cwd(), "scripts/package-platform.mjs"), out], { cwd: tree, stdio: "pipe" });
     const files = (dir: string): string[] => readdirSync(join(out, dir), { withFileTypes: true }).flatMap(e => e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]);
-    assert.deepEqual(files("web").sort(), ["web/dist/confirm.html", "web/dist/static/css/c.4.css", "web/dist/static/font/f.5.woff2",
-      "web/dist/static/js/confirm.2.js", "web/dist/static/js/lib.3.js", "web/dist/static/js/lib.3.js.LICENSE.txt"]);
+    assert.deepEqual(files("web").sort(), ["web/dist/build-manifest.json", "web/dist/confirm.html", "web/dist/static/css/c.4.css",
+      "web/dist/static/font/f.5.woff2", "web/dist/static/js/confirm.2.js", "web/dist/static/js/lib.3.js", "web/dist/static/js/lib.3.js.LICENSE.txt"]);
+    // The headless gateway serves the confirm page's assets from the packaged manifest, and names nothing of the owner app.
+    assert.deepEqual([...confirmAssets(join(out, "web/dist"))].sort(), ["/static/css/c.4.css", "/static/font/f.5.woff2", "/static/js/confirm.2.js", "/static/js/lib.3.js"]);
+    assert.doesNotMatch(readFileSync(join(out, "web/dist/build-manifest.json"), "utf8"), /index/);
     assert.deepEqual(files("deploy").sort(), ["deploy/platform-entrypoint.sh", "deploy/platform-staging.json", "deploy/platform.json"]);
     assert.equal(existsSync(join(out, "frontends")), false);
     assert.equal(statSync(join(out, "deploy/platform-entrypoint.sh")).mode & 0o111, 0o111, "the entrypoint is executable");
     assert.equal(readFileSync(join(out, "Dockerfile"), "utf8"), "Dockerfile.platform");
     const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as { revisions: Record<string, unknown>; files: Record<string, string> };
     assert.deepEqual(Object.keys(manifest.revisions), ["platform"]);
-    assert.ok(manifest.files["web/dist/confirm.html"] && !manifest.files["web/dist/index.html"]);
+    assert.ok(manifest.files["web/dist/confirm.html"] && manifest.files["web/dist/build-manifest.json"] && !manifest.files["web/dist/index.html"]);
     assert.throws(() => execFileSync(process.execPath, [join(process.cwd(), "scripts/package-platform.mjs"), out], { cwd: tree, stdio: "pipe" }), /must not exist/);
   } finally { rmSync(tree, { recursive: true, force: true }); rmSync(out, { recursive: true, force: true }); }
 });
