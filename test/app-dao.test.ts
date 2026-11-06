@@ -672,7 +672,8 @@ const editRequest = (hash: string, change: (r: any) => object) => {
 };
 const editConsent = (id: string, change: (r: any) => object) => {
   const path = join(".app-access", "consents", `${id}.json`);
-  writeFileSync(path, JSON.stringify(change(JSON.parse(readFileSync(path, "utf8")))));
+  // Replaced whole, as the store writes: an in-place write leaves the directory's timestamp, so cached consents stay stale.
+  writeAtomic(path, JSON.stringify(change(JSON.parse(readFileSync(path, "utf8")))));
 };
 const stopHash = (html: string) => html.match(/Hash <code>([a-f0-9]{64})<\/code>/)![1]!;
 const STOP = `/confirm/dao/stop/${DAO}/treasury`;
