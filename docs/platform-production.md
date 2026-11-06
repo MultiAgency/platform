@@ -40,6 +40,9 @@ unchanged by it.
    - `/health` gives 200.
    - `/apps/v1/agents/x` gives 401 without a credential, and 403 with a browser `Origin`.
    - `/`, `/gw/challenge` and `/a/x/access` give 404.
+   - One of the confirm page's own scripts gives 200: from the package copy,
+     `node -p 'require("./web/dist/build-manifest.json").entries.confirm.initial.js[0]'`. Without that manifest the
+     page renders blank (seen on staging 2026-11-06).
    - `POST /apps/v1/dao-consents` gives 401 without a credential.
 6. Issue the first production credentials from the service's state directory (`cd /data/state &&
    /app/node_modules/.bin/tsx /app/src/app-credential.ts issue <deployment> api.multiagency.ai 90 "<name>"`) and deliver

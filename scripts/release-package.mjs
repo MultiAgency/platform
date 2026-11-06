@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 /**
- * A new, immutable release package at `destination`: `copy` records each file's sha256, and `finish` writes the
+ * A new, immutable release package at `destination`: `copy` and `write` record each file's sha256, and `finish` writes the
  * manifest with the given Git revisions. Explicit inputs only: never package repository roots, credentials, volumes,
  * or node_modules.
  */
@@ -26,6 +26,11 @@ export function releasePackage(destination) {
       files[relative(output, target)] = createHash('sha256').update(readFileSync(target)).digest('hex');
     } else throw new Error(`Non-file input: ${source}`);
   }
+  /** A file the package derives from its inputs rather than copies. */
+  function write(target, content) {
+    mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, content);
+    files[relative(output, target)] = createHash('sha256').update(readFileSync(target)).digest('hex');
+  }
   mkdirSync(output, { recursive: true });
   function finish(revisions) {
     writeFileSync(join(output, '.dockerignore'), 'node_modules\n');
@@ -34,7 +39,7 @@ export function releasePackage(destination) {
       revisions, files }, null, 2) + '\n');
     console.log(output);
   }
-  return { output, copy, finish };
+  return { output, copy, write, finish };
 }
 
 export const revision = path => { try { return execFileSync('git', ['-C', path, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(); } catch { return null; } };

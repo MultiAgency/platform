@@ -35,7 +35,9 @@ directory, hosted agents and consents are kept, and the host is unchanged, so si
    `DASHBOARD_HOST` to the Railway domain, then point a CNAME for `api.dev.multiagency.ai` (Namecheap) at the domain
    `railway domain status` shows and remove `DASHBOARD_HOST`.
 4. Read-only checks: `/health` 200; `/apps/v1/agents/x` without a credential 401, with a browser `Origin` 403;
-   `/`, `/gw/challenge` and `/a/x/access` 404. Another host gets 421 from the gateway (offline-tested in
+   `/`, `/gw/challenge` and `/a/x/access` 404; one of the confirm page's own scripts 200 (from the package copy,
+   `node -p 'require("./web/dist/build-manifest.json").entries.confirm.initial.js[0]'`), since a package without that
+   manifest serves the page blank (seen 2026-11-06). Another host gets 421 from the gateway (offline-tested in
    `test/platform-host.test.ts`), but through Railway's edge it can't be checked: a request for a host not attached to
    the service gets Railway's own 404 "Application not found" (`x-railway-fallback: true`, seen 2026-11-05) and never
    reaches the gateway.
