@@ -338,7 +338,7 @@ test("an app sets up an Organization's own Treasury agent; its plans run only un
     // The provider's history lists the swap, so the agent's books carry it: its ledger row and its CSV line.
     const [swapped] = swaps();
     expect(value(await agent.call('ledger')).filter(r => r.type === 'swap')).toEqual([expect.objectContaining({ correlationId: swapped.correlation_id,
-      status: 'SUCCESS', assetIn: USDC, assetOut: WNEAR, amountOut: swapped.amountOut.toString() })]);
+      status: 'SUCCESS', assetIn: USDC, assetOut: WNEAR, amountOut: swapped.amountOut })]);
     expect(value(await agent.call('ledgerCsv'))).toContain(swapped.correlation_id);
     steps.push("the swap read back from the provider's history into the ledger and its CSV");
 
