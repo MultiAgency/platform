@@ -2,3 +2,6 @@ allowBuilds:
   esbuild: false
 # Verification shares installed dependencies read-only; install explicitly before source capture.
 verifyDepsBeforeRun: false
+# Published 2026-11-06, under the release-age window; needed at once for the partner portal's keys.
+minimumReleaseAgeExclude:
+  - '@near-intents-agent-api/sdk@0.8.0'
