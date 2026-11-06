@@ -114,7 +114,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
 
   const swapStatus = swap => ({ correlation_id: swap.correlation_id, agent_id: swap.agent, type: 'swap', status: 'SUCCESS', created_at: swap.at, updated_at: swap.at,
     failure_code: null, details: { action: 'swap', request: { origin_asset: swap.body.origin_asset, destination_asset: swap.body.destination_asset,
-      amount: swap.body.amount, min_amount_out: swap.body.min_amount_out, confidential: true }, confidential: true, amount_out: swap.amountOut.toString() } });
+      amount: swap.body.amount, min_amount_out: swap.body.min_amount_out, confidential: true }, confidential: true, amount_out: swap.amountOut } });
   const status = payment => ({ correlation_id: payment.correlation, agent_id: payment.agent, type: payment.type ?? 'transfer', status: payment.status,
     created_at: payment.at, updated_at: payment.at, failure_code: payment.failure ?? null, details: { approval_id: payment.approval } });
   // A held withdrawal's approval shape isn't observed on mainnet: modelled here as OutLayer's `Withdraw` op, only so a
@@ -234,7 +234,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         if (BigInt(body.amount) > treasuryBalances.get(from.asset_id) || BigInt(body.min_amount_out) > amountOut) throw new Error('Infeasible swap');
         treasuryBalances.set(from.asset_id, treasuryBalances.get(from.asset_id) - BigInt(body.amount));
         treasuryBalances.set(to.asset_id, treasuryBalances.get(to.asset_id) + amountOut);
-        const swap = { correlation_id: randomUUID(), agent: agent.id, key: entry.key, body, amountOut, at: new Date().toISOString() }; swaps.push(swap);
+        const swap = { correlation_id: randomUUID(), agent: agent.id, key: entry.key, body, amountOut: amountOut.toString(), at: new Date().toISOString() }; swaps.push(swap);
         if (swaps.length === dropSwapAt) { dropSwapAt = 0; return res.destroy(); }
         return json(res, { correlation_id: swap.correlation_id });
       }
