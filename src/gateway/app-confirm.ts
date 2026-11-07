@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { closeSync, fsyncSync, openSync, readFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, openSync, readFileSync, writeSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { z } from "zod";
@@ -89,6 +89,17 @@ export function confirmAssets(dist: string): Set<string> {
   let entry: { initial?: { js?: string[]; css?: string[] }; async?: { js?: string[]; css?: string[] }; assets?: string[] } | undefined;
   try { entry = JSON.parse(readFileSync(join(dist, "build-manifest.json"), "utf8")).entries?.confirm; } catch { return new Set(); }
   return new Set([...entry?.initial?.js ?? [], ...entry?.initial?.css ?? [], ...entry?.async?.js ?? [], ...entry?.async?.css ?? [], ...entry?.assets ?? []]);
+}
+
+/**
+ * What the confirm page needs from the web build and doesn't find in `dist`: its manifest, its entry, its page and each
+ * asset its entry lists. Empty when the page can be served whole; without these it loads blank or not at all.
+ */
+export function missingConfirmFiles(dist: string): string[] {
+  let manifest: { entries?: { confirm?: unknown } };
+  try { manifest = JSON.parse(readFileSync(join(dist, "build-manifest.json"), "utf8")); } catch { return ["build-manifest.json"]; }
+  if (!manifest.entries?.confirm) return ["build-manifest.json: the confirm entry"];
+  return ["/confirm.html", ...confirmAssets(dist)].filter(path => !existsSync(join(dist, path)));
 }
 
 const opening = z.object({ signature: z.string() });

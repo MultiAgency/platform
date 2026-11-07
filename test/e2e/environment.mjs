@@ -28,6 +28,15 @@ const root = resolve(import.meta.dirname, '../..');
 const EXIT_WITH_PARENT_FILE = join(root, 'test/e2e/exit-with-parent.cjs');
 const EXIT_WITH_PARENT = `--require ${JSON.stringify(EXIT_WITH_PARENT_FILE)}`;
 const close = server => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
+/**
+ * The gateway serves the confirm page from this checkout's web build. Without it the page loads blank or 404s and a
+ * test waits on a button that never comes, so the stack refuses to start, naming the build to run.
+ */
+export async function requireConfirmBuild(dist = join(root, 'web/dist')) {
+  const { missingConfirmFiles } = await tsImport('../../src/gateway/app-confirm.ts', import.meta.url);
+  const missing = missingConfirmFiles(dist);
+  if (missing.length) throw new Error(`The confirm page's web build is missing or incomplete in ${dist} (no ${missing.join(', ')}). Run \`pnpm build:web\` in ${root} first.`);
+}
 async function freePort(host = '127.0.0.1') {
   const server = httpServer();
   await new Promise(resolve => server.listen(0, host, resolve));
@@ -47,8 +56,9 @@ async function freePort(host = '127.0.0.1') {
  * areas a `frontendDist` host may set up.
  */
 export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoOwned = false, daoPortfolio = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false, appSetup = ['payables'] } = {}) {
+  await requireConfirmBuild();
   const daoArea = daoOwned ? ownerApp?.product : undefined;
-  if (daoOwned && !['payables', 'treasury'].includes(daoArea)) throw new Error('daoOwned requires an owner app');
+  if (daoOwned &&!['payables', 'treasury'].includes(daoArea)) throw new Error('daoOwned requires an owner app');
   if (daoArea === 'payables') owner = DAO;
   if (daoArea === 'treasury' || daoPortfolio) { workspace = true; portfolioOwner = DAO; }
   const dao = daoOwned || daoPortfolio;

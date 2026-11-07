@@ -9,6 +9,11 @@ import { readOnlyProviderFetch } from "./fixtures/live-network.cjs";
 import { rpcValue } from "./browser/fixtures/rpc.cjs";
 import { timedPrices } from "./fixtures/authority.js";
 import { validateBaseline } from "./e2e/challenge.mjs";
+import { requireConfirmBuild } from "./e2e/environment.mjs";
+import { missingConfirmFiles } from "../src/gateway/app-confirm.js";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 test("fault challenges accept a growing complete baseline and reject incomplete or unproven passes", () => {
   const titles = ["invoice, owner approval, and settlement stay distinct across the real stack",
@@ -128,4 +133,24 @@ test("a swallowed live-barrier error still fails the test process", () => {
   });
   assert.equal(result.status, 1, result.stderr);
   assert.equal(result.stderr, "");
+});
+
+test("the stack refuses to start without the confirm page's web build, naming the build to run", async () => {
+  const dist = mkdtempSync(join(tmpdir(), "confirm-build-"));
+  const write = (path: string, text = "") => { mkdirSync(dirname(join(dist, path)), { recursive: true }); writeFileSync(join(dist, path), text); };
+  // No build at all: the gateway would answer the page 404.
+  assert.deepEqual(missingConfirmFiles(dist), ["build-manifest.json"]);
+  await assert.rejects(requireConfirmBuild(dist), /web build is missing or incomplete.*Run `pnpm build:web`/);
+  // A build from before the confirm entry existed.
+  write("build-manifest.json", JSON.stringify({ entries: { index: { html: ["/index.html"] } } }));
+  assert.deepEqual(missingConfirmFiles(dist), ["build-manifest.json: the confirm entry"]);
+  // The entry is listed but its page and scripts aren't there: the page would load blank.
+  write("build-manifest.json", JSON.stringify({ entries: { confirm: { html: ["/confirm.html"],
+    initial: { js: ["/static/js/lib.3.js", "/static/js/confirm.2.js"], css: ["/static/css/c.4.css"] } } } }));
+  write("static/js/lib.3.js");
+  assert.deepEqual(missingConfirmFiles(dist), ["/confirm.html", "/static/js/confirm.2.js", "/static/css/c.4.css"]);
+  await assert.rejects(requireConfirmBuild(dist), /no \/confirm\.html, \/static\/js\/confirm\.2\.js, \/static\/css\/c\.4\.css/);
+  for (const path of ["confirm.html", "static/js/confirm.2.js", "static/css/c.4.css"]) write(path);
+  assert.deepEqual(missingConfirmFiles(dist), []);
+  await requireConfirmBuild(dist);
 });
