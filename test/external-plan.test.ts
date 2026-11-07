@@ -6,6 +6,7 @@ import { prepareExternalPlan } from "../src/planning/external.js";
 import { readOps } from "../src/ops.js";
 import { loadPlan } from "../src/plans.js";
 import { PublicError } from "../src/public-error.js";
+import { loadStrategy } from "../src/strategy.js";
 import { freshDirectory } from "./fixtures/harness.js";
 freshDirectory("external-plan", { per: "test" });
 
@@ -48,9 +49,13 @@ test("external plans reject invalid actions, forbidden outputs, infeasible total
   provider();
   await assert.rejects(prepareExternalPlan({ swaps: [{ ...swaps[0], amount: "999999999999" }] }));
   await assert.rejects(prepareExternalPlan({ swaps: [{ ...swaps[0], amount: "6000000" }, { ...swaps[0], amount: "6000000" }] }), refused(/remaining balance/));
-  await assert.rejects(prepareExternalPlan({ swaps: [{ ...swaps[0], minAmountOut: "999999999999999999999999" }] }), refused(/floor/));
+  const named = `swap 1000000 ${ASSETS.USDC} for ${ASSETS.wNEAR}`;
+  await assert.rejects(prepareExternalPlan({ swaps: [{ ...swaps[0], minAmountOut: "999999999999999999999999" }] }),
+    (error: unknown) => refused(/floor/)(error) && (error as Error).message ===
+      `Requested output floor 999999999999999999999999 exceeds the quoted output 500000000000000000000000 (${named})`);
   api.swap = async () => ({ quote: { amount_out: "500000000000000000000000", min_amount_out: "1" } }) as never;
-  await assert.rejects(prepareExternalPlan({ swaps }), refused(/cost/));
+  await assert.rejects(prepareExternalPlan({ swaps }), (error: unknown) => refused(/cost/)(error) && (error as Error).message ===
+    `Quote's worst-case cost 10000 bps exceeds the owner's cost limit ${loadStrategy().maxCostBps} bps (${named})`);
   assert.deepEqual(readOps(), []);
 });
 

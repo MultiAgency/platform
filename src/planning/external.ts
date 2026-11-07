@@ -45,8 +45,11 @@ export async function quoteChosen(swaps: ChosenSwap[]) {
     if (!Amount.safeParse(quote.amountOut).success || !Amount.safeParse(quote.minAmountOut).success || BigInt(quote.minAmountOut) > BigInt(quote.amountOut))
       throw new Error("Quote has invalid output amounts");
     const floor = swap.minAmountOut && BigInt(swap.minAmountOut) > BigInt(quote.minAmountOut) ? swap.minAmountOut : quote.minAmountOut;
-    if (BigInt(floor) > BigInt(quote.amountOut)) throw new PublicError("Requested output floor exceeds the quoted output");
-    if (!Number.isFinite(quote.worstCostBps) || quote.worstCostBps > strategy.maxCostBps) throw new PublicError("Quote exceeds the owner's cost limit");
+    const named = `swap ${swap.amount} ${swap.from} for ${swap.to}`;
+    if (BigInt(floor) > BigInt(quote.amountOut))
+      throw new PublicError(`Requested output floor ${floor} exceeds the quoted output ${quote.amountOut} (${named})`);
+    if (!Number.isFinite(quote.worstCostBps) || quote.worstCostBps > strategy.maxCostBps)
+      throw new PublicError(`Quote's worst-case cost ${quote.worstCostBps} bps exceeds the owner's cost limit ${strategy.maxCostBps} bps (${named})`);
     actions.push({ type: "swap", from: swap.from, to: swap.to, amount: swap.amount,
       amountOut: quote.amountOut, minAmountOut: floor, costBps: quote.costBps });
     usdIn.push(usd);
