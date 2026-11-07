@@ -1,11 +1,14 @@
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { environment } from './environment.mjs';
 import { connectWallet, installWallet } from './wallet.mjs';
 import { DAO, OWNER, PAYEE, PUBLIC_KEY, SECOND, listen } from './provider.mjs';
 import { appCredential, stackControls } from './stack-controls.mjs';
+
+// Written whole: a reader polling the file never sees it truncated.
+const writeWhole = (path, text) => { writeFileSync(`${path}.tmp`, text); renameSync(`${path}.tmp`, path); };
 
 // A running isolated stack for app-owned recipes and filming: the same services, simulator and
 // boundaries as the deterministic tests. Simulated provider, chain, signatures and settlement only.
@@ -90,7 +93,7 @@ const state = () => ({
   providerErrors: simulated.errors, simulated: ['provider', 'chain', 'wallet signatures', 'deposits', 'settlement'],
   controls: { directory: controls, write: '<name>.json with {"command": one of ' + Object.keys(commands).join('|') + ', ...arguments}; the result appears as <name>.result.json', stop: 'create a file named stop' },
 });
-writeFileSync(join(directory, 'state.json'), JSON.stringify(state(), null, 2));
+writeWhole(join(directory, 'state.json'), JSON.stringify(state(), null, 2));
 console.log(`Isolated stack ready: ${join(directory, 'state.json')}`);
 await new Promise(resolve => {
   // One pass at a time: a command may wait on the stack (signing in, issuing), and a file is answered once.
@@ -108,9 +111,9 @@ await new Promise(resolve => {
           const value = await commands[command](input);
           result = { ok: true, ...(value !== undefined && { value }) };
         } catch (error) { result = { ok: false, error: String(error) }; }
-        unlinkSync(path); writeFileSync(path.replace(/\.json$/, '.result.json'), JSON.stringify(result));
+        unlinkSync(path); writeWhole(path.replace(/\.json$/, '.result.json'), JSON.stringify(result));
       }
-      writeFileSync(join(directory, 'state.json'), JSON.stringify(state(), null, 2));
+      writeWhole(join(directory, 'state.json'), JSON.stringify(state(), null, 2));
     } finally { running = false; }
     if (existsSync(join(directory, 'stop'))) { clearInterval(timer); resolve(); }
   }, 250);
