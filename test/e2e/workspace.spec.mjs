@@ -10,26 +10,36 @@ async function rpc(page, agent, method, input) {
     return { status: response.status, body: await response.json() };
   }, { agent, method, input });
 }
+// The running test's wallets, each recorded as soon as it has a page. A test stalled on an await that is not a
+// Playwright call times out without reaching its `finally`; the after-each hook still runs, and saves them.
+const openWallets = [];
+async function saveWallets(info) {
+  const wallets = openWallets.splice(0);
+  for (const [i, wallet] of wallets.entries()) {
+    await wallet.page.screenshot({ path: info.outputPath(`${i}.png`), fullPage: true }).catch(() => {});
+    writeFileSync(info.outputPath(`${i}.txt`), await wallet.page.locator('body').innerText().catch(() => 'unavailable'));
+    await wallet.context.tracing.stop({ path: info.outputPath(`trace-${i}.zip`) });
+    await wallet.context.close();
+  }
+  return wallets;
+}
+test.afterEach(async ({}, info) => { await saveWallets(info); });
 async function signedPage(browser, stack, account, path) {
   const wallet = await browserContext(browser, stack, account);
   await wallet.context.tracing.start({ screenshots: true, snapshots: true });
-  const page = await wallet.context.newPage();
-  await page.goto(`${stack.dashboard}${path}`);
-  await connectWallet(page, account);
-  return { ...wallet, page };
+  const signed = { ...wallet, page: await wallet.context.newPage() };
+  openWallets.push(signed);
+  await signed.page.goto(`${stack.dashboard}${path}`);
+  await connectWallet(signed.page, account);
+  return signed;
 }
 async function scenario(browser, info, run, options = {}) {
   const stack = await environment(info.outputPath('environment'), { workspace: true, ...options });
   stack.browserVersion = browser.version();
-  const wallets = [];
-  try { await run(stack, async (account, path) => { const wallet = await signedPage(browser, stack, account, path); wallets.push(wallet); return wallet; }); }
+  let wallets = [];
+  try { await run(stack, (account, path) => signedPage(browser, stack, account, path)); }
   finally {
-    for (const [i, wallet] of wallets.entries()) {
-      await wallet.page.screenshot({ path: info.outputPath(`${i}.png`), fullPage: true }).catch(() => {});
-      writeFileSync(info.outputPath(`${i}.txt`), await wallet.page.locator('body').innerText().catch(() => 'unavailable'));
-      await wallet.context.tracing.stop({ path: info.outputPath(`trace-${i}.zip`) });
-      await wallet.context.close();
-    }
+    wallets = await saveWallets(info);
     await stack.close();
     expect(stack.simulated.errors).toEqual([]); expect(stack.portfolio.errors).toEqual([]);
     for (const wallet of wallets) expect(wallet.unexpected).toEqual([]);
