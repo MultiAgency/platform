@@ -241,10 +241,12 @@ owner signatures are DAO votes the `daoVote` control passes; it needs `--app`),
 `--app <deployment>` for an app deployment's server on `/apps/v1` (a service credential issued at startup into
 `stack/app-credential`, mode 0600, never into `state.json`; self-service setup of the deployment's own Payables agents),
 `--on-chain-policy-edits` for the simulator to answer freeze, unfreeze and a policy edit that changes a
-provider-enforced field as NEP-366, for the Payables and Treasury agents alike (the app then receives only a confirm link, served from `web/dist`, so run
-`pnpm build:web` first),
+provider-enforced field as NEP-366, for the Payables and Treasury agents alike (the app then receives only a confirm link),
 `--headed` or `--no-browser`) builds the same isolated stack for app-owned workflow
-recipes and filming, and keeps it running. `stack/state.json` lists the application URLs, CDP endpoint,
+recipes and filming, and keeps it running. It builds the web into its snapshot first. Running `test/e2e/stack.mjs`
+directly, as an app's own stack tests do, serves this checkout's `web/dist`: run `pnpm build:web` there first. Without
+the confirm page's build (its manifest entry, page and listed assets) the stack refuses to start and names that command,
+rather than serve a confirm page that loads blank. `stack/state.json` lists the application URLs, CDP endpoint,
 owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`: the stack clicks a button named exactly
 "Connect wallet" and, if near-connect asks which wallet to use, picks the local test wallet), with `--treasury` the portfolio's access page and
 machine base (with `--dao-treasury` both `null`, since a DAO has no owner session, plus the DAO's account and Group members, the agent's owner and `signer: "dao"`), with `--app` the deployment, base and credential file, the simulated chain's RPC (`chain.rpc`), the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
