@@ -6,7 +6,7 @@ import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { generateKey, Near, type PrivateKey } from "near-kit";
 import { setupMessage } from "../src/contract/app-consent.js";
 import { AppCredentials } from "../src/gateway/app-access.js";
@@ -171,9 +171,9 @@ test("the platform package carries the gateway and the confirm entry's files onl
     const files = (dir: string): string[] => readdirSync(join(out, dir), { withFileTypes: true }).flatMap(e => e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]);
     assert.deepEqual(files("web").sort(), ["web/dist/build-manifest.json", "web/dist/confirm.html", "web/dist/static/css/c.4.css",
       "web/dist/static/font/f.5.woff2", "web/dist/static/js/confirm.2.js", "web/dist/static/js/lib.3.js", "web/dist/static/js/lib.3.js.LICENSE.txt"]);
-    // The headless gateway serves the confirm page's assets from the packaged manifest, and names nothing of the owner app.
+    // The headless gateway serves the confirm entry's assets from the packaged manifest: the owner app's entry is listed
+    // there too, but none of its files ships, so none is served.
     assert.deepEqual([...confirmAssets(join(out, "web/dist"))].sort(), ["/static/css/c.4.css", "/static/font/f.5.woff2", "/static/js/confirm.2.js", "/static/js/lib.3.js"]);
-    assert.doesNotMatch(readFileSync(join(out, "web/dist/build-manifest.json"), "utf8"), /index/);
     assert.deepEqual(files("deploy").sort(), ["deploy/platform-entrypoint.sh", "deploy/platform-staging.json", "deploy/platform.json"]);
     assert.equal(existsSync(join(out, "frontends")), false);
     assert.equal(statSync(join(out, "deploy/platform-entrypoint.sh")).mode & 0o111, 0o111, "the entrypoint is executable");
@@ -181,6 +181,9 @@ test("the platform package carries the gateway and the confirm entry's files onl
     const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as { revisions: Record<string, unknown>; files: Record<string, string> };
     assert.deepEqual(Object.keys(manifest.revisions), ["platform"]);
     assert.ok(manifest.files["web/dist/confirm.html"] && manifest.files["web/dist/build-manifest.json"] && !manifest.files["web/dist/index.html"]);
+    // The release candidate's check: every web file shipped is byte-equal to the tested build's.
+    for (const [file, hash] of Object.entries(manifest.files)) if (file.startsWith("web/dist/"))
+      assert.equal(hash, createHash("sha256").update(readFileSync(join(tree, file))).digest("hex"), `${file} differs from the tested build`);
     assert.throws(() => execFileSync(process.execPath, [join(process.cwd(), "scripts/package-platform.mjs"), out], { cwd: tree, stdio: "pipe" }), /must not exist/);
   } finally { rmSync(tree, { recursive: true, force: true }); rmSync(out, { recursive: true, force: true }); }
 });
