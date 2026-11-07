@@ -27,7 +27,7 @@ test("real shared gateway isolates access sessions, credentials and agent assign
   writeFileSync(join(dir, "dashboard.json"), JSON.stringify({ host: "one.test", selfService: true,
     hosts: { "one.test": { demo: "treasury", agents: ["portfolio", "dao"] }, "two.test": { demo: "treasury", agents: ["portfolio"] }, "empty.test": { demo: "treasury", agents: [], hostedAreas: ["treasury"] } },
     agents: [{ name: "portfolio", owner: "owner.near", area: "treasury", port: agentPort }, { name: "dao", owner: "dao.near", area: "treasury", port: agentPort + 1 }] }));
-  const child = spawn(join(root, "node_modules/.bin/tsx"), [join(root, "src/gateway/server.ts")], { cwd: dir,
+  const child = spawn(process.execPath, ["--import", join(root, "node_modules/tsx/dist/loader.mjs"), join(root, "src/gateway/server.ts")], { cwd: dir,
     env: { ...process.env, SESSION_SECRET: secret, PORT: String(port), NEAR_RPC_URL: `http://127.0.0.1:${chainPort}` }, stdio: ["ignore", "pipe", "pipe"] });
   let output = ""; child.stderr!.on("data", chunk => output += chunk);
   t.after(async () => { const ended = child.exitCode === null && child.signalCode === null ? new Promise<void>(resolve => child.once("exit", () => resolve())) : Promise.resolve(); child.kill(); await ended; await close(chain); await close(upstream); rmSync(dir, { recursive: true, force: true }); });

@@ -42,7 +42,7 @@ async function startGateway(t: { after: (fn: () => Promise<void>) => void }, con
   const token = new AppCredentials(join(dir, ".app-access")).issue({ deployment: "staging", host: HOST, label: "staging", days: 30 }).token;
   let diagnostics = "";
   const secret = "offline-platform-host-secret-123456789012345";
-  const child: ChildProcess = spawn(join(root, "node_modules/.bin/tsx"), [join(root, "src/gateway/server.ts")], { cwd: dir,
+  const child: ChildProcess = spawn(process.execPath, ["--import", join(root, "node_modules/tsx/dist/loader.mjs"), join(root, "src/gateway/server.ts")], { cwd: dir,
     env: { ...process.env, PORT: String(port), SESSION_SECRET: secret, NEAR_RPC_URL: `http://127.0.0.1:${chainPort}` },
     stdio: ["ignore", "pipe", "pipe"] });
   child.stderr!.on("data", data => { diagnostics = (diagnostics + data.toString()).slice(-8000); });

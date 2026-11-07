@@ -57,7 +57,7 @@ test("real gateway isolates host APIs, preserves Proto, and refuses writes witho
     { name: "payout", area: "payables", owner: "alice.near", port: portB, executor: false },
   ] };
   writeFileSync(join(dir, "dashboard.json"), JSON.stringify(config));
-  const child = spawn(join(process.cwd(), "node_modules/.bin/tsx"), [join(process.cwd(), "src/gateway/server.ts")], { cwd: dir, env: { ...process.env, PORT: String(port), SESSION_SECRET: secret, NEAR_RPC_URL: `http://127.0.0.1:${nearPort}` }, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, ["--import", join(process.cwd(), "node_modules/tsx/dist/loader.mjs"), join(process.cwd(), "src/gateway/server.ts")], { cwd: dir, env: { ...process.env, PORT: String(port), SESSION_SECRET: secret, NEAR_RPC_URL: `http://127.0.0.1:${nearPort}` }, stdio: ["ignore", "pipe", "pipe"] });
   t.after(async () => { child.kill(); upstream.close(); upstreamB.close(); near.close(); rmSync(dir, { recursive: true, force: true }); });
   let errors = ""; child.stderr!.on("data", x => errors += x);
   await new Promise<void>((resolve, reject) => { const timer = setTimeout(() => reject(new Error(errors)), 8000); child.stdout!.on("data", x => { if (String(x).includes("on port")) { clearTimeout(timer); resolve(); } }); });

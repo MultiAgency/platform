@@ -14,7 +14,7 @@ for (const enabled of [false, true]) test(`shared discovery advertises area boun
   writeFileSync(join(dir, 'dashboard.json'), JSON.stringify({ host: 'payables.test', selfService: enabled,
     agents: [{name:'payout', owner:'alice.near', area:'payables', port:9999, executor:false}],
     hosts: { 'payables.test': {demo:'payables', agents:['payout'], hostedAreas:['payables']}, 'other.test': {demo:'payables', agents:['payout']} } }));
-  const child = spawn(join(process.cwd(), 'node_modules/.bin/tsx'), [join(process.cwd(), 'src/gateway/server.ts')], {cwd:dir, env:{...process.env, PORT:String(port),SESSION_SECRET:'offline-discovery-secret-'.repeat(3)},stdio:['ignore','pipe','pipe']});
+  const child = spawn(process.execPath, ['--import', join(process.cwd(), 'node_modules/tsx/dist/loader.mjs'), join(process.cwd(), 'src/gateway/server.ts')], {cwd:dir, env:{...process.env, PORT:String(port),SESSION_SECRET:'offline-discovery-secret-'.repeat(3)},stdio:['ignore','pipe','pipe']});
   t.after(async () => { if(child.exitCode === null) { child.kill(); await new Promise(resolve => child.once('exit',resolve)); } });
   let diagnostics=''; child.stderr!.on('data', chunk=>diagnostics+=chunk);
   await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error(diagnostics||'startup timeout')),8000);child.stdout!.on('data',chunk=>{if(String(chunk).includes('on port')){clearTimeout(timer);resolve();}});child.once('exit',()=>{clearTimeout(timer);reject(new Error(diagnostics));});});
