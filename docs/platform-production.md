@@ -11,7 +11,7 @@ unchanged by it.
 | Item | State | What it needs |
 |---|---|---|
 | A release candidate on the commit to ship | 0.5.3 is the build to ship: it has the shutdown grace, consent archiving, the monthly access log and provider SDK 0.8.0 (needed for a partner portal key). Candidate `a434f381` (commit `49b8d51`, Node 24.22.2) passed every gate on 2026-11-07; published to npm and tagged `sdk-v0.5.3` | Done |
-| The same build observed on staging | staging runs 0.5.3 (`c3a2eb0b`, 2026-11-07; read-only checks passed) | One consent and one read on staging |
+| The same build observed on staging | staging runs 0.5.3 (`c3a2eb0b`, then `54fa8a24` with a partner portal key, 2026-11-07; read-only checks passed); one consent and one read through treasury.dev on 2026-11-07 ([platform staging](platform-staging.md)) | Done |
 | Its own credentials | none issued | A new provider key for production from the partner portal (keys from before the portal are being retired: [credential rotation](credential-rotation.md)), a new FastNEAR key and a new `SESSION_SECRET`. None reused from `dao`, so the outstanding [credential rotation](credential-rotation.md) for `dao` doesn't touch this service; that rotation still needs doing |
 | Railway config | `railway.json` still works until 2026-12-01 | A first deploy before then works as staging's did; any deploy after needs the migration ([operations](operations.md#railway-config-as-code-ends-2026-12-01)) |
 | Treasury setup on production | `deploy/platform.json` sets up Payables only | A decision: add `treasury` to `appSetup` (DAO setup through apps is mainnet-observed on staging), or keep Payables only at first |

@@ -196,7 +196,11 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 **Before starting**
 - **Staging runs 0.5.3's `platform` package.** Since 2026-11-07 (checked at 04:27Z): candidate `a434f381`, commit
   `49b8d51`, Railway deployment `c3a2eb0b`, image `sha256:d2803f47…`, with `deploy/platform-staging.json`. Its confirm
-  page's 22 assets were each fetched and byte-equal to the package's. Before it, from 2026-11-06T21:16Z, staging ran
+  page's 22 assets were each fetched and byte-equal to the package's. Redeployed on the same image with the partner
+  portal's key as deployment `54fa8a24` (2026-11-07T05:00Z; an earlier redeploy, `a2adbd16`, had the wrong key and
+  every provider call answered `401 invalid_api_key`, with nothing sent). On it, through treasury.dev, the owner
+  disconnected an existing Treasury agent and signed a new consent (read, treasury and owner; expires
+  2027-02-05T09:26Z), and the agent's holdings and books read through the provider (2026-11-07, about 09:26Z). The strategy grant stayed in force across the reconnect. Before it, from 2026-11-06T21:16Z, staging ran
   `platform` packages built from a checkout, not from a release candidate: commit `6f8ecf0` (deployments `d4a7ac2f`
   and `73e2c2e7`), then commit `161ee1f` from 2026-11-07T02:48Z (deployment `4d7b6d77`, image `sha256:1ae21c41…`).
   Each is matched to its package by time (the package was made a few minutes before the deployment); Railway

@@ -345,3 +345,20 @@ and was at first not registered on USDC.
 Not checked: a confidential withdrawal of an asset whose `destination_asset` differs from its `token`; how a failed
 delivery is reported; whether 1Click would have registered an unregistered USDC receiver (the platform refuses before
 sending, so it is never tried).
+
+## A wallet owner approves a Treasury rebalance through an app on platform staging, 2026-11-07 (UTC)
+
+On mainnet through platform staging at api.dev.multiagency.ai, running SDK 0.5.3's `platform` package (release
+candidate `a434f381`, commit `49b8d51`) as Railway deployment `54fa8a24`, the first deployment with a partner portal
+provider key. A wallet-owned Treasury agent, through treasury.dev, with strategy targets USDC 50%, wNEAR 25%, ETH 25%,
+autopilot off and a $0 per-run ceiling. Amounts were small; they are in the private release record.
+
+| Check | Result |
+|---|---|
+| A rebalance proposed in the app and approved by the owner's own signature | At about 05:50Z both swaps (wNEAR → ETH, USDC → ETH) read `SUCCESS` in the app's activity, and the holdings moved to the targets |
+| Sends with a partner portal key | Both swaps were sent on `54fa8a24`, whose provider key is from the partner portal |
+| The money lock during the run | The gateway logged reconciliation deferred while the swaps held the lock (05:50:16Z to 05:50:37Z), then nothing further |
+| A new consent after disconnecting (about 09:26Z) | The owner disconnected and signed a new consent (read, treasury, owner); holdings and books read through the provider, and the strategy grant stayed authorized |
+
+Not checked here: the proposal's ID and the chain transactions (read from the app's activity, not from the provider's
+records); a rebalance by autopilot (off, $0 ceiling).
