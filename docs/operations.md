@@ -188,6 +188,14 @@ The owner runs the read-only smoke command before and after the rollout:
 DASHBOARD_URL=https://proto.multiagency.ai INVOICES_URL=https://invoices.multiagency.ai pnpm smoke
 ```
 
+For a platform host (app access and the confirm page only), `PLATFORM_URL=https://api.multiagency.ai pnpm smoke`
+(or `https://api.dev.multiagency.ai`) checks, without a credential: `/health`; app access answers 401 without a credential
+and 403 to a browser; `POST /apps/v1/dao-consents` 401; `/`, `/gw/challenge`, `/a/x/access` and `/build-manifest.json`
+404; the confirm page for an unused link, and every script and stylesheet it loads, 200 (a host without its build
+manifest serves the page blank with no error); and an unknown DAO's stop page 404 with no script, under
+`default-src 'none'`. A request for another host can't be checked through Railway's edge, so its 421 stays
+offline-tested. Each of the three URLs is optional.
+
 For signed-in checks, use `SMOKE_COOKIE_FILE` and `SMOKE_SNAPSHOT` paths in the private release
 record, not tracked files. Compare the same snapshot before and after. Smoke deliberately avoids
 `setup`, `held` and invoice-list reads that may update records, and does not prove all new routes

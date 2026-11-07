@@ -79,7 +79,7 @@ The command line has only what the dashboard doesn't: owner actions signed with 
 | `pnpm inspect [--whoami]` | The agent's policy, balances and grants, as the API returns them |
 | `pnpm reconcile [--poll]` | Operations without a proven outcome; `--poll` reads their statuses once, resending nothing |
 | `pnpm books [--csv]` | Balances against chain transfers and recorded executions; `--csv` prints the ledger |
-| `pnpm smoke` | Read-only check of the hosted dashboard and invoice page |
+| `pnpm smoke` | Read-only check of the hosted dashboard and invoice page (`DASHBOARD_URL`, `INVOICES_URL`) and of a platform host (`PLATFORM_URL`); set any of them |
 | `pnpm run-report` | The unattended-run report ([unattended run](docs/unattended-run.md)) |
 
 ## Hosted demo
