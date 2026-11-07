@@ -31,6 +31,13 @@ platform-only fixes are listed separately.
   `AppDaoPrepared` and `AppWalletPrepared`.
 - **Proposal refusal codes** (addition): `PROPOSAL_REFUSAL_CODES` and `ProposalRefusalCode` list every code the
   proposal procedures send; the treasury-app skill lists the six it was missing.
+- **`proposals/create` refusals carry their code and numbers** (reclassification): with `legs: "strategy"`, a refusal
+  while picking the strategy's legs (a stale price, a strategy change during observation, no grant) is now `refused`
+  with `not_proposable`, like explicit legs; it was `refused` with no code. An agent with no grant now refuses
+  `proposals/create` (`not_proposable`, either kind of legs) with "This agent has no grant: the owner must issue one
+  before it can quote or send."; it was an untyped server error, read as `unknown`. An explicit leg's floor and
+  cost refusals now name the requested floor and the quoted output, or the quote's worst-case cost and the owner's
+  limit in bps, with the leg's amount and asset ids, all raw. Offline-tested.
 - **A cash floor in the strategy** (addition; platform#23, Treasury ADR 4): `strategy/save` accepts an optional
   `cashFloor: { usd, assets }`, whole USD of the named assets' public and confidential balance. `strategy/get` and the
   strategy snapshots type it. The platform refuses a swap that would lower that cash and leave it under the floor, on
@@ -81,6 +88,10 @@ Platform fixes in the same release, outside the package:
 - **The `platform` package serves the confirm page** (platform#28): it now carries the confirm entry of the web build's
   manifest, which a headless gateway reads to serve the page's assets. Packages built before had none, so the page
   loaded blank (seen on staging 2026-11-06).
+- **Dependencies refreshed for Dependabot alerts** (lockfile only): seroval 1.7.7 (web frontend, through TanStack
+  Router; its flaws are in server-rendering serialization, which the single-page app doesn't use),
+  systeminformation 5.33.19 and fast-uri 3.1.9 (development only, through the shadcn CLI). elliptic, deepmerge and
+  minimatch have no fix in range and were dismissed with reasons.
 
 ## 0.5.2 (2026-11-05)
 
