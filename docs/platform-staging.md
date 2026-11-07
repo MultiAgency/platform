@@ -194,8 +194,14 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 - what the provider answers for a DAO-owned hosted agent
 
 **Before starting**
-- **Staging runs 0.5.2's `platform` package.** Since 2026-11-06 (checked at 15:44Z): candidate `d33f8f9b`, commit
-  `ce5fec6`, Railway deployment `5975d56f`, with `deploy/platform-staging.json`, whose `appSetup` lists `treasury`.
+- **Staging runs 0.5.3's `platform` package.** Since 2026-11-07 (checked at 04:27Z): candidate `a434f381`, commit
+  `49b8d51`, Railway deployment `c3a2eb0b`, image `sha256:d2803f47…`, with `deploy/platform-staging.json`. Its confirm
+  page's 22 assets were each fetched and byte-equal to the package's. Before it, from 2026-11-06T21:16Z, staging ran
+  `platform` packages built from a checkout, not from a release candidate: commit `6f8ecf0` (deployments `d4a7ac2f`
+  and `73e2c2e7`), then commit `161ee1f` from 2026-11-07T02:48Z (deployment `4d7b6d77`, image `sha256:1ae21c41…`).
+  Each is matched to its package by time (the package was made a few minutes before the deployment); Railway
+  doesn't record the source. Before that, 0.5.2 from 2026-11-06 (checked at 15:44Z): candidate `d33f8f9b`, commit
+  `ce5fec6`, deployment `5975d56f`, whose `appSetup` lists `treasury`.
   Before that, 0.5.1 with the proposal-hash fix from about 2026-11-05T04:12Z (candidate `956a0e55`, commit `8ce51c2`,
   deployment `3c085b20`, image `sha256:1870fb68…`), 0.5.1 from about 02:53Z (candidate
   `2b941c69`, commit `2223d11`, deployment `f417fc3a`, image `sha256:9fa854c9…`), and 0.5.0 from 2026-11-04T21:46Z
