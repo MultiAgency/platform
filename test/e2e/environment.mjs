@@ -65,13 +65,15 @@ export async function environment(directory, { workspace = false, portfolioOwner
   for (const dir of [executorDir, reviewerDir, gatewayDir]) mkdirSync(dir);
   // Each port is probed on the address its service binds: the gateway listens on every interface (`::`), and a port free
   // on 127.0.0.1 can still be held there by another process (macOS allows both binds), so its start would fail.
-  const [executorPort, reviewerPort, gatewayPort, invoicePort] = await Promise.all([freePort(), freePort(), freePort('::'), freePort('::1')]);
+  const [executorPort, reviewerPort, invoicePort] = await Promise.all([freePort(), freePort(), freePort('::1')]);
+  let gatewayPort = await freePort('::');
   const key = join(directory, 'localhost.key'), cert = join(directory, 'localhost.crt');
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert,
     '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1'], { stdio: 'ignore' });
-  async function proxy(port, host) {
+  // `target` is read per request: the gateway may start on a later port than the one first probed.
+  async function proxy(target, host) {
     const server = httpsServer({ key: readFileSync(key), cert: readFileSync(cert) }, (req, res) => {
-      const upstream = request({ host, port, method: req.method, path: req.url, headers: req.headers }, answer => {
+      const upstream = request({ host, port: target(), method: req.method, path: req.url, headers: req.headers }, answer => {
         res.writeHead(answer.statusCode, answer.headers); answer.pipe(res);
       });
       upstream.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
@@ -79,8 +81,8 @@ export async function environment(directory, { workspace = false, portfolioOwner
     });
     proxies.push(server); return listen(server);
   }
-  const dashboard = `https://127.0.0.1:${await proxy(gatewayPort, '127.0.0.1')}`;
-  const invoices = `https://localhost:${await proxy(invoicePort, '::1')}`;
+  const dashboard = `https://127.0.0.1:${await proxy(() => gatewayPort, '127.0.0.1')}`;
+  const invoices = `https://localhost:${await proxy(() => invoicePort, '::1')}`;
   // The actual Invoices release runs as its own process with no Proto configuration or credentials.
   let payeeFrontend, frontendProcess;
   const frontendProcesses = new Set();
@@ -196,8 +198,18 @@ export async function environment(directory, { workspace = false, portfolioOwner
       // A new prototype's own build on this host, using the existing showcase assignment.
       ...(frontendDist && { hosts: { [new URL(dashboard).host]: { demo: 'showcase', agents: agents.map(a => a.name), frontendDist, hostedAreas } } }),
       ...(release && { hosts: { [new URL(dashboard).host]: { demo: ownerApp.product, agents: agents.filter(a => a.area === ownerApp.product).map(a => a.name), frontend: { origin: release.origin, product: ownerApp.product } } } }), ...((secondAccount || selfService) && { selfService: true, appSetup: ['treasury', 'payables'] }), agents }));
-    await start('gateway', gatewayDir, 'src/gateway/server.ts', { PORT: String(gatewayPort), AGENT_GRANT_TOKEN: '',
-      DASHBOARD_FILE: join(gatewayDir, 'dashboard.json') }, 'on port');
+    // Another process can take the probed port before the gateway binds it: only that failure retries, on a fresh
+    // port. The dashboard proxy forwards to whichever port the gateway took; the host it signs in to is the proxy's.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await start('gateway', gatewayDir, 'src/gateway/server.ts', { PORT: String(gatewayPort), AGENT_GRANT_TOKEN: '',
+          DASHBOARD_FILE: join(gatewayDir, 'dashboard.json') }, 'on port');
+        break;
+      } catch (error) {
+        if (attempt === 3 || !String(error.message).includes('EADDRINUSE')) throw error;
+        gatewayPort = await freePort('::');
+      }
+    }
   } catch (error) { await dispose(); throw error; }
   function records() {
     if (!existsSync(join(executorDir, '.invoices', `${simulated.id}.sqlite`))) return { invoices: [], revisions: [], payments: [], reservations: [] };
