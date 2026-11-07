@@ -142,6 +142,15 @@ test("only an app through the gateway proposes; the expiry is bounded; the owner
   assert.equal(tokenAmount("120500000", 6), "120.5"); assert.equal(tokenAmount("1000000", 6), "1");
 });
 
+test("with no grant, proposing is refused, not an unknown failure, and nothing is stored", async () => {
+  delete process.env.AGENT_GRANT_TOKEN;
+  for (const legs of [[{ from: usdc, to: wnear, amount: "15" }], "strategy"])
+    await assert.rejects(propose("r1", { legs }), (error: unknown) => refusedWith("not_proposable")(error)
+      && /no grant: the owner must issue one/.test((error as Error).message));
+  assert.deepEqual(listProposals(app).proposals, []);
+  assert.deepEqual(sends, []); assert.deepEqual(readOps(), []);
+});
+
 test("a proposal the provider warns about, or whose output the policy forbids, is not stored", async () => {
   warnings = ["high_fee"];
   await assert.rejects(propose(), refusedWith("not_proposable"));

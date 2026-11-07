@@ -109,11 +109,12 @@ export async function createProposal(context: CallContext, input: unknown, now =
   if (until > now.getTime() + MAX_PROPOSAL_MS) throw refused("expiry_invalid", "A proposal is valid for at most 7 days.");
   const open = proposalIds().filter(other => { const p = loadProposal(other); return p && ["proposed", "approved"].includes(proposalState(p.record).state); });
   if (open.length >= MAX_OPEN_PROPOSALS) throw refused("too_many_proposals", `This agent already has ${MAX_OPEN_PROPOSALS} open proposals. Withdraw or wait for some.`);
-  const chosen = legs === "strategy" ? await strategyLegs() : legs;
-  if (!chosen.length) throw refused("nothing_to_propose", "The strategy picks no leg worth its cost now. Nothing was stored.");
   let quoted: Awaited<ReturnType<typeof quoteChosen>>;
-  try { quoted = await quoteChosen(chosen); }
-  catch (error) { if (error instanceof PublicError) throw refused("not_proposable", error.message); throw error; }
+  try {
+    const chosen = legs === "strategy" ? await strategyLegs() : legs;
+    if (!chosen.length) throw refused("nothing_to_propose", "The strategy picks no leg worth its cost now. Nothing was stored.");
+    quoted = await quoteChosen(chosen);
+  } catch (error) { if (error instanceof PublicError) throw refused("not_proposable", error.message); throw error; }
   const { snapshot, actions, usdIn } = quoted;
   const record: ProposalRecord = { version: 1, id, requestId, actor: who.actor, consent: who.consent, deployment: who.deployment, organization: who.organization,
     agentId: snapshot.agentId, source: legs === "strategy" ? "rebalance" : "external", request,

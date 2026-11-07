@@ -17,10 +17,10 @@ import { refusalDetails } from "./provider-display.js";
 import { workOrderDispatchProblem } from "./work-order-binding.js";
 import { PublicError } from "./public-error.js";
 
-/** Every money action runs under the agent's grant, never the owner's key. */
+/** Every money action runs under the agent's grant, never the owner's key. With none, quoting and sending are refused. */
 export function agent() {
   const grantToken = process.env.AGENT_GRANT_TOKEN;
-  if (!grantToken) throw new Error("AGENT_GRANT_TOKEN is not set: issue a grant first");
+  if (!grantToken) throw new PublicError("This agent has no grant: the owner must issue one before it can quote or send.");
   return api.forGrant(grantToken);
 }
 
