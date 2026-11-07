@@ -75,7 +75,7 @@ test(`independent ${area} build signs into the real gateway and keeps reads host
     'invoices.test': { demo: 'invoices', agents: [], hostedAreas: ['payables'] },
     'other.test': { demo: 'showcase', agents: ['treasury'] },
   }, agents: [{ name: 'treasury', owner: 'alice.near', area, port: agentPort, executor: false }, ...(area === 'payables' ? [{ name: 'linked-payout', owner: 'alice.near', area: 'payables', port: linkedPort, executor: false, invoices: 'https://invoices.test/submit?source=agency' }] : [])] }));
-  const startGateway = () => spawn(join(runtime, 'node_modules/.bin/tsx'), [join(runtime, 'src/gateway/server.ts')], {
+  const startGateway = () => spawn(process.execPath, ['--import', join(runtime, 'node_modules/tsx/dist/loader.mjs'), join(runtime, 'src/gateway/server.ts')], {
     cwd: directory, env: { ...process.env, PORT: String(port), SESSION_SECRET: 'offline-shared-frontend-secret-123456789', NEAR_RPC_URL: `http://127.0.0.1:${chainPort}`, NEAR_INTENTS_AGENT_API_URL: `http://127.0.0.1:${providerPort}` }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   let gateway = startGateway();

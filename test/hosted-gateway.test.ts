@@ -62,7 +62,7 @@ for (const sharedHosts of [false, true]) test(`${sharedHosts ? "shared hosts" : 
   };
   t.after(async () => { await stop(); rpc.close(); old.close(); rmSync(dir, { recursive: true, force: true }); });
   const start = async () => {
-    child = spawn(join(root, "node_modules/.bin/tsx"), [join(root, "src/gateway/server.ts")], { cwd: dir,
+    child = spawn(process.execPath, ["--import", join(root, "node_modules/tsx/dist/loader.mjs"), join(root, "src/gateway/server.ts")], { cwd: dir,
       env: { ...process.env, PORT: String(port), SESSION_SECRET: secret, NEAR_RPC_URL: `http://127.0.0.1:${rpcPort}` }, stdio: ["ignore", "pipe", "pipe"] });
     child.stderr!.on("data", data => { diagnostics = (diagnostics + data.toString()).slice(-8000); });
     await new Promise<void>((resolve, reject) => {

@@ -64,7 +64,7 @@ before(async () => {
   const probe = createServer();
   const port = await listen(probe);
   await new Promise((done) => probe.close(done));
-  gateway = spawn(join(process.cwd(), "node_modules/.bin/tsx"), [join(process.cwd(), "src/gateway/server.ts")], {
+  gateway = spawn(process.execPath, ["--import", join(process.cwd(), "node_modules/tsx/dist/loader.mjs"), join(process.cwd(), "src/gateway/server.ts")], {
     cwd: dir,
     env: { ...process.env, PORT: String(port), DASHBOARD_FILE: file, SESSION_SECRET: SECRET, NEAR_RPC_URL: `http://127.0.0.1:${rpcPort}` },
     stdio: ["ignore", "pipe", "inherit"],
