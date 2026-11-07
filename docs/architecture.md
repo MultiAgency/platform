@@ -84,7 +84,7 @@ existing domain calls. Submission remains centralized in dispatch.
   `appSetup`) and the confirm entry's files alone, each byte-equal to the tested build's. Hosted agents run the same
   agent server in both. Both share `scripts/release-package.mjs` (copy, file hashes, manifest).
 - **Command line**: `create-agent.ts`, `issue-grant.ts`, `revoke-grant.ts`, `update-policy.ts`,
-  `archive.ts`, `inspect.ts`, `books.ts`, `smoke.ts`, `run-report.ts`, `report.ts`, `remote.ts`.
+  `archive.ts`, `inspect.ts`, `books.ts`, `smoke.ts`, `smoke-platform.ts`, `run-report.ts`, `report.ts`, `remote.ts`.
 
 Planning is grouped under `src/planning/`: `model.ts` defines the saved contract, `checks.ts` is pure,
 `store.ts` preserves the existing `.plans/` format and claims, `observation.ts` reads current facts,

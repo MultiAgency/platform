@@ -1,12 +1,15 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { hostedRpc, required } from "./remote.js";
+import { hostedRpc } from "./remote.js";
 import type { Access } from "./gateway/roles.js";
+import { platformChecks } from "./smoke-platform.js";
 
 /**
- * Checks a deployed dashboard and invoice page from outside, changing nothing: health, security
- * headers, the sign-in host each signs for, and that nothing is reachable without a session.
+ * Checks deployed hosts from outside, changing nothing. Each URL is optional; set at least one:
+ * - DASHBOARD_URL, INVOICES_URL: the prototype's dashboard and invoice page. Health, security headers, the sign-in
+ *   host each signs for, and that nothing is reachable without a session.
+ * - PLATFORM_URL: a platform host (app access and the confirm page only; src/smoke-platform.ts).
  *
- *   DASHBOARD_URL=https://… INVOICES_URL=https://… pnpm smoke
+ *   DASHBOARD_URL=https://… INVOICES_URL=https://… PLATFORM_URL=https://… pnpm smoke
  *
  * With SMOKE_COOKIE_FILE (a file holding a signed-in `dao_session=…`) it also reads as that account.
  * With SMOKE_SNAPSHOT (a file path) it records what must survive a restart, and on the next run compares
@@ -19,8 +22,9 @@ import type { Access } from "./gateway/roles.js";
  * and records each open invoice's status).
  */
 
-const DASHBOARD = new URL(required("DASHBOARD_URL"));
-const INVOICES = new URL(required("INVOICES_URL"));
+const optionalUrl = (name: string) => (process.env[name] ? new URL(process.env[name]!) : undefined);
+const DASHBOARD = optionalUrl("DASHBOARD_URL"), INVOICES = optionalUrl("INVOICES_URL"), PLATFORM = optionalUrl("PLATFORM_URL");
+if (!DASHBOARD && !INVOICES && !PLATFORM) throw new Error("Set DASHBOARD_URL, INVOICES_URL or PLATFORM_URL");
 const COOKIE = process.env.SMOKE_COOKIE_FILE ? readFileSync(process.env.SMOKE_COOKIE_FILE, "utf8").trim() : undefined;
 const SNAPSHOT = process.env.SMOKE_SNAPSHOT;
 const ELSEWHERE = "https://elsewhere.example";
@@ -38,10 +42,10 @@ const at = (base: URL, path: string) => new URL(path, base);
 const get = (url: URL, headers: Record<string, string> = {}) => fetch(url, { headers, redirect: "manual" });
 const post = (url: URL, headers: Record<string, string> = {}, body = "{}") =>
   fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body, redirect: "manual" });
-const rpc = <T>(agent: string, path: string) => hostedRpc<T>(DASHBOARD, COOKIE!, agent, path);
+const rpc = <T>(agent: string, path: string) => hostedRpc<T>(DASHBOARD!, COOKIE!, agent, path);
 
 // The dashboard, without a session.
-{
+if (DASHBOARD) {
   const health = await get(at(DASHBOARD, "/health"));
   check("dashboard /health", health.ok && ((await health.json()) as { ok?: boolean }).ok === true, String(health.status));
 
@@ -68,7 +72,7 @@ const rpc = <T>(agent: string, path: string) => hostedRpc<T>(DASHBOARD, COOKIE!,
 }
 
 // The invoice page, without a session.
-{
+if (INVOICES) {
   const health = await get(at(INVOICES, "/health"));
   check("invoices /health", health.ok, String(health.status));
   const challenge = (await (await post(at(INVOICES, "/api/signin/challenge"))).json()) as { recipient?: string };
@@ -80,8 +84,16 @@ const rpc = <T>(agent: string, path: string) => hostedRpc<T>(DASHBOARD, COOKIE!,
   check("invoices refuse cross-site writes", crossSite.status === 403, String(crossSite.status));
 }
 
+// The platform host, without a credential.
+if (PLATFORM) {
+  // An unreachable host is a failed check, not a crash: the other hosts' results still print.
+  const results = await platformChecks(PLATFORM).catch((error: Error) =>
+    [{ name: `platform ${PLATFORM.host} reachable`, ok: false, detail: String((error.cause as { code?: string } | undefined)?.code ?? error.message) }]);
+  for (const { name, ok, detail } of results) check(name, ok, detail);
+}
+
 // As a signed-in account.
-if (COOKIE) {
+if (COOKIE && DASHBOARD) {
   type Me = { agents: { name: string; owner: string; dao: boolean }[]; viewer: { account: string; access: Record<string, Access> } | null };
   const me = (await (await get(at(DASHBOARD, "/gw/me"), { cookie: COOKIE })).json()) as Me;
   check("the session signs in", me.viewer !== null);
