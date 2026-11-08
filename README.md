@@ -353,9 +353,8 @@ Each line is a gap; the linked page says how the rest is known. The
   the coordinated [credential rotation](docs/credential-rotation.md) after the diagnostic exposure is outstanding.
 - FastNear deposit batching awaits a verified raw-transaction hash mapping; deployed indexer freshness is unverified
   ([follow-up](docs/archive/infrastructure-review.md#follow-up-review-2026-10-16)).
-- No check boots the `platform` image twice and proves the state directories survive: the prototype's `dao` image had
-  one (`scripts/check-shared-image.mjs`), removed with it on 2026-11-08. The platform's entrypoint never writes in
-  `/data/state`; that is read from its source, not checked on the image ([operations](docs/operations.md)).
+- The `platform` image check (`pnpm check:platform-image`: two boots, the platform smoke checks, state preserved) runs
+  by hand, with Docker; no release candidate gate or CI job runs it ([operations](docs/operations.md)).
 - Every deploy still uses Railway's Config as Code, which the Railway CLI warned on 2026-11-05 keeps working only until
   2026-12-01; later deploys need Railway's Infrastructure as Code (`.railway/railway.ts`). Not migrated:
   `deploy/railway.gateway.json`, the `platform` package's root `railway.json` (staging and production). See

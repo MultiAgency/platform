@@ -42,7 +42,8 @@
     "test:e2e:explore": "node test/e2e/run.mjs --explore",
     "test:e2e:stack": "node test/e2e/run.mjs --stack",
     "test:e2e:challenge": "node test/e2e/run.mjs --challenge",
-    "release:candidate": "node scripts/release-candidate.mjs"
+    "release:candidate": "node scripts/release-candidate.mjs",
+    "check:platform-image": "node scripts/check-platform-image.mjs"
   },
   "dependencies": {
     "@ag-ui/core": "1.0.3",

@@ -49,7 +49,10 @@ Platform changes in this release, outside the package:
   and fails on any other Dockerfile, packaging script or deploy file. Removed: `Dockerfile.gateway`,
   `Dockerfile.payouts`, the root `railway.json`, `deploy/shared-frontends.json`, `deploy/dashboard-entrypoint.sh`,
   `scripts/package-shared-frontends.mjs`, `scripts/check-shared-image.mjs` and `scripts/test-shared-frontend.mjs`. The
-  `dao` image's state-preservation check went with it; the `platform` image has none yet (Not done yet).
+  `dao` image's state-preservation check went with it, replaced by `pnpm check:platform-image` for the `platform` image:
+  built as Railway builds it, then inside it with no network, the packaged bytes, two boots of the real entrypoint and
+  config passing the platform smoke checks, and every state directory and file unchanged. Run by hand (Docker); it
+  failed as it should on a tampered package and on an entrypoint that deleted `.ops`.
 
 ## 0.5.3 (2026-11-06)
 
