@@ -190,11 +190,12 @@ export const appRevoked = z.looseObject({ revoked: z.literal(true) });
  *   ended while the request was checked; nothing was stored, filed or forwarded).
  * - Wait, then file again: `dao_requests_limited` (the deployment's DAO requests waiting for a vote, or filed in the last
  *   day, are at their limit).
- * - Proposals: `proposal_unanswered`, `proposal_not_open`, `expires_too_soon`.
+ * - Proposals: `proposal_unanswered`, `proposal_not_open` (filing a vote, or relaying one, once the proposal is no longer
+ *   open: the DAO's vote can't apply to it), `expires_too_soon`.
  * - `too_many_consents`: the deployment holds its limit of live consents; revoke unused ones first.
  * - `setup_failed`: the agent couldn't be set up (the message says why).
- * - `agent_refused`: the agent refused the DAO's signed verdict; reading the vote again relays the same signature, so
- *   it may succeed once the agent's state allows it.
+ * - `agent_refused`: the agent refused the DAO's signed verdict while its proposal is open; reading the vote again
+ *   relays the same signature, so it may succeed once the agent's state allows it.
  */
 export const APP_GATEWAY_CODES = ["invalid_request", "not_found", "signature_invalid", "browser", "dao_owned", "not_dao", "confirm_page",
   "not_created", "already_created", "agent_changed", "owner_changed", "consent_ended", "consent_revoked", "no_consent", "scope", "setup_key",

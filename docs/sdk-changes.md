@@ -19,6 +19,11 @@ platform-only fixes are listed separately.
   unaffected.
 
 Platform changes in this release, outside the package:
+- **A DAO's vote on a proposal that is no longer open answers `proposal_not_open`** (409), not `agent_refused`. The
+  agent refuses a verdict on a proposal that was invalidated, expired, withdrawn, rejected or already claimed, and always
+  will, so reading the vote again can't change it; an app closes the request. Refused while the proposal is open, it's
+  still `agent_refused`, and reading again relays the same signature, which completes a relay recorded before a crash.
+  The gateway reads the proposal only after the agent refuses. Offline-tested (`test/app-dao.test.ts`).
 - **Approving a held withdrawal:** an `approval_vote` approving a held withdrawal to a NEAR account is verified like a
   transfer's (the provider's request hash recomputed with `flow` `withdraw`, chain `near`, the current policy still
   permitting the withdrawal, its asset and that payee) and no longer refused `local_authorization_held`. The hash
