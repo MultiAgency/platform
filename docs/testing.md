@@ -341,12 +341,12 @@ deployment. Deployed smoke checks and recorded mainnet observations retain their
 
 `pnpm release:candidate -- --treasury-skill <dir>` (scripts/release-candidate.mjs) produces a release candidate in one
 command, from a commit (`--ref`, default `HEAD`). The Treasury skill is the one input a plain `test/e2e/run.mjs` needs.
-Uncommitted changes are not included; commit first.
+Uncommitted changes are not included; commit first. It needs Docker for its last gate.
 
 1. Freeze: `git archive` of the commit into `.test-artifacts/stack-snapshots/`. `node_modules` is shared and its
    dependency tree is recorded.
-2. Gates, in order, stopping at the first failure. Nothing is packaged after a failure; logs and `RELEASE-FAILED.json`
-   stay in the snapshot.
+2. Gates, in order, stopping at the first failure. A failed candidate writes no `release.json`; logs and
+   `RELEASE-FAILED.json` stay in the snapshot.
    - typecheck, the offline suite and `evidence:check`;
    - one frontend build, then the browser suite, the full E2E run and the challenge run, all against that build. The
      E2E runs use `--prebuilt-web`, so they test the frozen build instead of rebuilding it; a rebuild isn't
@@ -356,7 +356,10 @@ Uncommitted changes are not included; commit first.
 4. The deploy sources go to `.test-artifacts/releases/<runDigest>/`: the `platform` package
    (`scripts/package-platform.mjs`), the only package that ships. `release.json` records the commit, the input digest,
    the frontend source and build digests, each gate's command, status and counts (E2E run ids and stats, challenge
-   outcomes, browser scenarios), and the package digest.
+   outcomes, browser scenarios, the image check's packaged files and state), and the package digest.
+5. The last gate builds that package's image as Railway does and checks it offline (`pnpm check:platform-image`, see
+   [operations](operations.md)): the packaged bytes, two boots passing the platform smoke checks, and every state
+   directory kept. Only then is `release.json` written.
 
 It deploys nothing, uses no credentials and touches no state directory. Deploying from those sources stays the owner's
 action.

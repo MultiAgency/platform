@@ -51,8 +51,9 @@ Platform changes in this release, outside the package:
   `scripts/package-shared-frontends.mjs`, `scripts/check-shared-image.mjs` and `scripts/test-shared-frontend.mjs`. The
   `dao` image's state-preservation check went with it, replaced by `pnpm check:platform-image` for the `platform` image:
   built as Railway builds it, then inside it with no network, the packaged bytes, two boots of the real entrypoint and
-  config passing the platform smoke checks, and every state directory and file unchanged. Run by hand (Docker); it
-  failed as it should on a tampered package and on an entrypoint that deleted `.ops`.
+  config passing the platform smoke checks, and every state directory and file unchanged. Every release candidate runs
+  it on the package it produced, as its last gate, so a candidate needs Docker; it failed as it should on a tampered
+  package and on an entrypoint that deleted `.ops`.
 
 ## 0.5.3 (2026-11-06)
 

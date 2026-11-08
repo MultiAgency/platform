@@ -19,8 +19,9 @@ Preserve the complete state when moving an executor. This is the canonical list;
 Railway does (a release candidate's `platform` package, or one made from this tree's web build), then, inside it with no
 network, volume or credentials, checks the packaged bytes against the package's manifest, boots the real entrypoint and
 config twice, runs the platform smoke checks (`src/smoke-platform.ts`) against each boot, and checks that every state
-directory and file present before the boots is unchanged after them. It needs Docker and is run by hand: no release
-candidate gate or CI job runs it. First run 2026-11-08 on this tree: passed (219 packaged files, 15 directories).
+directory and file present before the boots is unchanged after them. It needs Docker. Every release candidate runs it
+on the `platform` package it produced (its last gate); CI doesn't (no Docker in the job). First run 2026-11-08: passed
+(219 packaged files, 15 directories).
 plus each instance's settings file. `.ops/` also holds each executor's `<agent>.submission-evidence.ndjson` (provider answers to failed sends; evidence only, never read to decide a send). `.invoices/` includes its SQLite journals and the compensation store
 (`<agent>.compensation.sqlite`); `.notify/` records which alerts were sent (losing it re-sends them); `.agent-connections/`
 holds agent connections and their access log (see [agent access](agent-access.md)); `.machine-auth/` holds Treasury

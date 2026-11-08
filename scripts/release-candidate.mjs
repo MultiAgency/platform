@@ -1,12 +1,13 @@
 // One command for a release candidate: freeze a commit, build the frontend once, run every gate against that build,
-// and package what ships from it: the `platform` package and, with --sdk, the SDK. Writes release.json with every
-// digest. Runs locally only: it deploys nothing, uses no credentials and touches no state directory.
+// package what ships from it (the `platform` package and, with --sdk, the SDK), then check that package's image. Writes
+// release.json with every digest. Runs locally only: it deploys nothing, uses no credentials and touches no state
+// directory. Needs Docker for the image check.
 //
 //   pnpm release:candidate -- [--ref <commit>] [--sdk] --treasury-skill <dir>
 //
 // The Treasury skill (an external consumer of the machine route) is the one input a plain E2E run needs.
 //
-// Stops at the first failing gate and packages nothing. The candidate is
+// Stops at the first failing gate; a failed candidate writes no release.json. The candidate is
 // .test-artifacts/stack-snapshots/<runDigest>/ (app recipes use it as before); the deploy sources and release.json are
 // in .test-artifacts/releases/<runDigest>/. Only committed files are frozen: commit first.
 import { spawnSync, execFileSync } from 'node:child_process';
@@ -58,14 +59,14 @@ function gate(name, command, commandArgs, read) {
   console.log(`\n== ${name}: ${[command, ...commandArgs].join(' ')}`);
   const result = spawnSync(command, commandArgs, { cwd: workdir, env, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   const output = (result.stdout ?? '') + (result.stderr ?? '');
-  process.stdout.write(output.split('\n').filter(line => /^(ℹ (tests|pass|fail)|✖ |.*scenarios ran|.*suite\(s\) failed|\s+\d+ (passed|failed|skipped)|Challenge |FAIL|Error)/.test(line)).join('\n') + '\n');
+  process.stdout.write(output.split('\n').filter(line => /^(ℹ (tests|pass|fail)|✖ |.*scenarios ran|.*suite\(s\) failed|\s+\d+ (passed|failed|skipped)|Challenge |PASS:|FAIL|Error)/.test(line)).join('\n') + '\n');
   mkdirSync(join(workdir, '.test-artifacts/release-gates'), { recursive: true });
   writeFileSync(join(workdir, '.test-artifacts/release-gates', `${name}.log`), output);
   record.gates[name] = { command: [command, ...commandArgs].join(' '), status: result.status, ...(read?.(output) ?? {}) };
   if (result.status !== 0) {
     record.result = `failed at ${name}`;
     writeFileSync(join(workdir, 'RELEASE-FAILED.json'), JSON.stringify(record, null, 2) + '\n');
-    console.error(`\n${name} failed (exit ${result.status}); nothing is packaged. Logs: ${join(workdir, '.test-artifacts/release-gates')}`);
+    console.error(`\n${name} failed (exit ${result.status}); no release.json is written, so this is no candidate. Logs: ${join(workdir, '.test-artifacts/release-gates')}`);
     process.exit(1);
   }
 }
@@ -113,6 +114,12 @@ execFileSync(process.execPath, ['scripts/package-platform.mjs', join(out, 'platf
 const platformFiles = JSON.parse(readFileSync(join(out, 'platform/manifest.json'), 'utf8')).files;
 for (const [file, hash] of Object.entries(platformFiles))
   if (file.startsWith('web/dist/') && hash !== sha256(join(snapshot, file))) throw new Error(`The platform package's ${file} differs from the tested build`);
+// 5. The image of exactly that package, built as Railway builds it: two offline boots pass the platform checks and keep
+// every state directory (scripts/check-platform-image.mjs). Needs Docker. A failure leaves no release.json.
+gate('platform-image', process.execPath, ['scripts/check-platform-image.mjs', join(out, 'platform')], output => {
+  const pass = output.match(/PASS: (\d+) packaged hashes; .*?; (\d+) state files and (\d+) state directories unchanged/);
+  return pass ? { packagedFiles: Number(pass[1]), stateFiles: Number(pass[2]), stateDirectories: Number(pass[3]) } : {};
+});
 
 record.runDigest = runDigest;
 record.snapshot = snapshot;
