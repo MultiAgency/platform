@@ -368,7 +368,15 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     let answer: unknown;
     // Relaying the same signature again is answered with the proposal as it is: the agent keeps the first approval.
     try { answer = await (record.verdict === "approve" ? client.approve : client.reject)({ id: record.proposal, signed }); }
-    catch (error) { json(res, 409, { code: "agent_refused", error: `The agent refused the DAO's ${record.verdict}: ${error instanceof Error ? error.message : "refused"}. Reading again relays the same signature.` }); return true; }
+    catch (error) {
+      // Refused while the proposal is open, the agent may take it later (`agent_refused`). Refused once the proposal is no
+      // longer open, it never will: answered as filing answers it (`proposal_not_open`).
+      const current = await client.get({ id: record.proposal }).then(read => proposalView.safeParse(read).data?.state, () => undefined);
+      if (current !== undefined && current !== "proposed") {
+        json(res, 409, { code: "proposal_not_open", error: `This proposal is ${current}; the DAO's ${record.verdict} can't apply to it. Nothing was relayed.` }); return true;
+      }
+      json(res, 409, { code: "agent_refused", error: `The agent refused the DAO's ${record.verdict}: ${error instanceof Error ? error.message : "refused"}. Reading again relays the same signature.` }); return true;
+    }
     const relayed = daoRequests.relayed(record.id, proposalView.safeParse(answer).data?.state ?? "unknown");
     appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
       event: "dao-vote-relayed", request: record.id, consent: record.under, organization: record.organization, owner: record.dao, agent: record.agent,

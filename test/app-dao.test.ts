@@ -317,6 +317,19 @@ test("a DAO vote relays nothing for a proposal that isn't open, a consent that e
   state.replies["/rpc/proposals/reject"] = { status: 200, json: { ...PROPOSAL, state: "rejected" } };
   assert.equal((await call(port, `/apps/v1/dao-votes/${refused.hash}`, "GET", staging)).body.proposalState, "rejected", "reading again relays the same signature");
 
+  // The proposal ended after the vote was filed (here invalidated, as a changed strategy does): the agent refuses the vote
+  // and always will, so the answer says the proposal isn't open, not that the agent refused for now.
+  state.signature = null;
+  const closed = (await ask()).body.request;
+  state.replies["/rpc/proposals/get"] = { status: 200, json: { ...PROPOSAL, state: "invalidated", reason: "the owner's strategy changed" } };
+  state.replies["/rpc/proposals/reject"] = { status: 400, json: { defined: true, code: "not_open", status: 400, message: "This proposal is invalidated; it can't be rejected." } };
+  vote(closed.hash);
+  const notOpen = await call(port, `/apps/v1/dao-votes/${closed.hash}`, "GET", staging);
+  assert.deepEqual([notOpen.status, notOpen.body.code], [409, "proposal_not_open"], JSON.stringify(notOpen.body));
+  // Refused while the proposal reads open, it's the agent's refusal for now.
+  state.replies["/rpc/proposals/get"] = { status: 200, json: PROPOSAL };
+  assert.equal((await call(port, `/apps/v1/dao-votes/${closed.hash}`, "GET", staging)).body.code, "agent_refused");
+
   state.signature = null;
   const ended = (await ask()).body.request;
   assert.equal((await call(port, `/apps/v1/consents/${consent}`, "DELETE", staging)).status, 200);
