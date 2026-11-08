@@ -35,6 +35,13 @@ Platform changes in this release, outside the package:
   entrypoint, and agents started with `--import tsx`), moved to dependencies, and `Dockerfile.platform` installs with
   `--prod`: 203 packages instead of 461, 645 MB instead of 778 (measured locally). The image check (two offline boots,
   the platform smoke checks, state kept) passed on it.
+- **A read answers `invalidated` once the agent or the owner's strategy changed:** `proposals/get` and `proposals/list`
+  close an open (`proposed` or `approved`) proposal whose agent or strategy no longer matches, with the reason approval
+  gives (`the owner's strategy changed`), where they answered it open until someone approved or executed it. An app no
+  longer offers the owner, or a DAO's vote, a proposal that can't pass. A changed policy is still found at approval and
+  execution only, since reading it asks the provider. The strategy's digest covers the whole strategy, the autopilot's
+  cadence and ceiling included, so changing those closes open proposals too. Offline-tested
+  (`test/treasury-proposals.test.ts`).
 
 ## 0.5.4 (2026-11-08)
 

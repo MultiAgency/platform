@@ -210,6 +210,32 @@ test("a policy or strategy change voids a proposal, at approval and at execution
   assert.deepEqual(sends, []);
 });
 
+test("a read closes an open proposal whose strategy changed, as approval would; a claimed one never; the policy is checked at approval only", async () => {
+  const open = await propose("r1");
+  const approved = await propose("r2");
+  await approve(approved);
+  const claimed = await propose("r3");
+  await approve(claimed);
+  assert.equal(claim(claimed.id, "00000000-0000-0000-0000-000000000000"), true);
+  const before = loadStrategy();
+  saveStrategy({ ...before, maxCostBps: before.maxCostBps + 1 });
+
+  const read = getProposal(app, { id: open.id });
+  assert.deepEqual([read.state, read.reason], ["invalidated", "the owner's strategy changed"]);
+  const listed = Object.fromEntries(listProposals(app).proposals.map(p => [p.id, p.state]));
+  assert.equal(listed[approved.id], "invalidated", "an approved one too, by any read");
+  assert.equal(listed[claimed.id], "stopped", "a claimed one is never closed");
+  saveStrategy(before);
+  assert.equal(getProposal(app, { id: open.id }).state, "invalidated", "a reverted strategy doesn't revive it");
+
+  // The policy is the provider's: a read doesn't ask it, so a changed policy waits for approval.
+  const unread = await propose("r4");
+  revision = 2;
+  assert.equal(getProposal(app, { id: unread.id }).state, "proposed");
+  await assert.rejects(approve(unread), refusedWith("invalidated"));
+  assert.deepEqual(sends, []);
+});
+
 test("rejected, withdrawn, expired or under another consent, a proposal never executes", async () => {
   const rejected = await propose("r1");
   const wrong = await sign(proposalText(rejected, "approve"));
