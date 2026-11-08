@@ -198,7 +198,13 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 - what the provider answers for a DAO-owned hosted agent
 
 **Before starting**
-- **Staging runs 0.5.3's `platform` package.** Since 2026-11-07 (checked at 04:27Z): candidate `a434f381`, commit
+- **Staging runs 0.5.4's `platform` package.** Since 2026-11-08 (checked at 22:05Z): candidate `2d8d30d6`, commit
+  `f2c7b7f`, Railway deployment `e6e6e9f1`, image `sha256:3285a695…` (base `node:24.22.0-slim`), with
+  `deploy/platform-staging.json` (the gateway signs for `api.dev.multiagency.ai`); its three hosted agents started. The
+  platform smoke checks passed (18 of 18), and its confirm page's 6 assets were each fetched and byte-equal to the
+  package's. The first candidate under the platform-only release script, whose last gate booted that package's image
+  offline twice.
+- **Before that, 0.5.3's `platform` package.** Since 2026-11-07 (checked at 04:27Z): candidate `a434f381`, commit
   `49b8d51`, Railway deployment `c3a2eb0b`, image `sha256:d2803f47…`, with `deploy/platform-staging.json`. Its confirm
   page's 22 assets were each fetched and byte-equal to the package's. Redeployed on the same image with the partner
   portal's key as deployment `54fa8a24` (2026-11-07T05:00Z; an earlier redeploy, `a2adbd16`, had the wrong key and
