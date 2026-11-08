@@ -12,9 +12,9 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
-## 0.5.4
+## 0.5.4 (2026-11-08)
 
-No change to the package's API yet.
+No change to the package's API.
 
 Platform changes in this release, outside the package:
 - **A request limit per app credential** (platform#15): the operator sets each credential's hourly limit, 1 to 12,000,
