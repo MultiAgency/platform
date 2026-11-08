@@ -3,7 +3,7 @@
 A DAO's payout agent takes payment requests from people outside the DAO, holds funds in its
 confidential balance, and files every payment for the DAO's vote. Requesters deal with the invoice
 page, never with members. Mainnet: `agentic.sputnik-dao.near`, its payout agent, and
-https://invoices.multiagency.ai.
+the invoice page at https://invoices.multiagency.ai (retired 2026-11-08).
 
 The [Agent Connect audit and delivery plan](agent-connect-audit.md) maps briefs 01 and 03 to
 Payables and brief 02 to Portfolio, and specifies the isolated work-order and
