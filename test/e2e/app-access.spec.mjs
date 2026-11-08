@@ -267,8 +267,8 @@ test('an app requests a payout once under its requestId, follows it by requestId
     expect(stack.simulated.transfers).toHaveLength(1);
     steps.push("the owner's vote, relayed by the app with the proven terms, released the held payout once");
 
-    // A withdrawal to chain near (P3b): the owner agrees a withdrawal payee through the app, the request is held for the
-    // owner, approving it is refused until a held withdrawal's approval is verified, and rejecting it ends it unpaid.
+    // A withdrawal to chain near (P3b): the owner agrees a withdrawal payee through the app; each request is held for the
+    // owner, whose approval, proven against the provider's hash, releases it once, and whose rejection ends one unpaid.
     await ownerStep(agent, { type: 'policy_update', expectedPolicy: await reviewed(), changes: { withdrawals: [{ address: BUILDER }] } });
     expect(stack.simulated.payoutPolicy(created).policy).toMatchObject({ actions: ['transfer', 'withdraw'] });
     const withdrawn = value(await agent.call('payouts/request', { requestId: 'wd-1', asset: USDC, delivery: { chain: 'near' }, recipient: BUILDER,
@@ -277,17 +277,28 @@ test('an app requests a payout once under its requestId, follows it by requestId
     const heldWithdrawal = stack.simulated.transfers.find(p => p.type === 'withdraw');
     expect(heldWithdrawal.body).toEqual({ asset: USDC, amount: '500000', chain: 'near', recipient: BUILDER, confidential: true });
     const pending = value(await agent.call('held')).find(h => h.correlationId === withdrawn.correlationId);
-    const approve = await agent.call('owner/prepare', { action: { type: 'approval_vote', approvalId: pending.approvalId, verdict: 'approve', correlationId: withdrawn.correlationId }, signer: 'wallet' });
-    expect(approve, 'approving a held withdrawal is refused: a refusal, not an unknown outcome').toMatchObject({ ok: false, kind: 'refused', code: 'local_authorization_held' });
+    const approve = value(await agent.call('owner/prepare', { action: { type: 'approval_vote', approvalId: pending.approvalId, verdict: 'approve', correlationId: withdrawn.correlationId }, signer: 'wallet' }));
+    expect(approve.payment).toEqual({ correlationId: withdrawn.correlationId, verdict: 'approve', terms: { recipient: BUILDER, asset: USDC, amount: '500000', chain: 'near' } });
+    const approved = await sign(OWNER, approve.intent.payload);
+    value(await agent.call('owner/submit', { correlationId: approve.correlationId, signedData: { ...approve.intent, public_key: approved.publicKey, signature: approved.signature } }));
+    stack.simulated.settle(withdrawn.correlationId);
+    await expect.poll(async () => value(await agent.call('payouts/status', { requestId: 'wd-1' })).state).toBe('succeeded');
+    expect(stack.simulated.transfers.filter(p => p.type === 'withdraw'), 'the approved withdrawal was sent once').toHaveLength(1);
+    steps.push("a withdrawal to chain near was held for the owner; the owner's vote, with the terms proven against the provider's hash, released it once");
     // A vote's status follows the payout it decides: a rejected one ends FAILED.
-    const reject = value(await agent.call('owner/prepare', { action: { type: 'approval_vote', approvalId: pending.approvalId, verdict: 'reject', correlationId: withdrawn.correlationId }, signer: 'wallet' }));
-    expect(reject.payment).toEqual({ correlationId: withdrawn.correlationId, verdict: 'reject', terms: null });
+    const second = value(await agent.call('payouts/request', { requestId: 'wd-2', asset: USDC, delivery: { chain: 'near' }, recipient: BUILDER,
+      amount: '400000', expectedPolicy: await reviewed() }));
+    expect(second).toMatchObject({ requestId: 'wd-2', state: 'held' });
+    const secondHeld = stack.simulated.transfers.find(p => p.correlation === second.correlationId);
+    const { approvalId: secondApproval } = value(await agent.call('held')).find(h => h.correlationId === second.correlationId);
+    const reject = value(await agent.call('owner/prepare', { action: { type: 'approval_vote', approvalId: secondApproval, verdict: 'reject', correlationId: second.correlationId }, signer: 'wallet' }));
+    expect(reject.payment).toEqual({ correlationId: second.correlationId, verdict: 'reject', terms: null });
     const rejected = await sign(OWNER, reject.intent.payload);
     value(await agent.call('owner/submit', { correlationId: reject.correlationId, signedData: { ...reject.intent, public_key: rejected.publicKey, signature: rejected.signature } }));
     await expect.poll(async () => value(await agent.call('owner/status', { correlationId: reject.correlationId })).status).toBe('FAILED');
-    await expect.poll(async () => value(await agent.call('payouts/status', { requestId: 'wd-1' })).state).toBe('failed');
-    expect(heldWithdrawal.failure).toBe('rejected_by_owner');
-    steps.push('a withdrawal to chain near was held for the owner; approving it was refused, and the rejection ended it unpaid');
+    await expect.poll(async () => value(await agent.call('payouts/status', { requestId: 'wd-2' })).state).toBe('failed');
+    expect(secondHeld.failure).toBe('rejected_by_owner');
+    steps.push('a second held withdrawal was rejected by the owner and ended unpaid');
 
     // A lost reply: the provider accepted the transfer, and its answer never arrived.
     stack.simulated.dropTransferResponse();

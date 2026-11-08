@@ -9,7 +9,9 @@ policy, grant, purpose, authorization, operation, unresolved, held payout, refus
 
 ## Where things are
 - `.agents/skills/` — individually discoverable stack skills with primary sources and verified integration notes. Read the relevant skill before stack-related implementation or review. `.claude/skills` links to the same directory.
-- `README.md` — what runs, how to start it, the two areas (Payables, Treasury), and **Not done yet**.
+- `README.md` — the product (two core loops, what's experimental), how to start it, and **Not done yet**.
+- `docs/review.md` — the reviewer's front door: each claim, how it is known, where the evidence is. Keep it in step with the claims it summarizes.
+- `docs/prototype.md` — the experimental dashboard prototype (`dao`, `invoices` packages).
 - `docs/facilitator.md`, `docs/treasury.md` — each area: its briefs, each requirement's stage, how each claim is
   known, what isn't covered.
 - `docs/architecture.md` — which files are shared core, facilitator or treasury; the one send site; how

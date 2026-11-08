@@ -8,16 +8,20 @@ import { AuthorizationHeld, readOps } from "./ops.js";
 export type PaymentApproval = { approvalId: string; correlationId: string; verdict: "approve" | "reject";
   requestHash: string; key?: string; invoiceRevision?: number; policyDigest?: string };
 
-/** The terms a provider approval names: a confidential transfer of `amount` of `token` to `to`. */
+/** The terms a provider approval names: a confidential transfer, or withdrawal to NEAR, of `amount` of `token` to `to`. */
 type Terms = { to: string; token: string; amount: string };
+type Flow = "transfer" | "withdraw";
+/** A held withdrawal's `request_data` as observed on mainnet (2026-10-30, docs/mainnet-log.md). */
+const WITHDRAWAL_FIELDS = new Set(["to", "chain", "token", "amount", "destination_asset"]);
 
 /**
- * The wallet provider's hash of a confidential transfer: sha256 of its canonical operation
+ * The wallet provider's hash of a confidential transfer or withdrawal: sha256 of its canonical operation
  * (`shared-tee-helpers` `wallet_policy::request_hash`, `Op::Confidential`), recomputed here so the
- * readable terms are proven to be the ones the approval releases.
+ * readable terms are proven to be the ones the approval releases. A withdrawal's is the transfer's with
+ * `flow` `withdraw` (mainnet, 2026-10-30; docs/enforcement.md).
  */
-const requestHash = (terms: Terms) =>
-  createHash("sha256").update(canonical({ ...terms, chain: "near", flow: "transfer", kind: "confidential" })).digest("hex");
+const requestHash = (terms: Terms, flow: Flow) =>
+  createHash("sha256").update(canonical({ ...terms, chain: "near", flow, kind: "confidential" })).digest("hex");
 
 /**
  * Checks a vote on one held payment against the provider's own evidence, so any instance of the
@@ -43,32 +47,42 @@ export async function checkPaymentApproval(input: Pick<PaymentApproval, "approva
       !Number.isFinite(Date.parse(approval.expires_at)) || !approval.request_hash)
     throw new AuthorizationHeld("approval does not identify this pending agent payment");
   let binding: PaymentApproval = { approvalId: input.approvalId, correlationId: input.correlationId, verdict: input.verdict, requestHash: approval.request_hash };
-  // A held withdrawal can be rejected (that releases nothing), not approved: its approval's terms and hash aren't
-  // observed yet, so what an approval would release can't be proven (docs/enforcement.md).
-  if (approving && status.type !== "transfer")
-    throw new AuthorizationHeld("approving a held withdrawal isn't available yet: its approval can't be verified. Reject it, or wait.");
+  const flow: Flow | null = status.type === "transfer" || status.type === "withdraw" ? status.type : null;
+  if (approving && !flow) throw new AuthorizationHeld(`approving a held ${status.type} is not supported`);
 
   // Rejecting releases nothing, so it needs no more than the identity checks above.
   let invoiceId: string | undefined;
-  let terms: { recipient: string; asset: string; amount: string } | null = null;
+  let terms: { recipient: string; asset: string; amount: string; chain?: "near" } | null = null;
   if (approving) {
     if (approval.request_type !== "confidential") throw new AuthorizationHeld(`approving a ${approval.request_type} request is not supported`);
-    const { to, token, amount } = approval.request_data as Partial<Record<keyof Terms, unknown>>;
+    const { to, token, amount, chain, destination_asset } = approval.request_data as Record<string, unknown>;
     if (typeof to !== "string" || typeof token !== "string" || typeof amount !== "string" || !/^[1-9]\d*$/.test(amount))
       throw new AuthorizationHeld("provider approval terms are incomplete: recipient, asset or amount missing");
-    if (requestHash({ to, token, amount }) !== approval.request_hash)
+    if (flow === "withdraw") {
+      if (typeof chain !== "string" || typeof destination_asset !== "string")
+        throw new AuthorizationHeld("provider approval terms are incomplete: a withdrawal's chain or destination asset missing");
+      if (chain !== "near") throw new AuthorizationHeld("a held withdrawal is approved only to chain near");
+      // The request hash doesn't cover what the payee receives, so the owner's signature can't bind it: it must at least
+      // read as the token withdrawn, or the approval is refused (docs/enforcement.md, "Payout withdrawals").
+      if (destination_asset !== token) throw new AuthorizationHeld("a held withdrawal's destination asset isn't the token withdrawn");
+      // Only the fields observed on mainnet (2026-10-30): any other, such as a memo, the hash wouldn't cover.
+      const outside = Object.keys(approval.request_data).filter((key) => !WITHDRAWAL_FIELDS.has(key));
+      if (outside.length) throw new AuthorizationHeld(`a held withdrawal's approval names fields outside the observed set: ${outside.join(", ")}`);
+    }
+    if (requestHash({ to, token, amount }, flow!) !== approval.request_hash)
       throw new AuthorizationHeld("provider approval terms don't match its request hash");
-    terms = { recipient: to, asset: token, amount };
+    terms = { recipient: to, asset: token, amount, ...(flow === "withdraw" && { chain: "near" as const }) };
 
     if (!view) throw new AuthorizationHeld("policy unavailable");
-    const refusal = authorize({ method: "transfer", request: { recipient: to, asset: token, amount, confidential: true } },
+    const request = { recipient: to, asset: token, amount, confidential: true };
+    const refusal = authorize(flow === "withdraw" ? { method: "withdraw", request: { ...request, chain: "near" } } : { method: "transfer", request },
       { purpose: "approval", facts: { now: Date.now(), agentId: id, view, grant: undefined } });
     if (refusal) throw new AuthorizationHeld(`${refusal.code}: ${refusal.message}`);
     const policy = view.policy!;
 
     // A payment this instance sent must be exactly the one approved, and its invoice unrevised.
     const op = readOps().find((o) => o.correlationId === input.correlationId);
-    if (op && (op.method !== "transfer" || op.request.recipient !== to || op.request.asset !== token || op.request.amount !== amount))
+    if (op && (op.method !== flow || op.request.recipient !== to || op.request.asset !== token || op.request.amount !== amount))
       throw new AuthorizationHeld("provider approval terms do not match the recorded payment");
     invoiceId = op?.invoiceId;
     const invoice = invoiceId ? getInvoice(invoiceId) : undefined;

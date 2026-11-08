@@ -117,9 +117,10 @@ export function authorize(action: Action, c: Case): Refusal | null {
   if (buys) return refuse("asset_out_not_allowed", buys);
 
   if (purpose === "payout" || purpose === "invoice" || purpose === "approval") {
-    // A payout request may also withdraw to an agreed NEAR account, from the confidential balance it is funded in.
-    // Invoices and approvals stay confidential USDC transfers.
-    if (action.method === "withdraw" && purpose === "payout") {
+    // A payout request may also withdraw to an agreed NEAR account, from the confidential balance it is funded in, and
+    // the owner may approve one held for its vote (approval rules: user decision, 2026-11-08, "verify like a transfer's").
+    // Invoices stay confidential USDC transfers.
+    if (action.method === "withdraw" && (purpose === "payout" || purpose === "approval")) {
       const { chain, asset, confidential, memo, recipient } = action.request;
       if (chain !== "near" || !confidential || memo !== undefined || !WITHDRAWN.has(asset))
         return refuse("withdraw_not_allowed", "Payout withdrawals are wNEAR or USDC to chain near, from the confidential balance, without a memo");
@@ -134,10 +135,12 @@ export function authorize(action: Action, c: Case): Refusal | null {
     // The provider checked payee and cap when the payment was requested, under the policy then; the
     // owner signs now, so what the policy no longer allows is refused here.
     if (purpose === "approval") {
-      const { recipient, asset, amount } = action.request;
-      if (!policy.actions.includes("transfer")) return refuse("action_not_allowed", "The current policy does not permit transfers");
+      const { recipient, asset } = action.request;
+      if (!policy.actions.includes(action.method))
+        return refuse("action_not_allowed", `The current policy does not permit ${action.method === "withdraw" ? "withdrawals" : "transfers"}`);
       if (policy.assets !== "any" && !policy.assets.includes(asset)) return refuse("asset_not_allowed", "The current policy does not permit this payment asset");
-      if (!agreedPayees(policy).has(recipient)) return refuse("payee_not_agreed", `${recipient} is not an agreed payee`);
+      // A withdrawal's payee was checked against the policy's withdrawal destinations above.
+      if (action.method === "transfer" && !agreedPayees(policy).has(recipient)) return refuse("payee_not_agreed", `${recipient} is not an agreed payee`);
     }
     // The provider refuses an amount over the per-transaction cap under a code not proven here
     // (`policy_transaction_limit_exceeded`), which would leave the operation unknown and block the agent's sends:

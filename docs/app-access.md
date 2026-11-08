@@ -273,8 +273,9 @@ later read until what the DAO signed expires (the consent's, setup's or proposal
 
 Limits: DAO owners as above (Treasury only; no `payout` or `owner`); payout requests
 pay confidential USDC through `intents`, or withdraw wNEAR (arriving as native NEAR) or USDC to an agreed NEAR account
-(mainnet-observed on staging 2026-10-30), and a held withdrawal can only be rejected (approving one isn't built yet,
-though its approval's hash is now observed); the owner can't revoke on the platform directly
+(mainnet-observed on staging 2026-10-30), and a held withdrawal is approved like a transfer (offline- and stack-tested; its hash shape is mainnet-observed,
+an approval isn't), with `destination_asset`, which the hash doesn't cover, required to be the token withdrawn, and no field outside the
+set observed on mainnet; the owner can't revoke on the platform directly
 (the deployment or the operator can, and removing the signing key ends it once a call or `check-keys` observes the
 removal: a key removed and re-added with no call or sweep in between goes unnoticed); a wallet that signs a callback URL into
 NEP-413 can't consent; owner actions are limited to the list above, and NEP-366 ones are signed on the platform's

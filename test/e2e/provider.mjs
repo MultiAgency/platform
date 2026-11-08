@@ -117,14 +117,15 @@ export async function provider(directory, { treasury = false, account = OWNER, p
       amount: swap.body.amount, min_amount_out: swap.body.min_amount_out, confidential: true }, confidential: true, amount_out: swap.amountOut } });
   const status = payment => ({ correlation_id: payment.correlation, agent_id: payment.agent, type: payment.type ?? 'transfer', status: payment.status,
     created_at: payment.at, updated_at: payment.at, failure_code: payment.failure ?? null, details: { approval_id: payment.approval } });
-  // A held withdrawal's approval shape isn't observed on mainnet: modelled here as OutLayer's `Withdraw` op, only so a
-  // reject has an approval to name. The platform never approves one.
+  // A held withdrawal's approval, as observed on mainnet (2026-10-30, docs/enforcement.md): `request_data` adds `chain` and
+  // `destination_asset` (here the token withdrawn); the hash is the transfer's with `flow` `withdraw`, without `destination_asset`.
   const approval = payment => {
-    const data = payment.type === 'withdraw' ? { amount: payment.body.amount, kind: 'withdraw', to: payment.body.recipient, token: payment.body.asset }
-      : { amount: payment.body.amount, chain: 'near', flow: 'transfer', kind: 'confidential', to: payment.body.recipient, token: payment.body.asset };
+    const withdraw = payment.type === 'withdraw';
+    const hashed = { amount: payment.body.amount, chain: 'near', flow: withdraw ? 'withdraw' : 'transfer', kind: 'confidential', to: payment.body.recipient, token: payment.body.asset };
+    const data = withdraw ? { amount: hashed.amount, chain: 'near', destination_asset: hashed.token, to: hashed.to, token: hashed.token } : hashed;
     return { approval_id: payment.approval, wallet_id: agents.get(payment.agent).wallet.wallet_id, status: payment.status === 'PENDING_APPROVAL' ? 'PENDING' : payment.failure === 'rejected_by_owner' ? 'REJECTED' : 'APPROVED',
-      expires_at: expires, request_type: payment.type === 'withdraw' ? 'withdraw' : 'confidential', request_data: data,
-      request_hash: createHash('sha256').update(JSON.stringify(data)).digest('hex') };
+      expires_at: expires, request_type: 'confidential', request_data: data,
+      request_hash: createHash('sha256').update(JSON.stringify(hashed)).digest('hex') };
   };
   let dropNextTransfer = false, dropNextSignature = false, ownerOutcomeUnavailable = false;
   /** Passed DAO proposals that called `v1.signer`: the transaction and the signature its receipt returns (`daoVote`). */

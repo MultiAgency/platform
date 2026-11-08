@@ -103,12 +103,74 @@ test("an approval releasing a payee an except-mode policy doesn't agree to is re
   await assert.rejects(checkPaymentApproval(heldPayment("other.near")), /payee_not_agreed/);
 });
 
-test("a held withdrawal can be rejected but not approved: verifying its approval isn't built", async () => {
-  policy = payoutPolicy(["payee.near"]);
-  const vote = heldPayment("payee.near");
+/** A held payout policy that also withdraws wNEAR and USDC to `payee.near`. */
+const heldWithdrawing = (): Policy => {
+  const base = payoutPolicy(["payee.near"]);
+  return { ...base, actions: ["transfer", "withdraw"], assets: [ASSETS.USDC, ASSETS.wNEAR],
+    destinations: { mode: "only", list: [...base.destinations.list, { action: "withdraw", chain: "near", address: "payee.near", memo: null }] } };
+};
+
+/**
+ * A provider approval holding a confidential withdrawal to NEAR, in the shape observed on mainnet (2026-10-30,
+ * docs/enforcement.md, "Payout withdrawals"): `request_data` names `to`, `chain`, `token`, `amount` and
+ * `destination_asset`; `request_hash` covers all but `destination_asset`, with `flow` `withdraw`.
+ */
+function heldWithdrawal(to: string, { token = ASSETS.wNEAR as string, destination = token, chain = "near" }: { token?: string; destination?: string; chain?: string } = {}) {
+  const hashed = { to, token, amount: "1", chain };
+  const request_hash = createHash("sha256").update(canonical({ ...hashed, flow: "withdraw", kind: "confidential" })).digest("hex");
+  mock.method(api, "getApproval", async () => ({ approval_id: "approval", wallet_id: fixtureWallet.wallet_id, status: "PENDING",
+    expires_at: new Date(Date.now() + 3_600_000).toISOString(), request_hash, request_type: "confidential",
+    request_data: { ...hashed, destination_asset: destination } }));
   mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, agent_id: process.env.AGENT_ID, type: "withdraw",
     status: "PENDING_APPROVAL", details: { approval_id: "approval" } }));
-  await assert.rejects(checkPaymentApproval(vote), /approving a held withdrawal isn't available yet/);
+  return { approvalId: "approval", correlationId: "op_held", verdict: "approve" as const };
+}
+
+test("a held withdrawal to an agreed NEAR account is approved when its terms hash to the provider's request hash", async () => {
+  policy = heldWithdrawing();
+  const { terms } = await checkPaymentApproval(heldWithdrawal("payee.near"));
+  assert.deepEqual(terms, { recipient: "payee.near", asset: ASSETS.wNEAR, amount: "1", chain: "near" }, "the proven terms say it's a withdrawal");
+});
+
+test("a held withdrawal whose destination asset isn't the withdrawn token is refused: the hash doesn't cover it", async () => {
+  policy = heldWithdrawing();
+  await assert.rejects(checkPaymentApproval(heldWithdrawal("payee.near", { destination: ASSETS.USDC })), /destination asset/);
+});
+
+for (const extra of [{ memo: "x" }, { refund_to: "other.near" }])
+  test(`a held withdrawal whose provider request carries a field outside the observed set (${Object.keys(extra)[0]}) is refused`, async () => {
+    policy = heldWithdrawing();
+    const vote = heldWithdrawal("payee.near");
+    const approval = await api.getApproval("agent", "approval");
+    mock.method(api, "getApproval", async () => ({ ...approval, request_data: { ...approval.request_data, ...extra } }));
+    await assert.rejects(checkPaymentApproval(vote), /outside/);
+  });
+
+test("a held withdrawal off chain near is refused", async () => {
+  policy = heldWithdrawing();
+  await assert.rejects(checkPaymentApproval(heldWithdrawal("payee.near", { chain: "eth" })), /chain near/);
+});
+
+test("a held withdrawal the current policy no longer allows is refused before the owner signs", async () => {
+  policy = { ...heldWithdrawing(), actions: ["transfer"] };
+  await assert.rejects(checkPaymentApproval(heldWithdrawal("payee.near")), /action_not_allowed/);
+  policy = heldWithdrawing();
+  await assert.rejects(checkPaymentApproval(heldWithdrawal("other.near")), /payee_not_agreed/);
+  policy = { ...heldWithdrawing(), assets: [ASSETS.USDC] };
+  await assert.rejects(checkPaymentApproval(heldWithdrawal("payee.near")), /asset_not_allowed/);
+});
+
+test("a held withdrawal is approved only as the payment this instance recorded", async () => {
+  policy = heldWithdrawing();
+  record({ at: new Date().toISOString(), idempotencyKey: "payout:w", kind: "payout", method: "transfer",
+    request: { recipient: "payee.near", asset: ASSETS.wNEAR, amount: "1", confidential: true } });
+  record({ idempotencyKey: "payout:w", correlation_id: "op_held", status: "PENDING_APPROVAL" });
+  await assert.rejects(checkPaymentApproval(heldWithdrawal("payee.near")), /do not match the recorded payment/);
+});
+
+test("a held withdrawal can be rejected without verifying its terms", async () => {
+  policy = payoutPolicy(["payee.near"]);
+  const vote = heldWithdrawal("payee.near", { destination: ASSETS.USDC });
   assert.equal((await checkPaymentApproval({ ...vote, verdict: "reject" })).binding.verdict, "reject");
 });
 
@@ -124,6 +186,6 @@ test("a vote the approval check refuses reaches the caller as a refusal, not an 
   const client = createRouterClient(router);
   await assert.rejects(client.owner.prepare({ action: { type: "approval_vote", approvalId, verdict: "approve", correlationId: "op_held" }, signer: "wallet" }),
     (error: unknown) => error instanceof ORPCError && error.code === "BAD_REQUEST" && (error.data as { kind?: string }).kind === "refused"
-      && (error.data as { code?: string }).code === "local_authorization_held" && /approving a held withdrawal/.test(error.message));
+      && (error.data as { code?: string }).code === "local_authorization_held" && /terms are incomplete/.test(error.message));
   assert.equal(generate.mock.callCount(), 0);
 });
