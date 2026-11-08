@@ -13,7 +13,11 @@ test('the dashboard reaches the gateway even when another process listens on 127
   const squatter = createServer((_, res) => res.end('WebSockets request was expected'));
   try {
     const port = Number(readFileSync(join(info.outputPath('environment'), 'gateway.log'), 'utf8').match(/on port (\d+)/)[1]);
-    await new Promise((resolve, reject) => { squatter.once('error', reject); squatter.listen(port, '127.0.0.1', resolve); });
+    // Linux refuses this bind (the gateway's `::` holds 127.0.0.1 there too): no squatter, and the gateway must answer.
+    await new Promise((resolve, reject) => {
+      squatter.once('error', error => error.code === 'EADDRINUSE' ? resolve() : reject(error));
+      squatter.listen(port, '127.0.0.1', resolve);
+    });
     const body = await new Promise((resolve, reject) => request(`${stack.dashboard}/health`, { rejectUnauthorized: false }, res => {
       let text = ''; res.on('data', chunk => { text += chunk; }); res.on('end', () => resolve(text));
     }).on('error', reject).end());
