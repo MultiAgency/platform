@@ -82,9 +82,13 @@ The command line has only what the dashboard doesn't: owner actions signed with 
 | `pnpm smoke` | Read-only check of the hosted dashboard and invoice page (`DASHBOARD_URL`, `INVOICES_URL`) and of a platform host (`PLATFORM_URL`); set any of them |
 | `pnpm run-report` | The unattended-run report ([unattended run](docs/unattended-run.md)) |
 
-## Hosted demo
+## Hosted demo (retired 2026-11-08)
 
-Four public entry points share Railway routing. Signing in with a NEAR wallet signs a message, never a transaction.
+The prototype's four public entry points ran on Railway until 2026-11-08, when the user deleted their services; they
+no longer answer. They are described below as they ran. The `dao` and `invoices` packages still build and run
+locally. What's hosted now is the platform host only: `api.dev.multiagency.ai` (staging) and `api.multiagency.ai`
+(production), the headless `platform` package ([platform production](docs/platform-production.md)). Signing in with a
+NEAR wallet signs a message, never a transaction.
 
 - **Dashboard**, https://proto.multiagency.ai: the existing treasury executor and payout approve-only instance.
   The public showcase links the three ideas; owner workspaces and guides require sign-in.
@@ -238,10 +242,10 @@ Each line is a gap; the linked page says how the rest is known. The
 - `MultiAgency/payables` and `MultiAgency/treasury-prototype` (not archived) still carry their own copies of the
   gateway and money path, so a fix here doesn't reach them; Payables' frontend still imports from its copy. The
   Treasury app (`MultiAgency/treasury`) is to replace the prototype and this platform's Treasury pages.
-- The `dao` package's Treasury frontend (treasury.multiagency.ai) prints `treasury/get`'s `balances.near` as received,
-  so from 0.5.3 its Funding line shows raw yoctoNEAR. 0.5.3 deploys only the headless `platform` gateway; the `dao`
-  service isn't redeployed with it. Moving the `dao` package's Treasury input to `MultiAgency/treasury`, or removing
-  it, is planned separately.
+- The `dao` package's Treasury frontend (hosted at treasury.multiagency.ai until 2026-11-08) prints `treasury/get`'s
+  `balances.near` as received, so on a 0.5.3 server its Funding line shows raw yoctoNEAR. 0.5.3 deployed only the
+  headless `platform` gateway; the `dao` service was deleted without being redeployed. Moving the `dao` package's
+  Treasury input to `MultiAgency/treasury`, or removing it, is planned separately.
 - A new prototype must reuse a fixed host `demo` value and agent area; owner-app `contract.json` is checked at runtime
   only on hosts served by the shared release server (offline E2E, not deployed). See the
   [integration path](docs/integration-path.md#gaps).
@@ -343,8 +347,8 @@ Each line is a gap; the linked page says how the rest is known. The
   ([follow-up](docs/archive/infrastructure-review.md#follow-up-review-2026-10-16)).
 - Every deploy still uses Railway's Config as Code, which the Railway CLI warned on 2026-11-05 keeps working only until
   2026-12-01; later deploys need Railway's Infrastructure as Code (`.railway/railway.ts`). Not migrated: the root
-  `railway.json` (the `invoices` service) and `deploy/railway.gateway.json` (the `dao` and `platform` packages' root
-  `railway.json`: proto.multiagency.ai and platform staging). See
+  `railway.json` (the `invoices` package, no longer deployed) and `deploy/railway.gateway.json` (the `dao` and
+  `platform` packages' root `railway.json`; only the `platform` package is deployed: staging and production). See
   [operations](docs/operations.md#railway-config-as-code-ends-2026-12-01).
 - Guided walkthroughs and short guides (`/demos`) are tested with offline browser fixtures, not on the deployed hosts,
   and can't guarantee a swap, prompt approval or settlement. Guidance is deterministic, not an LLM; live AG-UI agent

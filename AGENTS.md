@@ -21,7 +21,8 @@ policy, grant, purpose, authorization, operation, unresolved, held payout, refus
 - `docs/enforcement.md` — what the signed policy guarantees today, how each part is known, and what a
   stronger claim needs (threat model, obligations, open cases, provider questions).
 - `docs/mainnet-log.md` — every dated mainnet run, with proposal numbers; op ids and tx hashes are in the private release record.
-- `DEMO.md` — the hosted walkthrough (kept out of the app so copy edits don't redeploy `dao`).
+- `DEMO.md` — the prototype's walkthrough, hosted until 2026-11-08 (kept out of the app so copy edits don't
+  rebuild `dao`).
 
 ## The money path
 Files: `src/agent.ts` (dispatch), `authorize.ts`, `lock.ts`, `ops.ts`, `plans.ts`, `treasury.ts`, `autopilot.ts`,
@@ -42,14 +43,15 @@ Files: `src/agent.ts` (dispatch), `authorize.ts`, `lock.ts`, `ops.ts`, `plans.ts
 - **Mandate digest** (`src/mandate.ts`) is recorded with every plan and money action.
 
 ## Live systems
-- Hosts: https://proto.multiagency.ai (`dao` service: gateway + treasury executor + payout
-  approve-only) and https://invoices.multiagency.ai (payout executor). Railway, one replica each,
-  state on the `/data` volume.
+- Hosts: https://api.dev.multiagency.ai (staging) and https://api.multiagency.ai (production), the
+  `platform` package's headless gateway: Railway service `gateway`, one instance per environment, one
+  replica, state on its `/data` volume. Staging's hosted agents hold and move real funds on mainnet.
+  The prototype's hosts (proto, invoices, payables, treasury.multiagency.ai) were retired on 2026-11-08.
 - Deploys, restarts and dashboard money actions are the user's. Prepare and verify; let them ship.
 - The signed-out public page shows the two areas and each requirement's stage, never the evidence,
   and reads nothing from the server: no balances, amounts, payees, policies, invoices, roster or
   proposals. `test/public.test.ts` pins `web/src/public.tsx`.
-- `pnpm test:live` moves or touches real funds: run only when asked, never scheduled. `pnpm smoke` is the read-only check of both hosts.
+- `pnpm test:live` moves or touches real funds: run only when asked, never scheduled. `PLATFORM_URL=<host> pnpm smoke` is the read-only check of a host.
 - An unattended run or freeze may be in progress: ask the user before editing money-path files.
 
 ## Calibrated claims

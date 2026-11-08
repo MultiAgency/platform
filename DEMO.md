@@ -4,10 +4,13 @@ A DAO, `agentic.sputnik-dao.near`, owns two agents that run its treasury on main
 treasury at its target allocation, and the payout agent pays the DAO's payees. The treasury is confidential:
 anyone can see how the DAO governs its agents, but only members see the money.
 
+The hosted walkthrough below ran until 2026-11-08, when its services were deleted; its hosts no longer answer. The
+steps record how it ran. The verification section is generated from the evidence inventory and stays as observed.
+
 | What | Where |
 |---|---|
-| Signed-in owner walkthroughs | https://proto.multiagency.ai |
-| Separate invoice demo for payees | https://invoices.multiagency.ai |
+| Signed-in owner walkthroughs | https://proto.multiagency.ai (retired 2026-11-08) |
+| Separate invoice demo for payees | https://invoices.multiagency.ai (retired 2026-11-08) |
 | The DAO on chain | https://nearblocks.io/address/agentic.sputnik-dao.near |
 
 Keep confidential details out of the talk: no targets, limits, payees or amounts. In the prepared

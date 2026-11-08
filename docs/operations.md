@@ -133,9 +133,9 @@ here is migrated yet; deploys after that date need it. The files every deploy us
 
 | File | Shipped as | Service |
 |---|---|---|
-| `railway.json` (root) | itself; `scripts/release-candidate.mjs` copies it into the candidate's `invoices` source | `invoices` (invoices.multiagency.ai) |
-| `deploy/railway.gateway.json` | the root `railway.json` of the `dao` package (`scripts/package-shared-frontends.mjs`) | `dao` (proto.multiagency.ai) |
-| `deploy/railway.gateway.json` | the root `railway.json` of the `platform` package (`scripts/package-platform.mjs`) | platform staging (api.dev.multiagency.ai); production would use the same package |
+| `railway.json` (root) | itself; `scripts/release-candidate.mjs` copies it into the candidate's `invoices` source | `invoices` (invoices.multiagency.ai; deleted 2026-11-08) |
+| `deploy/railway.gateway.json` | the root `railway.json` of the `dao` package (`scripts/package-shared-frontends.mjs`) | `dao` (proto.multiagency.ai; deleted 2026-11-08) |
+| `deploy/railway.gateway.json` | the root `railway.json` of the `platform` package (`scripts/package-platform.mjs`) | `gateway`: staging (api.dev.multiagency.ai) and production (api.multiagency.ai) |
 
 Each selects its Dockerfile, one replica, healthcheck `/health` and restart on failure (up to 5 retries). Each also
 sets `drainingSeconds` (45 for the gateway, 30 for invoices): Railway's default sends SIGKILL right after SIGTERM, which

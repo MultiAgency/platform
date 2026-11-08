@@ -280,8 +280,9 @@ classification are retained when dashboard permissions change.
 
 ## Shared demo entry points
 
-**Showcase**: `proto.multiagency.ai` introduces all three catalog ideas through static public copy
-and links to their demos. It is not a Treasury redirect. Its root makes no gateway or agent reads.
+**Showcase**: the public entry (hosted at `proto.multiagency.ai` until 2026-11-08) introduces all three catalog ideas
+through static public copy and links to their demos. It is not a Treasury redirect. Its root makes no gateway or agent
+reads.
 
 **Demo host**: An explicit gateway assignment of a host to an entry experience and named agents.
 Each host has its own sign-in audience and session key. Host assignment bounds access; the owner’s
