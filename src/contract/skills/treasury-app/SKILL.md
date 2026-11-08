@@ -179,7 +179,7 @@ digest suffix, targets, cost cap, the autopilot's per-run ceiling and any cash f
 public); show members the same terms from `strategy/get`
 before they vote. Under it, autopilot runs once your app turns it on (`autopilot/enable`), and with `treasury-execute`
 (only if the DAO voted it into its consent) your plans run. Saving another strategy needs a new grant vote, and
-invalidates open proposals.
+invalidates open proposals: the next read of each answers `invalidated`.
 
 ## Common mistakes
 

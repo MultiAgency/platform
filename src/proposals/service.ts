@@ -63,13 +63,18 @@ function mine({ actor, consents }: Caller, id: string) {
 }
 const view = ({ record, sha256 }: { record: ProposalRecord; sha256: string }) => proposalView(record, sha256);
 
-/** Why the proposal's bindings no longer hold now, or null. */
-function bindingChange(record: ProposalRecord, live: { agentId: string; policyRevision: number | null; policyDigest: string | null; strategyDigest: string }) {
+/** The bindings the agent holds itself: its identity and the owner's strategy. Reading them asks no one and can't fail. */
+const heldBindings = () => ({ agentId: agentId(), strategyDigest: strategyDigest(loadStrategy()) });
+/** Why the bindings the agent holds itself no longer hold now, or null. */
+function heldChange(record: ProposalRecord, live: { agentId: string; strategyDigest: string }) {
   if (live.agentId !== record.agentId) return "the agent changed";
-  if (live.policyRevision !== record.policyRevision || live.policyDigest !== record.policyDigest)
-    return `the policy changed (revision ${record.policyRevision} → ${live.policyRevision})`;
   if (live.strategyDigest !== record.strategyDigest) return "the owner's strategy changed";
   return null;
+}
+/** Why the proposal's bindings no longer hold now, or null: the agent's own, then the policy, which the provider holds. */
+function bindingChange(record: ProposalRecord, live: { agentId: string; policyRevision: number | null; policyDigest: string | null; strategyDigest: string }) {
+  return heldChange(record, live) ?? (live.policyRevision !== record.policyRevision || live.policyDigest !== record.policyDigest
+    ? `the policy changed (revision ${record.policyRevision} → ${live.policyRevision})` : null);
 }
 const invalidate = (id: string, reason: string) => {
   close(id, { state: "invalidated", reason, at: new Date().toISOString() });
@@ -128,14 +133,29 @@ export async function createProposal(context: CallContext, input: unknown, now =
   return answer();
 }
 
-export function getProposal(context: CallContext, input: unknown) {
-  return view(mine(caller(context), proposalRef.parse(input).id));
+/**
+ * A read's view. An open proposal whose agent or strategy changed is closed as invalidated first, as approval would
+ * close it: it can't pass, so no reader is shown it open. The policy is the provider's, so a read doesn't ask for it;
+ * approval and execution check it. A claimed proposal is never closed (`close` loses to the claim).
+ */
+function read(loaded: { record: ProposalRecord; sha256: string }, live: { agentId: string; strategyDigest: string }) {
+  const { state } = proposalState(loaded.record);
+  const changed = (state === "proposed" || state === "approved") && heldChange(loaded.record, live);
+  if (changed) close(loaded.record.id, { state: "invalidated", reason: changed, at: new Date().toISOString() });
+  return view(loaded);
 }
 
-/** This app's proposals, under any of its consents, newest first. Reading withdraws nothing. */
+export function getProposal(context: CallContext, input: unknown) {
+  return read(mine(caller(context), proposalRef.parse(input).id), heldBindings());
+}
+
+/**
+ * This app's proposals, under any of its consents, newest first. Reading withdraws none for a consent that ended; it
+ * closes an open one whose agent or strategy changed, as `getProposal` does.
+ */
 export function listProposals(context: CallContext) {
-  const who = caller(context);
-  const proposals = proposalIds().flatMap(id => { const p = loadProposal(id); return p && p.record.actor === who.actor ? [view(p)] : []; });
+  const who = caller(context), live = heldBindings();
+  const proposals = proposalIds().flatMap(id => { const p = loadProposal(id); return p && p.record.actor === who.actor ? [read(p, live)] : []; });
   return { proposals: proposals.sort((a, b) => b.createdAt.localeCompare(a.createdAt)) };
 }
 

@@ -789,7 +789,9 @@ under a plain grant, executed after the owner's strategy grant). The owner's own
 
 Proposals and consents: a proposal is withdrawn, on the app's next call, once the consent it was made under is no
 longer among the app's live consents for that agent (the gateway names them on each call); a second live consent (a renewal) withdraws nothing, and
-a proposal already claimed or closed answers its own state, never a withdrawal. The open-proposal limit is counted
+a proposal already claimed or closed answers its own state, never a withdrawal. A read (`proposals/get`, `proposals/list`)
+closes an open proposal whose agent or strategy changed as `invalidated`, as approval would, since the agent holds both;
+a changed policy, which the provider holds, is found at approval and execution only. The open-proposal limit is counted
 without a lock, so concurrent proposals can pass it slightly; one unreadable proposal record fails proposal calls for
 the whole agent (closed, not open). The owner's approving key is checked when the approval is relayed, not again at
 execution.
