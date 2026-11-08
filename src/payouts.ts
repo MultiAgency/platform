@@ -52,15 +52,14 @@ export async function paymentStatus(correlationId: string, waitMs?: number) {
   const approvalId = s.details?.approval_id ?? null;
   let expiresAt: string | null = null;
   let detailError: string | null = null;
-  // Terms are rebuilt from an approval only for a transfer: a withdrawal's approval isn't verified yet (its hash is observed, verifying it isn't built), so its terms
-  // come from this copy's journal or not at all.
-  if (approvalId && s.type === "transfer") {
+  // Terms shown for review only; a vote is verified against the provider's hash when it is prepared (payment-approval.ts).
+  if (approvalId) {
     try {
       const approval = await api.getApproval(agentId(), approvalId, { signal: AbortSignal.timeout(10_000) });
-      const data = approval.request_data;
-      if (approval.approval_id !== approvalId || typeof data.to !== "string" || typeof data.token !== "string" || typeof data.amount !== "string" || !/^[1-9]\d*$/.test(data.amount) || !Number.isFinite(Date.parse(approval.expires_at)))
+      const terms = approvalTerms(s.type, approval.request_data);
+      if (approval.approval_id !== approvalId || !terms || !Number.isFinite(Date.parse(approval.expires_at)))
         throw new Error("Approval details do not identify this payment's terms");
-      request = { recipient: data.to, asset: data.token, amount: data.amount, confidential: true };
+      request = terms;
       expiresAt = approval.expires_at;
     } catch { detailError = "Payment terms or approval deadline could not be read. Check again before deciding."; }
   }
@@ -69,26 +68,45 @@ export async function paymentStatus(correlationId: string, waitMs?: number) {
 }
 
 /**
- * Transfers waiting for approval in the API's history, newest first, from the approval window. Held withdrawals are
- * listed from this copy's journal only: their approval isn't verified yet, so their terms aren't rebuilt from it.
+ * A held payment's readable terms from its provider approval, for review: a confidential transfer, or a withdrawal to
+ * NEAR (mainnet-observed shape, 2026-10-30). Null when they don't read as one. Displaying them proves nothing.
  */
+function approvalTerms(type: string, data: Record<string, unknown>) {
+  const { to, token, amount, chain } = data;
+  if (typeof to !== "string" || typeof token !== "string" || typeof amount !== "string" || !/^[1-9]\d*$/.test(amount)) return null;
+  const request = { asset: token, amount, recipient: to };
+  if (type === "transfer") return { ...request, confidential: true };
+  if (type === "withdraw" && chain === "near") return { ...request, chain: "near", confidential: true };
+  return null;
+}
+
+/** Transfers and withdrawals waiting for approval in the API's history, newest first, from the approval window. */
 async function heldElsewhere() {
   const since = Date.now() - APPROVAL_TTL_MS;
   const found = [];
+  const cursors = new Set<string>();
   let cursor: string | undefined;
-  do {
+  for (let pageIndex = 0; ; pageIndex++) {
+    // Bounded like `paymentHistory`: a provider that repeats a page, or never reaches the window's start, is unreadable.
+    if (pageIndex === 20) throw new Error("held: the API's history is incomplete (it didn't reach the approval window's start)");
     const page = await api.getHistory(agentId(), { limit: 50, ...(cursor && { cursor }) });
     for (const entry of page.data) {
       const approvalId = (entry.details as { approval_id?: string } | null)?.approval_id;
-      if (entry.type !== "transfer" || entry.status !== "PENDING_APPROVAL" || !approvalId) continue;
-      const { request_data: data } = await api.getApproval(agentId(), approvalId);
-      const request = { asset: data.token, amount: data.amount, recipient: data.to, confidential: true };
+      // Agents on one API key share history reads that name an agent: list only this agent's (as `paymentHistory` does).
+      if (entry.agent_id !== agentId() || (entry.type !== "transfer" && entry.type !== "withdraw") || entry.status !== "PENDING_APPROVAL" || !approvalId) continue;
+      // Listed even when its terms don't read cleanly, so one odd approval hides nothing; a vote is verified when prepared.
+      const data = (await api.getApproval(agentId(), approvalId)).request_data ?? {};
+      const request = approvalTerms(entry.type, data)
+        ?? { asset: data.token, amount: data.amount, recipient: data.to, ...(entry.type === "withdraw" && { chain: data.chain }), confidential: true };
       found.push({ at: entry.created_at, kind: "remote", request, correlationId: entry.correlation_id, approvalId });
     }
     const oldest = page.data.at(-1)?.created_at;
-    cursor = page.next_cursor && oldest && Date.parse(oldest) > since ? page.next_cursor : undefined;
-  } while (cursor);
-  return found;
+    // An empty page that names a next one is followed, not taken as the end.
+    if (!page.next_cursor || (oldest && Date.parse(oldest) <= since)) return found;
+    if (cursors.has(page.next_cursor)) throw new Error("held: the API's history is incomplete (a page repeated)");
+    cursors.add(page.next_cursor);
+    cursor = page.next_cursor;
+  }
 }
 
 /** Recent held-payout identities retained by the provider, including settled payouts.

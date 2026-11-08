@@ -147,7 +147,7 @@ test("a released held action blocks new sends until reconciliation proves its ou
 
 test("a payout another instance filed is listed from the API's history and never written here", async () => {
   writeFileSync(opsLog(), "");
-  const remote = { correlation_id: "op_remote", type: "transfer", status: "PENDING_APPROVAL", created_at: new Date().toISOString(), details: { approval_id: "appr-1" } };
+  const remote = { correlation_id: "op_remote", agent_id: process.env.AGENT_ID, type: "transfer", status: "PENDING_APPROVAL", created_at: new Date().toISOString(), details: { approval_id: "appr-1" } };
   Object.assign(api, {
     getHistory: async () => ({ data: [remote, { ...remote, correlation_id: "op_done", status: "SUCCESS" }], next_cursor: null }),
     getApproval: async () => ({ request_data: { to: "payee.near", token: "nep141:usdc", amount: "1000000" } }),

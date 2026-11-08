@@ -2,39 +2,35 @@
 
 Control plane for agentic treasuries, built on NEAR Intents.
 
-An AI agent manages a treasury on [NEAR Intents](https://near.org/intents) through the
-[NEAR Intents Agent API](https://api.agentsonintents.com/llms.txt), inside a policy its owner signed.
-The owner can be a person's wallet or a Sputnik DAO, such as a [Trezu](https://trezu.org) treasury.
-The provider holds the funds and enforces that policy. This platform adds what the provider can't: owner sign-in and
-consent, checks before each send, at-most-once execution with recovery, and owner and DAO approvals
-([enforcement](docs/enforcement.md) says how each is known). Regular NEAR wallet
-owners and authorized Sputnik DAO members can reserve their own Treasury or Payables setup; owner policy and grant
-signatures remain separate. The public showcase reads no private records.
-
-This repository is meant to be the one owner of the gateway, executor and money path, with apps (Treasury, Payables,
-Invoices, the MultiAgency dashboard) building on it only through `@multiagency/sdk`. Not yet: Payables and the Treasury
-prototype still carry their own copies (see Not done yet).
-
-The [shared frontend integration](docs/shared-frontend-integration.md) keeps the platform's own page as the static
-three-idea showcase and serves independently built Treasury and Payables frontends. Invoices is
-Payables' payee-facing entry. The 2026-10-16 UTC [release record](docs/archive/proto-release-execution.md)
-records that release's sign-in, private access and routing checks.
-Agents retain separate balances, authority and executors.
-A new app builds on the platform through the [integration path](docs/integration-path.md).
+An AI agent moves a wallet's or a Sputnik DAO's funds on [NEAR Intents](https://near.org/intents) mainnet, only inside
+a policy its owner signed. The provider, the [NEAR Intents Agent API](https://api.agentsonintents.com/llms.txt), holds
+the funds and enforces that policy. This platform adds what the provider can't: owner sign-in and consent, checks before
+each send, at-most-once execution with recovery, and verified owner and DAO approvals. A DAO owner can be a
+[Trezu](https://trezu.org) treasury.
 
 > Runs on NEAR mainnet with real funds. Use a low-value account and small amounts.
 
-The initial agency experiment has two areas, each with its own agent owned by
-`agentic.sputnik-dao.near`. Other owners reserve separate instances. Each area runs a brief from
-the Agent Connect catalog and plans more:
+**Reviewing it?** Start with [docs/review.md](docs/review.md): each claim, how it is known, and where the evidence is.
 
-| Area | What it shows | Details |
+## The product
+
+The platform host (the headless `platform` package: [staging](docs/platform-staging.md),
+[production](docs/platform-production.md)) and `@multiagency/sdk`, through which apps reach it over `/apps/v1` with the
+owner's consent ([app access](docs/app-access.md), [integration path](docs/integration-path.md)). Its core is two loops:
+
+| Loop | What it does | Details |
 |---|---|---|
-| **Payables** (Confidential Treasury Facilitator) | Anyone asks the DAO to be paid; agreements carry terms (contractor requests, work orders, bounty and grant awards); each payment is held for the DAO's vote and paid confidentially | [docs/facilitator.md](docs/facilitator.md) |
-| **Treasury** (Agentic Treasury Management) | An agent rebalances toward a target on its own, quoting every swap, inside per-asset caps and a USD budget the DAO signed; idle funds stay confidential | [docs/treasury.md](docs/treasury.md) |
+| **Treasury** | An agent rebalances toward the owner's target, quoting every swap, inside per-asset caps and a USD budget the owner signed; each proposal is approved by the owner's signature or the DAO's vote, or autopilot runs under a grant bound to the saved strategy | [docs/treasury.md](docs/treasury.md) |
+| **Payouts** | An app requests a payout once under its own id; under a policy that holds payments, the provider holds it for the owner's vote; it is paid confidentially, or withdrawn to an agreed NEAR account. Wallet owners only: a DAO's consent covers Treasury, not payouts | [docs/facilitator.md](docs/facilitator.md) |
 
-Each doc measures its briefs requirement by requirement (complete, tested, live) and lists what isn't covered.
-The app shows the two running briefs and their evidence stages; additional roadmap briefs stay in those planning docs.
+This repository is meant to be the one owner of the gateway, executor and money path, with apps (Treasury, Payables,
+Invoices, the MultiAgency dashboard) building on it only through `@multiagency/sdk`. Not yet: Payables still carries its own
+copy (see Not done yet).
+
+**Experimental**, outside the core loops: no compatibility promise, and offline-tested unless their page says otherwise.
+The [dashboard prototype](docs/prototype.md) (the `dao` and `invoices` source, whose hosted services were retired and whose packages are no longer
+built, 2026-11-08) with its invoices, agreements, work orders, guided walkthroughs and Telegram notifications; the
+LLM-steered treasury at `/steward`; [agent connections](docs/agent-access.md); and the run-log adapter.
 
 ## How it works
 
@@ -63,6 +59,10 @@ cp .env.example .env   # add an API key from https://partners.demo.agentsoninten
 pnpm demo              # dashboard on http://localhost:8787
 ```
 
+That runs the experimental dashboard prototype. To build an app on the platform, run the local stack instead:
+`pnpm build:web && pnpm test:e2e:stack --app <deployment> --no-browser` (simulated provider and chain, an app credential
+issued at startup; see the [integration path](docs/integration-path.md)).
+
 The dashboard walks you through creating an agent and issuing its grant, and runs every money action.
 The command line has only what the dashboard doesn't: owner actions signed with a local key, and checks.
 
@@ -82,127 +82,16 @@ The command line has only what the dashboard doesn't: owner actions signed with 
 | `pnpm smoke` | Read-only check of the hosted dashboard and invoice page (`DASHBOARD_URL`, `INVOICES_URL`) and of a platform host (`PLATFORM_URL`); set any of them |
 | `pnpm run-report` | The unattended-run report ([unattended run](docs/unattended-run.md)) |
 
-## Hosted demo (retired 2026-11-08)
+## Test and deploy
 
-The prototype's four public entry points ran on Railway until 2026-11-08, when the user deleted their services; they
-no longer answer. They are described below as they ran. Their source still runs locally (`pnpm demo`,
-`pnpm invoices`); their packages are no longer built. What's hosted now is the platform host only: `api.dev.multiagency.ai` (staging) and `api.multiagency.ai`
-(production), the headless `platform` package ([platform production](docs/platform-production.md)). Signing in with a
-NEAR wallet signs a message, never a transaction.
+`pnpm verify` runs the complete offline sequence: typecheck, the offline suites, the browser suites (install the pinned
+browser once with `pnpm exec playwright install chromium`), the isolated application stack with simulated provider,
+chain and wallet, and the evidence drift check. CI runs it on every push to `main` and every pull request. See
+[test boundaries and harnesses](docs/testing.md).
 
-- **Dashboard**, https://proto.multiagency.ai: the existing treasury executor and payout approve-only instance.
-  The public showcase links the three ideas; owner workspaces and guides require sign-in.
-- **Treasury**, https://treasury.multiagency.ai: the independent Treasury frontend using the shared gateway.
-- **Payables**, https://payables.multiagency.ai: the independent Payables frontend using the shared gateway.
-- **Invoices**, https://invoices.multiagency.ai: payee routing to the existing payout executor,
-  where payees request agreements, file invoices and follow their existing payment identities.
-  Hosted sign-in, retained private access and payee page routing were checked in the
-  [2026-10-16 UTC release](docs/archive/proto-release-execution.md); no money action was performed.
-
-With `walkthroughs: true` or `selfService: true`, the signed-in entry is **Your agents**. Choose an existing
-agent or **Create your own agent**, select Portfolio or Payables, and continue setup. A regular NEAR
-wallet owns its own agent. For a DAO, sign in with a member's wallet, then select the DAO through
-Trezu; the gateway verifies membership and permission to propose owner actions. Owner signatures,
-DAO votes, policy application, grants and funding remain separate steps.
-
-Self-service setup (`selfService: true`) reserves one instance per owner and area, up to 32 on this
-host. Retrying reopens the same reservation. The selected owner and area cannot be changed inside
-that setup. Each instance retains its own settings, grant, lease and records; reservation itself
-sends nothing to the provider. The agent's policy is still created through the existing owner-intent
-flow. Provisioning and ownership isolation are tested offline, not mainnet-observed.
-
-**Open agent** opens its task workspace at `/a/<instance>/workspace`, or resumes incomplete setup.
-Policy and grants, funding, activity and guided walkthroughs have separate agent-scoped links.
-The **Guided walkthrough** link opens the real rebalance or payment controls. The guide summarizes
-prerequisite observations and follows the exact confirmed plan or returned payment. Funding,
-policy, grants, agreements and Activity remain linked where needed. Unknown outcomes remain
-unresolved; approval does not establish settlement. Opening or reloading a guide submits nothing.
-When a payee host is configured, owner-created Payables agents receive an isolated payee entry
-at `/i/<instance>/` after provider agent creation. The existing approve-only payout agent retains its
-separate invoice executor. New owner-created agents never share that executor’s state or grant.
-The shared routing is deployed. New-owner provisioning and scoped payee journeys retain
-offline coverage only; the release did not create an agent or issue a grant.
-
-There are no public read-only walkthroughs or requirement cards at the entry. Legacy example hashes
-also show sign-in when signed out. Requirement evidence remains in the canonical area documentation.
-Hosts without walkthrough mode retain the existing workspace navigation and task pages.
-
-See [frontend responsibilities](docs/architecture.md#frontend-responsibilities-offline-tested) for
-query, recovery and navigation behavior, [Payables](docs/facilitator.md) and [Treasury](docs/treasury.md)
-for requirement evidence, and [DEMO.md](DEMO.md) for the walkthrough.
-
-Install the pinned browser once with `pnpm exec playwright install chromium`; `pnpm test:browser`
-builds the app and runs the offline browser suites. These intercept requests and start no executor.
-`pnpm test:e2e` additionally runs an isolated application stack with simulated provider, chain and wallet boundaries.
-`pnpm verify` runs the complete offline verification sequence. See [test boundaries and harnesses](docs/testing.md)
-for credential isolation, live-test submission blocking, fixture contracts and failure artifacts.
-
-Each agent in `deploy/dashboard.json` names its `owner`, and the gateway decides per agent who may see
-it, from that owner at most a minute old. A wallet-owned agent admits only its owner account.
-A Sputnik DAO's named group members may read private records. Their applicable Group and Everyone
-permissions determine proposal and vote capabilities; public proposal rights alone never admit an outsider.
-There is no configured operator list. Execution controls require both FunctionCall proposal and approval
-permissions; local settings require both policy proposal and approval permissions. These are local
-application permissions: they never replace the owner's signature, DAO approval threshold, signed policy
-or live grant. The gateway and frontend share the same action checks. This mapping is offline-tested;
-see [dashboard access](docs/architecture.md#dashboard-access-offline-tested) for its exact scope.
-With self-service enabled, a verified wallet without an agent may sign in to start setup, but gains no access to another owner’s agents. Walkthrough mode lists no agents while signed out. Hosts without these options retain the member-only sign-in behavior. None of this limits whoever runs the host, who can read every agent’s state there. Both hosted agents are owned by the DAO; a wallet-owned agent behind the
-gateway is tested offline only (`test/gateway-denial.test.ts`). On the invoice page anyone may sign in, but only payees in
-the payout agent's policy file invoices; anyone else files an agreement request.
-
-The demo walkthrough is in [DEMO.md](DEMO.md).
-
-Deployment, executor migration and state preservation are documented in the
-[operations guide](docs/operations.md#dashboard). Each agent requires one executor host; the local
-lease does not enforce that across machines. Other instances use `EXECUTOR=off`.
-
-## Two kinds of agent
-
-- A **treasury agent** swaps between USDC, wNEAR and ETH toward a target, shields anything public,
-  and, as an experiment reached only at `/steward`, can be steered by an LLM whose responses are verified
-  against its TEE. No vote per action.
-- A **payout agent** only transfers USDC, confidentially, to payees the owner agreed to. Every payout
-  waits for the owner's approval. Approval verification checks the intended terms against the current
-  policy; cumulative enforcement and the final signed artifact retain the provider dependencies
-  described in the [enforcement assessment](docs/enforcement.md).
-
-Each instance of the server runs one agent. To run a second beside the first, give it its own
-settings file: `ENV_FILE=.env.payout PORT=8790 pnpm server`. It shares the API keys in `.env` but keeps
-its own agent, grant and treasury, and each agent has its own action log in `.ops/`. The payout agent's
-executor, which also serves the invoice page, starts with `ENV_FILE=.env.payout pnpm invoices`; any other
-instance of an agent runs `EXECUTOR=off` ([operations](docs/operations.md#payout-executor)).
-
-## Notifications
-
-Each executor can tell the owner on Telegram when something waits for a person: a payment held for
-approval, a money action still without a proven outcome after about five minutes (sends are paused
-until it's reconciled; one merely in flight settles sooner), or the autopilot's open warnings and
-decisions. It reads only the executor's own state, once a minute, and announces each item once while it
-stays open, across restarts too (`src/notify.ts`). Messages name the agent and link to the page where the
-owner acts on the item; they never carry amounts, payees or balances, since Telegram sees them.
-Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` (and optionally `NOTIFY_NAME`, `NOTIFY_LINK`) on the
-executor's service; without them it does nothing.
-
-## Invoices
-
-The payout executor serves both the private dashboard and public invoice page through the same
-grant, money lock and recovery loop. See [payout setup](docs/operations.md#payout-executor).
-
-Anyone signs in with a full-access NEAR wallet key and files an amount and optional note for their
-own account. An agreed payee's filing is an invoice; anyone else's is an **agreement request**, which is
-never a payment. Agreements carry terms (an amount per invoice and a deadline), and the DAO can also
-offer them first, as a service agreement or an award. Agreeing lists the payee in the policy by vote; the
-payee then files the invoice, which is held for its own vote ([facilitator](docs/facilitator.md)).
-The hosted dashboard reads the invoice host's agreements with a shared secret (`AGREEMENTS_URL`,
-`AGREEMENTS_SECRET`; [operations](docs/operations.md#payout-executor)). Sign-in, storage, retries and
-recovery are in [docs/architecture.md](docs/architecture.md#invoice-storage).
-
-**Work orders** use the same Payables workspace and invoice portal, with a dedicated agent for each
-order. In Agreements, save one payee's fixed USDC amount, work description and deadline; authorize
-its policy and expiring grant, then obtain a confidential USDC deposit address. Share its invoice link
-with the payee. Payments also lists the order, its held payout and owner actions. Payment submission
-always uses the original invoice identity and the shared dispatch path. This flow is locally implemented
-and offline-tested; no work-order agent has been demonstrated on the deployed hosts.
+Each agent has exactly one executor host; the local lease doesn't enforce that across machines, so any other instance
+runs `EXECUTOR=off` (approve-only). Deployment, executor migration and state preservation are in the
+[operations guide](docs/operations.md).
 
 ## DAO ownership
 
@@ -218,20 +107,17 @@ A confidential Trezu treasury funds its agent with a payment from its confidenti
 `nearcom:<the agent's wallet account>`, which the Funding page links to. Without the `nearcom:`
 prefix, Trezu sends the payment out as a public withdrawal.
 
-## Mainnet evidence
+## Checking the claims
 
-Each area's doc maps every claim to how it is known: [Payables](docs/facilitator.md),
-[Treasury](docs/treasury.md). Every dated mainnet run, with its DAO proposal numbers, is in
-[docs/mainnet-log.md](docs/mainnet-log.md). Operation ids and amounts are kept in a private record, since the
-treasury is confidential; they are available to reviewers on request.
+[docs/review.md](docs/review.md) summarizes each claim and how it is known. Each area's doc maps every requirement to its
+evidence: [Payables](docs/facilitator.md), [Treasury](docs/treasury.md). Every dated mainnet run, with its DAO proposal
+numbers, is in [docs/mainnet-log.md](docs/mainnet-log.md); operation ids and amounts are in a private record, available to
+reviewers on request.
 
-The app and the area tables use one [canonical requirement/evidence inventory](evidence/inventory.ts).
-Historical deployment checks and their limits are in the generated
-[demo verification table](DEMO.md#what-is-verified). Edit the inventory, then run
-`pnpm evidence:write`; `pnpm evidence:check` and `pnpm test` reject stale generated sections.
-Record new mainnet observations in [the dated log](docs/mainnet-log.md), then reference that evidence
-in the inventory. Keep private release details out of both. Walkthroughs link to these records instead
-of maintaining separate requirement statuses.
+The app and the area tables use one [canonical requirement/evidence inventory](evidence/inventory.ts). Edit it, then run
+`pnpm evidence:write`; `pnpm evidence:check` and `pnpm test` reject stale generated sections. Record new mainnet
+observations in [the dated log](docs/mainnet-log.md), then reference them in the inventory. Keep private release details
+out of both.
 
 ## Not done yet
 
@@ -259,8 +145,8 @@ Each line is a gap; the linked page says how the rest is known. The
 - App access (`/apps/v1`) runs in production on api.multiagency.ai since 2026-11-07, with no app credential issued yet
   ([platform production](docs/platform-production.md)). Mainnet-observed on staging: confidential USDC payouts (2026-10-28) and
   withdrawals of wNEAR or USDC to agreed NEAR accounts (2026-10-30), and DAO-owned agents (below) ([mainnet log](docs/mainnet-log.md)).
-  A held withdrawal can be rejected, not approved, so under the payout template it is paid only once the
-  owner turns approval off; at most 32 hosted agents per host. A dishonest app can still get a blind NEP-366 signature
+  Approving a held withdrawal is offline- and stack-tested, not mainnet-observed, and its signature doesn't bind
+  `destination_asset` ([enforcement](docs/enforcement.md)); at most 32 hosted agents per host. A dishonest app can still get a blind NEP-366 signature
   by having the owner sign the confirm link's text on its own page; a held payout's vote text names no payee or amount,
   so the app's display is the only place the owner sees them; an owner who signs the platform's sign-in text on an
   app's page gives it a full session; a service credential is a bearer. See [app access](docs/app-access.md).
@@ -292,6 +178,8 @@ Each line is a gap; the linked page says how the rest is known. The
 **Money path and recovery**
 - A send whose provider reply is lost blocks its executor's later sends, with no review procedure yet; nothing is sent
   twice, but the block doesn't clear after settlement or with `pnpm reconcile` ([enforcement](docs/enforcement.md)).
+- The held-payment list reads at most 1,000 history entries from the approval day, which may include other agents' on
+  the same API key; past that it reports the list incomplete (and changes nothing) instead of listing every held payment.
 - A provider `FAILED` status is treated as terminal; it isn't verified to make a replacement payment safe
   ([recovery guidance](DEMO.md#the-live-moment-one-invoice-end-to-end-facilitator)).
 - Payment recovery reads and owner-action discovery are offline-tested only. Discovery scans at most 250 provider

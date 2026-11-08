@@ -12,6 +12,26 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
+## 0.5.5 (unreleased)
+
+- **`payment.terms.chain`** (addition): an `approval_vote`'s proven terms in `owner/prepare` carry `chain: "near"` when
+  the held payment is a withdrawal to a NEAR account, and nothing for a transfer. Optional, so older apps and servers are
+  unaffected.
+
+Platform changes in this release, outside the package:
+- **Approving a held withdrawal:** an `approval_vote` approving a held withdrawal to a NEAR account is verified like a
+  transfer's (the provider's request hash recomputed with `flow` `withdraw`, chain `near`, the current policy still
+  permitting the withdrawal, its asset and that payee) and no longer refused `local_authorization_held`. The hash
+  doesn't cover `destination_asset`, so the approval is refused unless it is the token withdrawn, and refused if the
+  approval names any field outside the set observed on mainnet (2026-10-30). Offline- and stack-tested, not
+  mainnet-observed ([enforcement](enforcement.md)).
+- **Held payments on an approve-only copy:** `held` lists held withdrawals from the provider's history too, with
+  `chain: "near"` in `request`, and only this agent's held payments (agents on one API key share history). It follows an
+  empty history page that names a next one (it ended there and could list nothing), and reports a repeated page or more
+  than 20 as incomplete instead of looping. The 20 pages (1,000 entries) count everything the history read returns,
+  which may include other agents' entries on the same API key; past that, the held list says it's incomplete and changes
+  nothing. Offline-tested.
+
 ## 0.5.4 (2026-11-08)
 
 No change to the package's API.

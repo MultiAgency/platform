@@ -85,7 +85,7 @@ check went unanswered) means send the same request again.
 With `owner` scope an app may prepare `agent_create` without payees (naming the key that signed the setup),
 `agent_freeze`, `agent_unfreeze`, `grant_issue`, `grant_revoke`, `policy_update`, and `approval_vote` on a held payout,
 through `app.agent(organization, agent).call(...)`. Everything else is refused before it reaches the agent. A vote the
-platform can't verify (an expired or changed approval, other terms, approving a held withdrawal) is refused before
+platform can't verify (an expired or changed approval, other terms, a withdrawal approval naming unobserved fields) is refused before
 anything reaches the provider (`refused`, code `local_authorization_held`), at prepare or at submit.
 
 ```ts
@@ -266,8 +266,8 @@ template has USDC only; without a limit only the USD budget caps it). Then reque
 route fee. A USDC withdrawal's recipient must be registered on the USDC contract (a one-time `storage_deposit` the payee
 makes from any wallet): otherwise it is refused `recipient_not_registered` before anything is recorded, and the same
 `requestId` can be asked again once it is. A `nearcom:` address is never a withdrawal recipient; any other chain is refused `chain_not_supported`. A held
-withdrawal can be rejected, not approved, for now: show the owner the reject choice only. Under the payout template every
-payout is held, so a withdrawal is paid only once the owner turns `owner_approval` off. Fund wNEAR with `deposit` and
+withdrawal is approved or rejected like a transfer (0.5.5; offline- and stack-tested, not mainnet-observed); its proven
+`payment.terms` carry `chain: "near"`, so show the owner it's a public withdrawal that may arrive less a route fee. Fund wNEAR with `deposit` and
 `{ asset: "nep141:wrap.near" }`.
 
 ## Common mistakes

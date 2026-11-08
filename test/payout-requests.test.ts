@@ -204,7 +204,7 @@ test("through intents only confidential USDC is paid; a withdrawal goes only to 
 /** A payout policy that also withdraws, to `payee.near`, wNEAR and USDC. */
 const withdrawing = (): Policy => {
   const base = payoutPolicy(["payee.near"]);
-  // Auto-pay, so the provider settles without a vote (a held withdrawal can only be rejected for now).
+  // Auto-pay, so the provider settles without a vote.
   return { ...base, owner_approval: false, actions: ["transfer", "withdraw"], assets: [ASSETS.USDC, ASSETS.wNEAR],
     destinations: { mode: "only", list: [...base.destinations.list, { action: "withdraw", chain: "near", address: "payee.near", memo: null }] } };
 };

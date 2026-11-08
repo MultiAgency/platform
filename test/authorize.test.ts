@@ -120,7 +120,7 @@ test("payouts, invoices and approvals are confidential USDC transfers", () => {
   }
 });
 
-test("a payout may withdraw wNEAR or USDC to an agreed NEAR account, from the confidential balance; invoices and approvals never withdraw", () => {
+test("a payout may withdraw wNEAR or USDC to an agreed NEAR account, from the confidential balance, and the owner may approve one held; invoices never withdraw", () => {
   const withdrawing: Policy = { ...payout, actions: ["transfer", "withdraw"], assets: [ASSETS.USDC, ASSETS.wNEAR],
     destinations: { mode: "only", list: [...payout.destinations.list, { action: "withdraw", chain: "near", address: "payee.near", memo: null }] } };
   const view = policyView(withdrawing, 11);
@@ -139,7 +139,10 @@ test("a payout may withdraw wNEAR or USDC to an agreed NEAR account, from the co
   assert.equal(code("payout", withdraw(), { view: policyView(except, 11), available: "5000" }), "payee_not_agreed", "only an only-mode policy agrees to anyone");
   assert.equal(payoutCode(withdraw(), "999"), "insufficient_balance");
   assert.equal(code("payout", withdraw(), { view, available: "5000", heldPayouts: [{ recipient: "payee.near", asset: ASSETS.wNEAR, amount: "1000" }] }), "duplicate_held_payout");
-  for (const purpose of ["invoice", "approval"] as const) assert.equal(code(purpose, withdraw(), { view }), "transfer_not_allowed", purpose);
+  assert.equal(code("invoice", withdraw(), { view }), "transfer_not_allowed", "an invoice never withdraws");
+  assert.equal(code("approval", withdraw(), { view }), "ok", "the owner may approve a held withdrawal to an agreed account");
+  assert.equal(code("approval", withdraw({ recipient: "other.near" }), { view }), "payee_not_agreed");
+  assert.equal(code("approval", withdraw(), { view: policyView({ ...withdrawing, actions: ["transfer"] }, 11) }), "action_not_allowed");
   const usdcOnly: Policy = { ...withdrawing, assets: [ASSETS.USDC] };
   assert.equal(code("payout", withdraw(), { view: policyView(usdcOnly, 11), available: "5000" }), "asset_not_allowed", "an asset outside the policy is refused before sending");
   assert.equal(code("payout", withdraw(), { view: policyView({ ...withdrawing, assets: "any" }, 11), available: "5000" }), "ok");
