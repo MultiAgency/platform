@@ -15,14 +15,14 @@ const READ = ['setup', 'instance', 'overview', 'policyHistory', 'activity', 'unr
 const MUTATE = ['pay', 'deposit', 'recover', 'cancelPreparedInvoice', 'inbox/dismiss', 'owner/prepare', 'owner/submit', 'agreements/propose', 'agreements/offer',
   'agreements/decline', 'compensation/agreement', 'compensation/review', 'compensation/prepare', 'compensation/send', 'workOrders/create', 'workOrders/prepare',
   'workOrders/submit', 'workOrders/deposit', 'workOrders/file', 'strategy/save', 'autopilot/enable', 'autopilot/stop', 'autopilot/tick', 'treasury/link',
-  'treasury/unlink', 'treasury/setConfidential', 'treasury/fund'];
+  'treasury/unlink', 'treasury/fund'];
 const STREAM = ['rebalance', 'executePlan', 'sweep', 'steward/propose'];
 const LISTED = [...READ, ...MUTATE, ...STREAM];
 const until = () => new Date(Date.now() + 2 * 86_400_000).toISOString();
 
 test('Payables: every listed procedure through ownerClient equals its raw answer, with each reachable error kind', async ({ browser }, info) => {
   test.setTimeout(300_000);
-  expect(LISTED).toHaveLength(57);
+  expect(LISTED).toHaveLength(56);
   const stack = await environment(info.outputPath('environment'));
   const owner = await browserContext(browser, stack, OWNER), payeeBrowser = await browserContext(browser, stack, PAYEE);
   try {
@@ -117,7 +117,6 @@ test('Payables: every listed procedure through ownerClient equals its raw answer
     await check('strategy/save', { strategy: strategy.strategy, expectedDigest: strategy.digest }, undefined);
     await check('autopilot/enable', { expectedDigest: strategy.digest }, undefined);
     await check('treasury/link', { accountId: OWNER }, undefined);
-    await check('treasury/setConfidential', { confidential: true }, undefined);
     await check('treasury/fund', { asset: 'USDC', amount: '1000000' }, undefined);
     await check('treasury/unlink', undefined, undefined);
     await check('executePlan', { planId: randomUUID() }, 'refused');
@@ -132,7 +131,7 @@ test('Payables: every listed procedure through ownerClient equals its raw answer
       ['compensation/agreement', { id: 'x' }], ['compensation/review', { id: 'x' }], ['compensation/prepare', { type: 'nope' }], ['compensation/send', { type: 'send', id: 'x' }],
       ['workOrders/create', { id: 'x' }], ['workOrders/get', { id: 'x' }], ['workOrders/status', { id: 'x' }], ['workOrders/prepare', { id: 'x' }], ['workOrders/submit', { id: 'x' }],
       ['workOrders/deposit', { id: 'x' }], ['workOrders/file', { id: 'x' }], ['strategy/save', { strategy: {}, expectedDigest: 'x' }], ['autopilot/enable', { expectedDigest: 'x' }],
-      ['autopilot/evidence', { since: 'yesterday' }], ['autopilot/log', { tickId: '' }], ['treasury/link', { accountId: 'x' }], ['treasury/setConfidential', { confidential: 'yes' }],
+      ['autopilot/evidence', { since: 'yesterday' }], ['autopilot/log', { tickId: '' }], ['treasury/link', { accountId: 'x' }],
       ['treasury/fund', { asset: 'DOGE', amount: '1' }], ['executePlan', { planId: 'x' }], ['sweep', { execute: 'yes' }], ['steward/propose', { instruction: 'x'.repeat(3000) }]])
       await check(procedure, input, 'refused');
 

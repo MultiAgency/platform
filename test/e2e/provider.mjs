@@ -41,6 +41,11 @@ export const PUBLIC_KEY = parseKey(TEST_KEY).publicKey.toString();
  */
 export const DAO = 'council.sputnik-dao.near';
 export const DAO_SIGNER = rawKey(PUBLIC_KEY).toString('hex');
+/**
+ * The DAO's key on Trezu's path, its own name (`v1.signer.derived_public_key({ path: DAO, predecessor: DAO })`). Trezu's
+ * confidential setup registers it on `intents.near` (`add_public_key`): `daoConfidentialSetup`. Never signs here.
+ */
+export const DAO_TREZU_KEY = 'ed25519:Ftk7UkFssD7ntH1Dd2AXLPvm5Wtz7sgftex776AzCPQm';
 const daoPolicy = { proposal_bond: '100000000000000000000000', proposal_period: '604800000000000', default_vote_policy: { weight_kind: 'RoleWeight', quorum: '0', threshold: [1, 2] }, roles: [
   { name: 'council', kind: { Group: [OWNER] }, permissions: ['*:AddProposal', '*:VoteApprove', '*:VoteReject', '*:VoteRemove', '*:Finalize'], vote_policy: {} },
   { name: 'members', kind: { Group: [SECOND] }, permissions: ['call:VoteApprove', 'call:VoteReject'], vote_policy: {} },
@@ -128,6 +133,10 @@ export async function provider(directory, { treasury = false, account = OWNER, p
       request_hash: createHash('sha256').update(JSON.stringify(hashed)).digest('hex') };
   };
   let dropNextTransfer = false, dropNextSignature = false, ownerOutcomeUnavailable = false;
+  /** The DAO's keys on `intents.near` (`public_keys_of`): none until it is set up for confidential intents. */
+  const daoIntentKeys = [];
+  /** A chain view method whose every read fails, as an unreachable RPC would (`failChainView`). */
+  let failingView = null;
   /** Passed DAO proposals that called `v1.signer`: the transaction and the signature its receipt returns (`daoVote`). */
   const daoVotes = [];
   /** The chain's height: each passed vote lands in a later block than anything prepared before it. */
@@ -154,14 +163,23 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         const { params, id: requestId } = body;
         if (params.request_type === 'view_access_key' && [account, ...payees, ...accounts].includes(params.account_id) && params.public_key === PUBLIC_KEY)
           return json(res, { jsonrpc: '2.0', id: requestId, result: { nonce: 1, permission: 'FullAccess', block_height: 1, block_hash: '11111111111111111111111111111111' } });
-        // The simulated DAO: its policy, no proposals yet, and the MPC key its agents are owned by.
         const view = result => json(res, { jsonrpc: '2.0', id: requestId, result: { result: [...Buffer.from(JSON.stringify(result))], logs: [], block_height: 1, block_hash: '11111111111111111111111111111111' } });
+        const args = () => JSON.parse(Buffer.from(params.args_base64 ?? '', 'base64').toString() || '{}');
+        if (params.request_type === 'call_function' && params.method_name === failingView) return json(res, { error: 'Declared local chain outage' }, 503);
+        // The simulated DAO: its policy, no proposals yet, and its MPC keys.
         if (dao && params.request_type === 'call_function' && params.account_id === DAO) {
           if (params.method_name === 'get_policy') return view(daoPolicy);
           if (params.method_name === 'get_last_proposal_id') return view(0);
           if (params.method_name === 'get_proposals') return view([]);
         }
-        if (dao && params.request_type === 'call_function' && params.account_id === 'v1.signer' && params.method_name === 'derived_public_key') return view(PUBLIC_KEY);
+        // The DAO's MPC keys by path: the agents' owner (`agent-owner`), and Trezu's at the DAO's own name.
+        if (dao && params.request_type === 'call_function' && params.account_id === 'v1.signer' && params.method_name === 'derived_public_key') {
+          const { path, predecessor, domain_id } = args();
+          if (predecessor === DAO && domain_id === 1 && path === 'agent-owner') return view(PUBLIC_KEY);
+          if (predecessor === DAO && domain_id === 1 && path === DAO) return view(DAO_TREZU_KEY);
+        }
+        if (dao && params.request_type === 'call_function' && params.account_id === 'intents.near' && params.method_name === 'public_keys_of' && args().account_id === DAO)
+          return view(daoIntentKeys);
         if (params.request_type === 'call_function' && params.method_name === 'get_policy' && [account, ...payees, ...accounts].includes(params.account_id))
           return json(res, { jsonrpc: '2.0', id: requestId, error: { name: 'HANDLER_ERROR', cause: { name: 'UNKNOWN_ACCOUNT', info: { requested_account_id: params.account_id } }, code: -32000, message: 'Server error' } });
         // Account existence and balances for the owner's linked account (treasury/link, treasury/get).
@@ -174,7 +192,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
           return json(res, { jsonrpc: '2.0', id: requestId, result: { result: [...Buffer.from(JSON.stringify('0'))], logs: [], block_height: 1, block_hash: '11111111111111111111111111111111' } });
         // Token registration (NEP-145) for a withdrawal's recipient: the declared accounts are registered on every token.
         if (params.request_type === 'call_function' && params.method_name === 'storage_balance_of') {
-          const { account_id } = JSON.parse(Buffer.from(params.args_base64, 'base64').toString());
+          const { account_id } = args();
           return view(known.includes(account_id) ? { total: '1250000000000000000000', available: '0' } : null);
         }
         throw new Error(`Undeclared chain request: ${JSON.stringify(params)}`);
@@ -391,6 +409,10 @@ export async function provider(directory, { treasury = false, account = OWNER, p
       const signature = Buffer.from(parseKey(TEST_KEY).sign(Buffer.from(hash, 'hex')).data);
       daoVotes.push({ hash: randomBytes(32).toString('hex'), signature, height: height() + 1 });
     },
+    /** The simulated DAO is set up for confidential intents: Trezu's `add_public_key` of its key on `intents.near`. */
+    daoConfidentialSetup() { if (!dao) throw new Error('Only the simulated DAO is set up for confidential intents'); if (!daoIntentKeys.includes(DAO_TREZU_KEY)) daoIntentKeys.push(DAO_TREZU_KEY); },
+    /** Every chain read of view `method` fails from now on (`null` restores them): a read that gives no answer. */
+    failChainView(method) { failingView = method; },
     /** A Treasury agent's confidential balances (for assertions). */
     treasuryBalances: (agent = id) => Object.fromEntries([...agents.get(agent).treasury.confidential].map(([asset, raw]) => [asset, raw.toString()])),
     /** The payout agent's current policy and revision (for assertions). */

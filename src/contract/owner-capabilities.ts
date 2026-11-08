@@ -10,7 +10,7 @@ export const ownerCapabilities = {
   "agent-schedule-stop-v1": { routes: [], procedures: ["autopilot/stop"] },
   "agent-funding-v1": { routes: [], procedures: ["deposit"] },
   /** The owning DAO link, funding from it, shielding and sweep: any agent, not only Treasury strategy. */
-  "owner-treasury-v1": { routes: [], procedures: ["treasury/get", "treasury/link", "treasury/unlink", "treasury/setConfidential", "treasury/fund", "sweep"] },
+  "owner-treasury-v1": { routes: [], procedures: ["treasury/get", "treasury/link", "treasury/unlink", "treasury/fund", "sweep"] },
   "owner-intents-v1": { routes: ["/gw/proposals", "/gw/interventions"], procedures: ["owner/prepare", "owner/submit", "owner/status", "owner/pending", "owner/actions"] },
   "treasury-observe-v1": { routes: [], procedures: ["strategy/get", "autopilot/evidence", "autopilot/log", "ledger", "ledgerCsv", "reconcileBooks"] },
   "treasury-strategy-v1": { routes: [], procedures: ["strategy/save", "autopilot/set", "autopilot/enable", "autopilot/tick"] },

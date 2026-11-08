@@ -394,6 +394,7 @@ export const treasuryGetOutput = z.looseObject({
   }).nullable(),
   /** Raw integer strings: `near` in yoctoNEAR (24 decimals, the account's whole balance including storage), `usdc` at 6 decimals. */
   balances: z.looseObject({ near: z.string().regex(/^\d+$/), usdc: z.string().regex(/^\d+$/) }),
+  /** chain.ts confidentialSetup: a DAO set up for confidential intents; false for an account that isn't a DAO. */
   confidential: z.boolean(),
   payees: z.array(z.looseObject({ address: z.string(), proposalId: z.number(), description: z.string() })),
 }).nullable();
@@ -654,8 +655,6 @@ export const autopilotTickOutput = z.string();
 export const treasuryLinkOutput = z.void();
 /** rpc/treasury.ts treasury.unlink: returns nothing. */
 export const treasuryUnlinkOutput = z.void();
-/** rpc/treasury.ts treasury.setConfidential (env.ts saveEnv): returns nothing. */
-export const treasurySetConfidentialOutput = z.void();
 /** rpc/treasury.ts treasury.fund: a deposit address and chain.ts fundingTransaction. */
 export const treasuryFundOutput = z.looseObject({ deposit: depositOutput, transaction: nearTransaction });
 /** planning/external.ts prepareExternalPlan. */
@@ -772,7 +771,6 @@ export const ownerOutputs = {
   "autopilot/tick": autopilotTickOutput,
   "treasury/link": treasuryLinkOutput,
   "treasury/unlink": treasuryUnlinkOutput,
-  "treasury/setConfidential": treasurySetConfidentialOutput,
   "treasury/fund": treasuryFundOutput,
   "externalPlan": externalPlanOutput,
   "rebalance": rebalanceEvent,

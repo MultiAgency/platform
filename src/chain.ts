@@ -79,6 +79,28 @@ export async function describeTreasury(accountId: string) {
   return { accountId, dao: policy && council(policy), balances: { near: account.amount, usdc: usdc ?? "0" } };
 }
 
+/** Trezu's MPC key for each DAO: `v1.signer` derives it from the DAO and a path, which never change, so it is kept. */
+const trezuKeys = new Map<string, string>();
+
+/**
+ * Whether a DAO is set up for confidential intents: Trezu's confidential setup registers the DAO's MPC key on
+ * `intents.near` (`add_public_key`), derived at the DAO's own name (Trezu `nt-be` `confidential_setup.rs`,
+ * `fetch_mpc_public_key` in `relay/confidential.rs`; both read `ed25519:3LLt…TBc` for agentic.sputnik-dao.near on
+ * mainnet, 2026-11-08). Not the agents' `agent-owner` path (dao-owner.ts). The keys on `intents.near` change when a DAO
+ * is set up, so they are read on every call. A read that fails, or answers nothing, throws: it never answers false.
+ */
+export async function confidentialSetup(dao: string) {
+  let key = trezuKeys.get(dao);
+  if (!key) {
+    const derived = await near.view<string>("v1.signer", "derived_public_key", { path: dao, predecessor: dao, domain_id: 1 });
+    if (typeof derived !== "string" || !derived) throw new Error(`v1.signer derived no key for ${dao}`);
+    trezuKeys.set(dao, key = derived);
+  }
+  const keys = await near.view<string[]>("intents.near", "public_keys_of", { account_id: dao });
+  if (!Array.isArray(keys)) throw new Error(`intents.near gave no public keys answer for ${dao}`);
+  return keys.includes(key);
+}
+
 /** A DAO's members, and who approves a FunctionCall proposal (how funding is filed) with how many votes. */
 export function council(policy: DaoPolicy) {
   return {

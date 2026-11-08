@@ -15,7 +15,7 @@ if (live) {
   env = { ...(existsSync(local) ? parseEnv(readFileSync(local, "utf8")) : {}), ...process.env, PROTO_TEST_MODE: "live" };
   // Match instance-specific configuration without importing application modules or printing values.
   if (env.ENV_FILE && env.ENV_FILE !== ".env") {
-    for (const key of ["AGENT_ID", "AGENT_GRANT_TOKEN", "AGENT_GRANT_TOKEN_PENDING", "TREASURY_ACCOUNT", "TREASURY_CONFIDENTIAL", "AUTOPILOT"]) delete env[key];
+    for (const key of ["AGENT_ID", "AGENT_GRANT_TOKEN", "AGENT_GRANT_TOKEN_PENDING", "TREASURY_ACCOUNT", "AUTOPILOT"]) delete env[key];
     Object.assign(env, parseEnv(readFileSync(new URL(env.ENV_FILE, new URL("../", import.meta.url)), "utf8")));
   }
   requireLiveConfiguration(env);

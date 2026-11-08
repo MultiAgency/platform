@@ -26,7 +26,7 @@ const READS = ["compensation/list", "instance", "account", "setup", "overview", 
 const PROPOSES = ["owner/prepare", "agreements/propose", "agreements/offer", "rebalance", "externalPlan", "steward/propose", "deposit", "treasury/fund",
   "workOrders/create", "workOrders/prepare", "workOrders/deposit", "proposals/create", "proposals/withdraw"];
 const EXECUTES = ["proposals/execute", "compensation/prepare", "compensation/send", "compensation/review", "workOrders/file", "pay", "payouts/request", "sweep", "executePlan", "autopilot/tick", "autopilot/enable"];
-const MANAGES = ["compensation/agreement", "strategy/save", "treasury/link", "treasury/unlink", "treasury/setConfidential", "agreements/decline"];
+const MANAGES = ["compensation/agreement", "strategy/save", "treasury/link", "treasury/unlink", "agreements/decline"];
 const MAINTAINS = ["autopilot/stop", "recover", "inbox/dismiss", "cancelPreparedInvoice"];
 /** Relaying an owner's signature: signers only. */
 const SIGNS = ["owner/submit", "workOrders/submit", "proposals/approve", "proposals/reject"];

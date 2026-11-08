@@ -39,8 +39,8 @@ Three consent scopes, each named in the text the owner signs:
     under the owner's grant for the saved strategy and within its per-run ceiling.
   - Funding: `sweep`, and `deposit` (a one-time address that credits the agent), then the SDK's `fundingTransaction`
     for the transfer the owner or the DAO signs.
-  - For a wallet owner, the linked treasury account (`treasury/link`, `unlink`, `setConfidential`); refused for a
-    DAO-owned agent.
+  - For a wallet owner, the linked treasury account (`treasury/link`, `unlink`); refused for a
+    DAO-owned agent. Whether a linked DAO is confidential is read from chain (`treasury/get`); nothing sets it.
   - Every `proposals/*` procedure.
 - `treasury-execute`, only beside `treasury`: `rebalance`, `externalPlan` and `executePlan`, five-minute plans executed
   within the policy without a signature per swap, and only while the owner's live grant binds the strategy they were

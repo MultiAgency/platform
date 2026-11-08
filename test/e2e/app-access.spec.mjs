@@ -416,6 +416,15 @@ test("a DAO consents to an app by its own vote; its grant vote lets autopilot ru
     expect(consent).toMatchObject({ state: 'signed', consent: { signer: 'dao', owner: DAO, scopes: ['read', 'treasury'] } });
     const agent = app.agent('org_1', 'portfolio');
 
+    // Whether the DAO is confidential is read from chain: set up for confidential intents, its key on Trezu's path (its
+    // own name) is registered on intents.near. A read that fails gives no answer, never `false`.
+    expect(value(await agent.call('treasury/get'))).toMatchObject({ accountId: DAO, confidential: false });
+    stack.simulated.daoConfidentialSetup();
+    expect(value(await agent.call('treasury/get'))).toMatchObject({ accountId: DAO, confidential: true, payees: [] });
+    stack.simulated.failChainView('public_keys_of');
+    expect(await agent.call('treasury/get'), 'a failed chain read fails the call').toMatchObject({ ok: false, kind: 'unavailable' });
+    stack.simulated.failChainView(null);
+
     // The strategy-bound grant is a DAO vote: the platform prepares it, and the agent submits the DAO's signature itself.
     const strategy = value(await agent.call('strategy/get'));
     const grant = value(await agent.call('owner/prepare', { action: { type: 'grant_issue', label: 'treasury', expectedStrategyDigest: strategy.digest }, signer: 'dao' }));

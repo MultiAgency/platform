@@ -25,11 +25,11 @@ export const APP_PAYOUT = ["payouts/request", "payouts/status", "held", "deposit
  * (under such a grant) and off; sweeping public balances into the confidential one; `deposit`, a one-time address that
  * credits only the agent's own confidential balance, so the app can fund it; `autopilot/tick`, one autopilot pass now,
  * swapping only under a grant that binds the saved strategy and within its per-run ceiling; for a wallet owner, the
- * linked treasury account (`treasury/link`, `unlink`, `setConfidential`); and proposals, whose swaps execute only after
+ * linked treasury account (`treasury/link`, `unlink`); and proposals, whose swaps execute only after
  * the owner signs their exact terms.
  */
 export const APP_TREASURY = ["strategy/get", "autopilot/get", "autopilot/evidence", "autopilot/log", "treasury/get", "strategy/save",
-  "autopilot/enable", "autopilot/stop", "autopilot/tick", "sweep", "deposit", "treasury/link", "treasury/unlink", "treasury/setConfidential",
+  "autopilot/enable", "autopilot/stop", "autopilot/tick", "sweep", "deposit", "treasury/link", "treasury/unlink",
   "proposals/create", "proposals/get", "proposals/list", "proposals/approve",
   "proposals/reject", "proposals/withdraw", "proposals/execute"] as const;
 /**
@@ -92,7 +92,7 @@ export const DAO_CONSENT_SCOPES = ["read", "treasury", "treasury-execute"] as co
  * What a DAO's `treasury` consent doesn't cover although a wallet owner's does: the linked treasury account. A DAO-owned
  * agent's link is the DAO itself, fixed at setup (src/hosted-binding.ts): an app never changes which DAO it answers to.
  */
-export const DAO_APP_REFUSED = ["treasury/link", "treasury/unlink", "treasury/setConfidential"] as const;
+export const DAO_APP_REFUSED = ["treasury/link", "treasury/unlink"] as const;
 /** Whether a DAO's consent scopes cover a procedure: as `appScopesCover`, less `DAO_APP_REFUSED`. */
 export const daoScopesCover = (scopes: readonly AppScope[], path: string) =>
   appScopesCover(scopes, path) && !(DAO_APP_REFUSED as readonly string[]).includes(path);

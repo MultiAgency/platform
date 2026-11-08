@@ -11,7 +11,7 @@ import { ownerClient } from '../../src/contract/owner-client.ts';
 import { delegateSigningHash } from '../../src/owner-signature.ts';
 import { verifyEd25519 } from '../../src/nep413.ts';
 import { decodeSignedDelegateAction } from 'near-kit';
-import { OWNER, PAYEE, PUBLIC_KEY, USDC } from './provider.mjs';
+import { DAO, OWNER, PAYEE, PUBLIC_KEY, USDC } from './provider.mjs';
 
 // The running stack as a builder uses it (`pnpm test:e2e:stack --treasury --app <deployment>`): a separate app server
 // with the startup service credential, the owner's signatures from the `signOwner` control, a payout request held for
@@ -62,6 +62,30 @@ async function withStack(info, args, use) {
   }
   expect(await exited, 'the stack stops on its stop file').toBe(0);
 }
+
+test('a DAO-owned stack reads the DAO as public, then confidential once the daoConfidentialSetup control sets it up', async ({}, info) => {
+  test.setTimeout(240_000);
+  await withStack(info, ['--no-browser', '--dao-treasury', '--app', 'dao-local'], async (directory, state) => {
+    const { dashboard, app: appState, dao } = state(), host = new URL(dashboard).host;
+    expect(dao).toMatchObject({ account: DAO });
+    const control = controlFiles(directory);
+    const app = appClient({ base: dashboard, credential: readFileSync(appState.credentialFile, 'utf8'), fetch: stackFetch(directory) });
+    // The DAO consents to the app by its own vote: the `daoVote` control passes the proposal the member files.
+    const { agentId } = value(await app.identity('portfolio'));
+    const filed = value(await app.daoConsents.file(consentMessage({ host, deployment: 'dao-local', organization: 'org_1', owner: DAO,
+      agent: 'portfolio', agentId, scopes: ['read', 'treasury'], expiresAt: later(90) })));
+    const call = filed.transactions.proposal.actions[0].params.args.proposal.kind.FunctionCall.actions[0];
+    value(await control('daoVote', { hash: JSON.parse(Buffer.from(call.args, 'base64').toString()).request.payload_v2.Eddsa }));
+    expect(value(await app.daoConsents.state(filed.request.id)).state).toBe('signed');
+    const agent = app.agent('org_1', 'portfolio');
+
+    expect(value(await agent.call('treasury/get'))).toMatchObject({ accountId: DAO, confidential: false });
+    expect(await control('daoConfidentialSetup')).toEqual({ ok: true });
+    expect(value(await agent.call('treasury/get')), 'read on the next call, nothing cached').toMatchObject({ accountId: DAO, confidential: true, payees: [] });
+    expect(await control('daoConfidentialSetup'), 'setting it up again changes nothing').toEqual({ ok: true });
+    expect(value(await agent.call('treasury/get')).confidential).toBe(true);
+  });
+});
 
 test('a separate app server runs a held payout and a Treasury machine read on the running stack', async ({}, info) => {
   test.setTimeout(240_000);
