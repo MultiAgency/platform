@@ -20,9 +20,7 @@ test("the canonical list names every state directory the source writes", () => {
   assert.deepEqual(sorted(written).filter(d => !canonical.has(d)), [], "written by src but missing from docs/operations.md");
 });
 
-test("AGENTS.md and the image check repeat the canonical list exactly", () => {
+test("AGENTS.md repeats the canonical list exactly", () => {
   const agents = read("AGENTS.md").match(/preserves every state directory[\s\S]*?\n {2}\(canonical list[^\n]*\n?[^\n]*/)![0];
-  const image = new Set([...read("scripts/check-shared-image.mjs").match(/const kept = \[([^\]]*)\]/)![1]!.matchAll(/'(\.[a-z-]+)'/g)].map(m => m[1]!));
-  for (const [where, list] of [["AGENTS.md", dirs(agents)], ["scripts/check-shared-image.mjs", image]] as const)
-    assert.deepEqual(sorted(list), sorted(canonical), where);
+  assert.deepEqual(sorted(dirs(agents)), sorted(canonical));
 });

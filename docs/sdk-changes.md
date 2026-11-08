@@ -36,6 +36,20 @@ Platform changes in this release, outside the package:
   the provider, ends with the leg's event (`NOT_SENT`, the shield, `failureCode` naming the refusal) and `rejected`,
   where it ended as a refusal before any event; a proposal's execution answers with its view, `stopped`, listing what
   was sent and what was refused, where it answered `unknown` or a refusal. Offline-tested.
+- **A release candidate releases the platform only:** `pnpm release:candidate -- --treasury-skill <dir>` packages
+  `platform` (and the SDK with `--sdk`), no longer the prototype's `dao` and `invoices`, and needs no frozen app builds.
+  The 16 E2E cases that tested the prototype's frontends (Invoices, Payables and the Treasury owner-session build)
+  retired with its hosts; "invoice, owner approval, and settlement stay distinct" now approves through the owner
+  procedures, and still catches both faults the challenge run injects into it. A full release candidate on these sources
+  (Node 24.22.2, before commit) passed every gate: E2E 28 of 28, challenges 4 of 4; a first candidate on the same
+  sources stopped at one unexplained timeout in the challenges' baseline ([testing](testing.md)). `pnpm test:e2e:stack` no longer takes
+  `--invoices-dist-release`.
+- **What ships is declared, and the prototype's deploy files are gone:** `test/build-context.test.ts` names the one
+  shipped package (`platform`: its packaging script, Dockerfile, Railway config and deploy files) and the local configs,
+  and fails on any other Dockerfile, packaging script or deploy file. Removed: `Dockerfile.gateway`,
+  `Dockerfile.payouts`, the root `railway.json`, `deploy/shared-frontends.json`, `deploy/dashboard-entrypoint.sh`,
+  `scripts/package-shared-frontends.mjs`, `scripts/check-shared-image.mjs` and `scripts/test-shared-frontend.mjs`. The
+  `dao` image's state-preservation check went with it; the `platform` image has none yet (Not done yet).
 
 ## 0.5.3 (2026-11-06)
 

@@ -63,7 +63,7 @@ A page the platform serves on one of its hosts, using the owner's session there.
    After a lost reply or a reload, follow that record; never sign or submit again.
 5. **Release independently.** Follow the Invoices asset-service convention ([invoices-extraction.md](invoices-extraction.md)):
    an immutable artifact that keeps old hashed assets during rollout and rolls back without touching backend records.
-   Offline E2E only (`owner-release`, `treasury-migration` specs); not deployed.
+   The release server's staging, activation, retained assets and rollback are offline-tested; not deployed.
 6. **Test on the stack.** `pnpm example:build`, then `pnpm test:e2e:stack --frontend examples/minimal-prototype/dist`
    (or your build's absolute path). See [testing.md](testing.md).
 

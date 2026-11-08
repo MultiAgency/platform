@@ -42,12 +42,7 @@ Without `INVOICES_FRONTEND_URL`, the platform retains its existing embedded invo
 
 The local standalone build, typecheck and browser journeys pass. Browser coverage includes mobile layout, accessible labels/controls, drafts, lost responses, session expiry, contribution review and scoped entries with/without trailing slash. The platform's final full offline suite passed 826 tests, including exact-funding compatibility. One unrelated experimental-loader test was subsequently retired with its draft implementation. Targeted routing checks and five real-stack scenarios also passed. Real-stack tests use the platform's actual HTTP/RPC, sessions, records, guards and wallet verification with a simulated provider/chain; no real funds move.
 
-Reproduce from the platform repository:
-
-```sh
-pnpm typecheck
-pnpm test
-node test/e2e/run.mjs --invoices-dist-release <release A> [--invoices-dist-next <release B>] payments.spec.mjs agent-access.spec.mjs
-```
-
-The E2E runner snapshots and hashes the actual consumer releases and serves them from the shared release server, a separate process with only `HOST`, `PORT` and `RELEASES_ROOT` in its environment. It verifies invoice → owner approval → settlement, lost submission and signature responses, work-order request intake, report submission and authenticated owner review, plus the existing shared authorization flow. A sixth scenario stops the release server (open pages keep reading records; new loads return 503), starts a compatible release under the same platform session, refuses an incompatible `contract.json`, and rolls back, with one transfer, one submission and unchanged platform process ids. Scope-specific browser tests use offline HTTP fixtures. Hosted/mainnet acceptance and every everything-dev runtime integration remain unverified. The frontend is currently a standalone asset service, not a Module Federation remote.
+Until 2026-11-08 the platform repository reproduced this with
+`node test/e2e/run.mjs --invoices-dist-release <release A> [--invoices-dist-next <release B>]`. That input retired with
+the prototype's hosts: the platform host serves no payee pages, and Invoices' own CI owns its frontend journeys. As it
+ran then: the E2E runner snapshots and hashes the actual consumer releases and serves them from the shared release server, a separate process with only `HOST`, `PORT` and `RELEASES_ROOT` in its environment. It verifies invoice → owner approval → settlement, lost submission and signature responses, work-order request intake, report submission and authenticated owner review, plus the existing shared authorization flow. A sixth scenario stops the release server (open pages keep reading records; new loads return 503), starts a compatible release under the same platform session, refuses an incompatible `contract.json`, and rolls back, with one transfer, one submission and unchanged platform process ids. Scope-specific browser tests use offline HTTP fixtures. Hosted/mainnet acceptance and every everything-dev runtime integration remain unverified. The frontend is currently a standalone asset service, not a Module Federation remote.

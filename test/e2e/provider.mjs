@@ -36,7 +36,7 @@ export const BUILDER = 'builder.near';
 export const TEST_KEY = 'ed25519:vbKRaNtGLifEXMGHhMgHEnHyuLjX1Hb6VdEDQJ4NkARFxCcx4AYdyeLRLuLsoGbuDtwUZBHKtJkzM5RzBRafzNk';
 export const PUBLIC_KEY = parseKey(TEST_KEY).publicKey.toString();
 /**
- * A Sputnik DAO for shared-reader scenarios: the council (OWNER) may propose, vote and manage; the member (SECOND) may
+ * A Sputnik DAO: the council (OWNER) may propose, vote and manage; the member (SECOND) may
  * only vote. Its MPC signer derives the test key, so the agent's owner is that key's implicit account.
  */
 export const DAO = 'council.sputnik-dao.near';

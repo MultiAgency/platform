@@ -85,8 +85,8 @@ The command line has only what the dashboard doesn't: owner actions signed with 
 ## Hosted demo (retired 2026-11-08)
 
 The prototype's four public entry points ran on Railway until 2026-11-08, when the user deleted their services; they
-no longer answer. They are described below as they ran. The `dao` and `invoices` packages still build and run
-locally. What's hosted now is the platform host only: `api.dev.multiagency.ai` (staging) and `api.multiagency.ai`
+no longer answer. They are described below as they ran. Their source still runs locally (`pnpm demo`,
+`pnpm invoices`); their packages are no longer built. What's hosted now is the platform host only: `api.dev.multiagency.ai` (staging) and `api.multiagency.ai`
 (production), the headless `platform` package ([platform production](docs/platform-production.md)). Signing in with a
 NEAR wallet signs a message, never a transaction.
 
@@ -242,18 +242,16 @@ Each line is a gap; the linked page says how the rest is known. The
 - `MultiAgency/payables` and `MultiAgency/treasury-prototype` (not archived) still carry their own copies of the
   gateway and money path, so a fix here doesn't reach them; Payables' frontend still imports from its copy. The
   Treasury app (`MultiAgency/treasury`) is to replace the prototype and this platform's Treasury pages.
-- The `dao` package's Treasury frontend (hosted at treasury.multiagency.ai until 2026-11-08) prints `treasury/get`'s
-  `balances.near` as received, so on a 0.5.3 server its Funding line shows raw yoctoNEAR. 0.5.3 deployed only the
-  headless `platform` gateway; the `dao` service was deleted without being redeployed. Moving the `dao` package's
-  Treasury input to `MultiAgency/treasury`, or removing it, is planned separately.
 - The owner session (`/a/<agent>/`, the `dao` package's owner app, `ownerClient`, `/gw/agents` and `steward/propose`)
   has had no production host since 2026-11-08; owner UIs move to app access (platform#14). It stays until the apps
   replace it: Treasury's app-server pages (MultiAgency/treasury#138) and a Payables owner UI on `/apps/v1`, which doesn't
   exist yet: as of 2026-11-08, `MultiAgency/payables` (last commit 2026-10-19) uses only the owner session, and no
   branch of `MultiAgency/dashboard` calls app access, although staging holds its credential. Until then a wallet
-  owner of a Payables agent has no hosted owner UI, only the stop page with no app.
+  owner of a Payables agent has no hosted owner UI, only the stop page with no app. Contributor intake (the payee pages
+  and Invoices) has no hosted path either: the headless host doesn't serve it, and app access leaves agreements,
+  invoices and work orders out by design, so a Payables app keeps those records itself.
 - A new prototype must reuse a fixed host `demo` value and agent area; owner-app `contract.json` is checked at runtime
-  only on hosts served by the shared release server (offline E2E, not deployed). See the
+  only on hosts served by the shared release server (offline-tested, not deployed). See the
   [integration path](docs/integration-path.md#gaps).
 - Payables' frontend (`97ddec7`, 2026-10-16) passes the source contract preflight only; its build isn't in the
   real-stack E2E suite. See
@@ -355,10 +353,12 @@ Each line is a gap; the linked page says how the rest is known. The
   the coordinated [credential rotation](docs/credential-rotation.md) after the diagnostic exposure is outstanding.
 - FastNear deposit batching awaits a verified raw-transaction hash mapping; deployed indexer freshness is unverified
   ([follow-up](docs/archive/infrastructure-review.md#follow-up-review-2026-10-16)).
+- No check boots the `platform` image twice and proves the state directories survive: the prototype's `dao` image had
+  one (`scripts/check-shared-image.mjs`), removed with it on 2026-11-08. The platform's entrypoint never writes in
+  `/data/state`; that is read from its source, not checked on the image ([operations](docs/operations.md)).
 - Every deploy still uses Railway's Config as Code, which the Railway CLI warned on 2026-11-05 keeps working only until
-  2026-12-01; later deploys need Railway's Infrastructure as Code (`.railway/railway.ts`). Not migrated: the root
-  `railway.json` (the `invoices` package, no longer deployed) and `deploy/railway.gateway.json` (the `dao` and
-  `platform` packages' root `railway.json`; only the `platform` package is deployed: staging and production). See
+  2026-12-01; later deploys need Railway's Infrastructure as Code (`.railway/railway.ts`). Not migrated:
+  `deploy/railway.gateway.json`, the `platform` package's root `railway.json` (staging and production). See
   [operations](docs/operations.md#railway-config-as-code-ends-2026-12-01).
 - Guided walkthroughs and short guides (`/demos`) are tested with offline browser fixtures, not on the deployed hosts,
   and can't guarantee a swap, prompt approval or settlement. Guidance is deterministic, not an LLM; live AG-UI agent

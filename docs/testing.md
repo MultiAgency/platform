@@ -102,13 +102,21 @@ fixtures and an injected test wallet. Application RPC and invoice responses are 
 The Node network guard and browser request allowlist exclude external services. Its fixture keys,
 sessions, SQLite stores and logs belong only to the test environment. It exercises approval versus
 settlement, retained invoice identities, restart recovery after an accepted transfer loses its response,
-lost owner-signature response recovery, and approve-only refusal. It does not establish real provider,
-chain or wallet behavior.
+and approve-only refusal. It does not establish real provider, chain or wallet behavior.
 
-A plain run is the whole suite: if any case skips (a missing app release build, Treasury skill or change name), the run
+A plain run is the whole suite: if any case skips (the Treasury skill, `--treasury-skill <dir>`, not given), the run
 fails and names the skipped cases. `--narrow` marks a deliberately partial run and is not whole-suite evidence;
-`pnpm verify` passes it because it has no app release builds. Whole-suite evidence is a release-candidate run with every
-release input (`--invoices-dist-release/-next`, `--payables-dist/-next`, `--treasury-dist/-next`, `--treasury-skill`).
+`pnpm verify` passes it because it runs without the Treasury skill, as CI does. Whole-suite evidence is a release-candidate run, which takes
+the skill. Until 2026-11-08 the suite also took the prototype's app builds (Invoices, Payables and the Treasury
+owner-session build, frozen 2026-10-26); those cases retired with the prototype's hosts, and app frontends are tested in
+each app's own CI.
+
+Known intermittent failure, not yet explained: on 2026-11-08 "chosen swaps: lost provider response never duplicates
+submissions" (`treasury-interruption`) timed out once in a challenge run's baseline, on Node 24.22.2. Its page at
+`/a/portfolio/access` showed only "WebSockets request was expected", which is Chromium's reply on its remote-debugging
+port, though the gateway's configuration and the agent's bind agreed on the agent's port. The same case passed in that
+run's E2E gate and in four other runs on the same tree, including a full release candidate. A rerun is evidence only of
+itself: a repeat failure is investigated, not rerun away.
 
 Each run records a fingerprint of the installed dependency tree (`scripts/dependency-tree.mjs`: pnpm's installed
 lockfile and every installed package directory); `node_modules` is shared, not copied. A run from a frozen snapshot whose
@@ -233,7 +241,7 @@ Create `exploration/drop-response` to drop the next simulator transfer response;
 `exploration/stop` to capture the final trace and stop the local processes. These controls are files
 outside the application, not test-control HTTP routes. Close the agent-browser session afterward.
 
-`pnpm test:e2e:stack` (optionally with `--invoices-dist-release <dir>`, `--owner <account>`, repeated
+`pnpm test:e2e:stack` (optionally with `--owner <account>`, repeated
 `--payee <account>`, `--frontend <dir>` to serve a prototype build on the `showcase` host, `--payables-release <dir>` to serve a
 Payables build at `/a/payout/`, `--builder <account>` for an account on chain that is not yet an agreed payee (the
 owner adds it with a signed `policy_update`, which the simulator applies and versions), `--payout-funding <raw USDC>`
@@ -331,9 +339,8 @@ deployment. Deployed smoke checks and recorded mainnet observations retain their
 
 ## Candidate and deployed verification
 
-`pnpm release:candidate -- <inputs>` (scripts/release-candidate.mjs) produces a release candidate in one command,
-from a commit (`--ref`, default `HEAD`). It takes the same app inputs as a plain `test/e2e/run.mjs` and requires all of
-them: Invoices H and I, Payables A and B with B's change, Treasury A and B with B's change, and the Treasury skill.
+`pnpm release:candidate -- --treasury-skill <dir>` (scripts/release-candidate.mjs) produces a release candidate in one
+command, from a commit (`--ref`, default `HEAD`). The Treasury skill is the one input a plain `test/e2e/run.mjs` needs.
 Uncommitted changes are not included; commit first.
 
 1. Freeze: `git archive` of the commit into `.test-artifacts/stack-snapshots/`. `node_modules` is shared and its
@@ -346,40 +353,34 @@ Uncommitted changes are not included; commit first.
      byte-reproducible. The command refuses if an E2E manifest's `assets` differs from the candidate's build.
 3. The snapshot is renamed to its run digest, which is the name app recipes use. With `--sdk`, the SDK is packed from it
    and its skills are checked.
-4. The deploy sources go to `.test-artifacts/releases/<runDigest>/`: the dao package
-   (`scripts/package-shared-frontends.mjs` with the shipped Payables and Treasury releases, B) and the invoices source.
-   `release.json` records the commit, every input digest, the frontend source and build digests, each gate's command,
-   status and counts (E2E run ids and stats, challenge outcomes, browser scenarios), and the package digests.
+4. The deploy sources go to `.test-artifacts/releases/<runDigest>/`: the `platform` package
+   (`scripts/package-platform.mjs`), the only package that ships. `release.json` records the commit, the input digest,
+   the frontend source and build digests, each gate's command, status and counts (E2E run ids and stats, challenge
+   outcomes, browser scenarios), and the package digest.
 
 It deploys nothing, uses no credentials and touches no state directory. Deploying from those sources stays the owner's
 action.
 
 The workspace E2E cases use a separate Portfolio executor, provider identity and store alongside the
 Payables executor and approve-only server. They cover full-document cross-agent navigation and back,
-wallet ownership per agent despite ignored legacy operator configuration, forbidden direct reads and settings writes, strategy save with the
-schedule off, stale save/authorization/enable refusal, actual local grant signing, explicit enablement,
-and stopping after a declared provider outage. Database/provider records and persisted settings support
-browser assertions. They do not establish DAO role coverage or scheduled money execution end to end.
+wallet ownership per agent despite ignored legacy operator configuration, and forbidden direct reads and settings
+writes. Database/provider records and persisted settings support browser assertions. They do not establish DAO role
+coverage or scheduled money execution end to end.
 
 Before calling a candidate deployed-verified, complete this checklist in a private release record:
 
 1. Record the candidate source hash and full pipeline results. Resolve the other review session's
    findings; any source change needs a new candidate. Match the final commit/source archive to the
    tested files. Follow the existing [owner-run rollout](operations.md#owner-run-rollout).
-2. Record UTC time, deployment ID and source/image identity separately for `dao` and `invoices`.
-   Obtain these from deployment records; `/health` and asset names alone do not identify source.
-   Establish that both services use the reviewed candidate. An unknown deployed revision remains unknown.
-3. Run `DASHBOARD_URL=https://proto.multiagency.ai INVOICES_URL=https://invoices.multiagency.ai pnpm smoke`.
-   Without an authenticated session this covers public health, headers and access boundaries only.
-4. In an authenticated browser, inspect existing Payments, Agreements, Strategy, Runs and Activity.
-   Check cross-agent navigation/back/reload, retained recovery wording, owner decision versus payment
-   outcome, and keyboard/mobile layouts at 320, 390 and 1280 pixels. Record empty views and unavailable
-   evidence as such. Do not populate views by creating invoices, approving payments or starting runs.
-   Some page reads refresh retained observations; view-only inspection is not a storage-immutability claim.
-5. Keep screenshots and account/payment details in restricted private artifacts, separate from offline
+2. Record UTC time, deployment ID and source/image identity for each environment's `gateway` service
+   ([platform production](platform-production.md)). Obtain these from deployment records; `/health` and asset names
+   alone do not identify source. An unknown deployed revision remains unknown.
+3. Run `PLATFORM_URL=<host> pnpm smoke`: read-only, it covers health, headers, the confirm page's assets and access
+   boundaries only.
+4. Keep screenshots and account/payment details in restricted private artifacts, separate from offline
    fictional fixtures. Record failures and authentication blockers; a local mock cannot replace a hosted
    observation. Do not export cookies to enable browser access.
-6. Money verification is a separate owner-authorized operation. Retain its reviewed policy/strategy
+5. Money verification is a separate owner-authorized operation. Retain its reviewed policy/strategy
    binding, operation identity, provider correlation, owner action where required, terminal provider
    outcome and durable records. Approval is not settlement. Unknown outcomes remain unresolved; never
    retry with a new identity merely to obtain a passing result. Do not test crash/restart faults live.

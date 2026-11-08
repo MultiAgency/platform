@@ -20,31 +20,12 @@ for (const name of ['src', 'web', 'evidence', 'scripts', 'examples', 'test/e2e',
 symlinkSync(join(root, 'node_modules'), join(snapshot, 'node_modules'), 'dir');
 // Explicit consumer input: snapshot the actual Treasury skill, never maintain a second copy here.
 const args = process.argv.slice(2).filter(arg => arg !== '--prebuilt-web');
-// Invoices' release A, and optionally its real release B, staged and activated by the shared release server.
-const take = (flag, name) => {
-  const i = args.indexOf(flag); if (i === -1) return undefined;
-  const value = args[i + 1]; if (!value || value.startsWith('--')) throw new Error(`${flag} requires a built directory`);
-  const target = join(snapshot, `.consumer-fixtures/${name}`); cpSync(resolve(value), target, { recursive: true }); args.splice(i, 2); return target;
-};
-const invoicesDist = take('--invoices-dist-release', 'invoices'), invoicesNext = take('--invoices-dist-next', 'invoices-next');
-if (invoicesNext && !invoicesDist) throw new Error('--invoices-dist-next follows --invoices-dist-release');
-// P2 owner apps: actual builds A and B, each copied whole; the runner stages them under the shared release server.
-const ownerApps = {}, ownerChanges = {};
-for (const product of ['payables', 'treasury']) {
-  const a = take(`--${product}-dist`, `${product}/a`), b = take(`--${product}-dist-next`, `${product}/b`);
-  // The app names the change its release B makes, so the spec asserts it present in B and absent in A.
-  const changeIndex = args.indexOf(`--${product}-change`), change = changeIndex === -1 ? undefined : args.splice(changeIndex, 2)[1];
-  if (!a && !b) continue;
-  if (!a || !b) throw new Error(`--${product}-dist and --${product}-dist-next are both required: release B must be a real change`);
-  ownerApps[product] = { a, b };
-  if (change) ownerChanges[product] = change;
-}
 const consumerIndex = args.indexOf('--treasury-skill');
 let consumer, consumerDigest = null, consumerDependencies = null;
 if (consumerIndex !== -1) {
   const input = args[consumerIndex + 1];
   if (!input || input.startsWith('--')) throw new Error('--treasury-skill requires a directory');
-  // Its own directory: the Treasury app releases are copied under .consumer-fixtures/treasury/{a,b}.
+  // The skill's own files, copied into the snapshot.
   consumer = join(snapshot, '.consumer-fixtures/treasury-skill');
   mkdirSync(consumer, { recursive: true });
   for (const name of ['SKILL.md', 'references/api.md', 'scripts/treasury.mjs', 'scripts/package.json']) {
@@ -66,9 +47,6 @@ if (consumerIndex !== -1) {
 const env = { ...offlineEnvironment(), NODE_ENV: 'production', PROTO_E2E_ISOLATED: '1', PROTO_E2E_ARTIFACTS: artifacts,
   NODE_OPTIONS: `--require ${JSON.stringify(join(snapshot, 'test/fixtures/offline-network.cjs'))}` };
 if (consumer) env.PROTO_E2E_TREASURY_SKILL = consumer;
-if (Object.keys(ownerApps).length) env.PROTO_E2E_OWNER_APPS = JSON.stringify(ownerApps);
-if (Object.keys(ownerChanges).length) env.PROTO_E2E_OWNER_CHANGES = JSON.stringify(ownerChanges);
-if (invoicesDist) Object.assign(env, { PROTO_E2E_INVOICES_DIST: invoicesDist, ...(invoicesNext && { PROTO_E2E_INVOICES_NEXT: invoicesNext }) });
 for (const key of ['BROWSER_EXECUTABLE', 'PLAYWRIGHT_BROWSERS_PATH']) if (process.env[key]) env[key] = process.env[key];
 function digest(dir) {
   const hash = createHash('sha256');
@@ -92,7 +70,7 @@ if (!prebuilt) {
 const dependencies = dependencyTree(root);
 const frozen = existsSync(join(root, 'SNAPSHOT.json')) ? JSON.parse(readFileSync(join(root, 'SNAPSHOT.json'), 'utf8')).dependencyTree : undefined;
 if (frozen && frozen !== dependencies) throw new Error(`The installed dependency tree (${dependencies}) differs from the one this snapshot was frozen with (${frozen}); reinstall that tree or freeze again.`);
-writeFileSync(join(artifacts, 'manifest.json'), JSON.stringify({ node: process.version, dependencyTree: dependencies, invoicesFrontend: invoicesDist ? digest(invoicesDist) : null, invoicesFrontendNext: invoicesNext ? digest(invoicesNext) : null, treasurySkill: consumerDigest, treasurySkillDependencies: consumerDependencies, ownerApps: Object.fromEntries(Object.entries(ownerApps).map(([product, dirs]) => [product, Object.fromEntries(Object.entries(dirs).map(([name, dir]) => [name, digest(dir)]))])), ownerChanges, source: digest(join(snapshot, 'src')),
+writeFileSync(join(artifacts, 'manifest.json'), JSON.stringify({ node: process.version, dependencyTree: dependencies, treasurySkill: consumerDigest, treasurySkillDependencies: consumerDependencies, source: digest(join(snapshot, 'src')),
   frontend: digest(join(snapshot, 'web/src')), evidence: digest(join(snapshot, 'evidence')), assets: digest(join(snapshot, 'web/dist')), tests: digest(join(snapshot, 'test/e2e')),
   playwright: JSON.parse(readFileSync(join(root, 'node_modules/@playwright/test/package.json'))).version,
   lockfile: createHash('sha256').update(readFileSync(join(snapshot, 'pnpm-lock.yaml'))).digest('hex'), scope: 'offline application E2E; simulated provider, chain, and wallet' }, null, 2));
@@ -112,7 +90,7 @@ if (challenging) {
 const result = run(process.execPath, serving ? ['test/e2e/stack.mjs', ...args.slice(1)] : exploring ? ['test/e2e/explore.mjs', ...args.slice(1)] : [join(root, 'node_modules/@playwright/test/cli.js'), 'test', '-c', 'test/e2e/playwright.config.mjs', ...(challenging ? [] : args)]);
 process.exitCode = result.status ?? 1;
 if (dependencyTree(root) !== dependencies) { console.error('The installed dependency tree changed during the run; its results do not identify one tree.'); process.exitCode = 1; }
-// A plain run is the whole suite: a skipped case (a missing app build, skill or change name) fails it unless --narrow.
+// A plain run is the whole suite: a skipped case (the Treasury skill not given) fails it unless --narrow.
 if (!serving && !exploring && result.status === 0 && existsSync(join(artifacts, 'results.json'))) {
   const skipped = [];
   const visit = suite => { for (const spec of suite.specs ?? []) for (const t of spec.tests ?? []) if (t.status === 'skipped') skipped.push(`${spec.file}: ${spec.title}`); for (const child of suite.suites ?? []) visit(child); };

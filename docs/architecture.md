@@ -77,12 +77,12 @@ existing domain calls. Submission remains centralized in dispatch.
   them. `timeline-payment.tsx` follows one held payment step by step, each step read from its own record; it shows data
   only on the instance that holds those records (approvals filed there). The autopilot run view is no longer here: its
   route (`/follow/run`) redirects to the agent's app.
-- **Packages**: every release candidate builds two from the same tested snapshot. `dao`
-  (`scripts/package-shared-frontends.mjs`) is the prototype's full deployment: gateway, owner app, demo hosts and the
-  bundled Treasury and Payables frontends. `platform` (`scripts/package-platform.mjs`) is the engine for apps: the
+- **Packages**: a release candidate builds one from the tested snapshot (`test/build-context.test.ts` declares it; the
+  prototype's `dao` package retired with its hosts on 2026-11-08). `platform` (`scripts/package-platform.mjs`) is the
+  engine for apps: the
   gateway as a headless host (`headless` in its config: `/health`, `/apps/v1` and the confirm page only, app setup per
-  `appSetup`) and the confirm entry's files alone, each byte-equal to the tested build's. Hosted agents run the same
-  agent server in both. Both share `scripts/release-package.mjs` (copy, file hashes, manifest).
+  `appSetup`) and the confirm entry's files alone, each byte-equal to the tested build's. Hosted agents run the
+  agent server in it. `scripts/release-package.mjs` builds it (copy, file hashes, manifest).
 - **Command line**: `create-agent.ts`, `issue-grant.ts`, `revoke-grant.ts`, `update-policy.ts`,
   `archive.ts`, `inspect.ts`, `books.ts`, `smoke.ts`, `smoke-platform.ts`, `run-report.ts`, `report.ts`, `remote.ts`.
 

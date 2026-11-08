@@ -53,24 +53,3 @@ export const programFetch = (input, init = {}) => new Promise((resolve, reject) 
   });
   req.on('error', reject); if (init.body !== undefined) req.write(init.body); req.end();
 });
-
-/**
- * The Payables release generation under test. The app names release B's change (`--payables-change`); B has its own
- * change and both releases have every earlier one's.
- * `account-scoped-cache` (reads rescoped when the signed-in account changes) is asserted by account-switch.spec.mjs;
- * `session-recheck` (the session re-read on focus, visibility and a cross-tab signal) by shared-reader.spec.mjs.
- */
-export function payablesGeneration() {
-  const CHANGES = ['review-count', 'compensation-recovery', 'account-scoped-cache', 'session-recheck', 'record-deep-link', 'report-link', 'owner-attention'];
-  const change = JSON.parse(process.env.PROTO_E2E_OWNER_CHANGES ?? '{}').payables;
-  return { CHANGES, change, has: (release, name) => CHANGES.indexOf(name) < CHANGES.indexOf(change) || (release === 'b' && name === change) };
-}
-
-/** Open a gateway session for `account` in the browser context that `page` belongs to (as a sign-in in another tab would). */
-export async function signInAs(page, account, signFor) {
-  const challenge = await page.evaluate(async () => (await fetch('/gw/challenge')).json());
-  const signed = await signFor(account, challenge);
-  const status = await page.evaluate(async body => (await fetch('/gw/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })).status,
-    { accountId: signed.accountId, publicKey: signed.publicKey, signature: signed.signature, nonce: challenge.nonce });
-  expect(status, `sign in as ${account}`).toBe(200);
-}

@@ -9,11 +9,15 @@ and all four volumes. No deployment or restart is implied by committing source c
 These instructions describe the repository configuration. Deploys, restarts and money actions are
 performed by the owner. For the product and recorded results, see [README](../README.md).
 
-Preserve the complete state when moving an executor. This is the canonical list; AGENTS.md and
-`scripts/check-shared-image.mjs` repeat it, and `test/state-directories.test.ts` keeps them equal:
+Preserve the complete state when moving an executor. This is the canonical list; AGENTS.md repeats it, and
+`test/state-directories.test.ts` keeps them equal (and fails when the source writes a directory it doesn't name):
 <!-- state-directories -->
 `.ops/`, `.invoices/`, `.owner-intents/`, `.strategy/`, `.plans/`, `.evidence/`, `.inbox/`, `.agreements/`, `.notify/`, `.work-orders/`, `.hosted/`, `.agent-connections/`, `.machine-auth/`, `.app-access/`, `.proposals/`, and any legacy `.intake/` files
 <!-- /state-directories -->
+
+The `platform` image's entrypoint (`deploy/platform-entrypoint.sh`) creates `/data/state` and never writes in it. No
+check boots that image twice and proves these directories survive, as `scripts/check-shared-image.mjs` did for the
+prototype's `dao` image until it was removed with it (2026-11-08): unverified at the image level.
 plus each instance's settings file. `.ops/` also holds each executor's `<agent>.submission-evidence.ndjson` (provider answers to failed sends; evidence only, never read to decide a send). `.invoices/` includes its SQLite journals and the compensation store
 (`<agent>.compensation.sqlite`); `.notify/` records which alerts were sent (losing it re-sends them); `.agent-connections/`
 holds agent connections and their access log (see [agent access](agent-access.md)); `.machine-auth/` holds Treasury
@@ -113,7 +117,14 @@ owner-intent recovery records an outcome. Expiry alone is insufficient. Owner su
 later preparation even when the released payout is still settling. Preserve older settled records
 without outcome evidence and investigate them; do not fabricate a result or delete them to unblock.
 
-## Releasing to both services
+## Releasing to both services (the prototype, retired 2026-11-08)
+
+The prototype's services, `dao` and `invoices`, were deleted on 2026-11-08, and their packaging was removed from this
+repository: `Dockerfile.gateway`, `Dockerfile.payouts`, the root `railway.json`, `deploy/shared-frontends.json`,
+`deploy/dashboard-entrypoint.sh`, `scripts/package-shared-frontends.mjs` and `scripts/check-shared-image.mjs` (git
+history keeps them). This section and **Dashboard**, **Payout executor** and **Invoice migration and deployment** below
+record how they deployed. What ships now is the `platform` package alone (`test/build-context.test.ts` declares it);
+its runbook is [platform production](platform-production.md).
 
 | Service | Executes | Persistent state |
 |---|---|---|
@@ -133,12 +144,10 @@ here is migrated yet; deploys after that date need it. The files every deploy us
 
 | File | Shipped as | Service |
 |---|---|---|
-| `railway.json` (root) | itself; `scripts/release-candidate.mjs` copies it into the candidate's `invoices` source | `invoices` (invoices.multiagency.ai; deleted 2026-11-08) |
-| `deploy/railway.gateway.json` | the root `railway.json` of the `dao` package (`scripts/package-shared-frontends.mjs`) | `dao` (proto.multiagency.ai; deleted 2026-11-08) |
 | `deploy/railway.gateway.json` | the root `railway.json` of the `platform` package (`scripts/package-platform.mjs`) | `gateway`: staging (api.dev.multiagency.ai) and production (api.multiagency.ai) |
 
-Each selects its Dockerfile, one replica, healthcheck `/health` and restart on failure (up to 5 retries). Each also
-sets `drainingSeconds` (45 for the gateway, 30 for invoices): Railway's default sends SIGKILL right after SIGTERM, which
+It selects the package's Dockerfile, one replica, healthcheck `/health` and restart on failure (up to 5 retries). It
+also sets `drainingSeconds: 45`: Railway's default sends SIGKILL right after SIGTERM, which
 would cut a send in flight and leave it unresolved. On SIGTERM an agent server starts no new send and waits up to 25
 seconds for the one running (`stopSending`, `moneyIdle` in `src/lock.ts`); the gateway allows its agents 30 seconds,
 then up to 5 more (architecture.md). With a volume, Railway never runs the old and new deployment together
@@ -213,6 +222,8 @@ operation IDs, hashes, amounts and payees stay private. Reopening submissions, u
 resuming schedules are separate owner decisions. `pnpm test:live` requires separate authorization.
 
 ## Dashboard
+
+Retired as a deployment on 2026-11-08 (see above); `deploy/dashboard.json` still runs the gateway locally.
 
 **Deploy the gateway on Railway** (service `dao`: the packaged `Dockerfile.gateway`, one replica, a volume at
 `/data`). One container runs the public gateway (`src/gateway/server.ts`) and, on loopback beside it,

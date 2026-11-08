@@ -1,17 +1,17 @@
 // One command for a release candidate: freeze a commit, build the frontend once, run every gate against that build,
-// and package the deploy sources from it. Writes release.json with every digest. Runs locally only: it deploys nothing,
-// uses no credentials and touches no state directory.
+// and package what ships from it: the `platform` package and, with --sdk, the SDK. Writes release.json with every
+// digest. Runs locally only: it deploys nothing, uses no credentials and touches no state directory.
 //
-//   pnpm release:candidate -- [--ref <commit>] [--sdk] <the run.mjs inputs for a plain run>
-//     e.g. --invoices-dist-release H --invoices-dist-next I --payables-dist A4 --payables-dist-next A5 --payables-change <label>
-//          --treasury-dist A5 --treasury-dist-next A6 --treasury-change <label> --treasury-skill <dir>
+//   pnpm release:candidate -- [--ref <commit>] [--sdk] --treasury-skill <dir>
+//
+// The Treasury skill (an external consumer of the machine route) is the one input a plain E2E run needs.
 //
 // Stops at the first failing gate and packages nothing. The candidate is
 // .test-artifacts/stack-snapshots/<runDigest>/ (app recipes use it as before); the deploy sources and release.json are
 // in .test-artifacts/releases/<runDigest>/. Only committed files are frozen: commit first.
 import { spawnSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { dependencyTree } from './dependency-tree.mjs';
 
@@ -20,17 +20,13 @@ const args = process.argv.slice(2).filter(arg => arg !== '--');
 const take = flag => { const i = args.indexOf(flag); if (i === -1) return undefined; const [, value] = args.splice(i, 2); return value; };
 const ref = take('--ref') ?? 'HEAD';
 const sdk = args.includes('--sdk') && Boolean(args.splice(args.indexOf('--sdk'), 1));
-// App inputs are directories; gates run inside the frozen snapshot, so each is resolved against the caller's directory.
-const PATH_INPUTS = new Set(['--invoices-dist-release', '--invoices-dist-next', '--payables-dist', '--payables-dist-next',
-  '--treasury-dist', '--treasury-dist-next', '--treasury-skill']);
+// Inputs are directories; gates run inside the frozen snapshot, so each is resolved against the caller's directory.
+const PATH_INPUTS = new Set(['--treasury-skill']);
 const inputs = args.map((arg, i) => PATH_INPUTS.has(args[i - 1]) ? resolve(arg) : arg);
 const flag = name => { const i = inputs.indexOf(name); return i === -1 ? undefined : resolve(inputs[i + 1]); };
-const required = ['--invoices-dist-release', '--invoices-dist-next', '--payables-dist', '--payables-dist-next', '--payables-change',
-  '--treasury-dist', '--treasury-dist-next', '--treasury-change', '--treasury-skill'];
+const required = ['--treasury-skill'];
 const missing = required.filter(name => !inputs.includes(name));
 if (missing.length) throw new Error(`A candidate runs every case; missing: ${missing.join(', ')}`);
-// Release B of each app is what ships; release A is what it replaces.
-const shipped = { payables: flag('--payables-dist-next'), treasury: flag('--treasury-dist-next') };
 
 /** The same directory digest as test/e2e/run.mjs (and the stack-snapshot names). */
 function digest(dir, skip = ['.test-artifacts', 'SNAPSHOT.json']) {
@@ -109,15 +105,9 @@ workdir = snapshot;
 if (sdk) gate('sdk', 'pnpm', ['-s', 'contract:pack']);
 if (sdk) gate('sdk-skills', 'pnpm', ['-s', 'contract:skills']);
 
-// 4. Deploy sources, from the snapshot and the shipped app releases only.
+// 4. Deploy sources, from the snapshot only.
 const out = join(root, '.test-artifacts/releases', runDigest);
 mkdirSync(out, { recursive: true });
-execFileSync(process.execPath, ['scripts/package-shared-frontends.mjs', join(out, 'dao'), shipped.treasury, shipped.payables], { cwd: snapshot, stdio: 'inherit' });
-const invoices = join(out, 'invoices');
-mkdirSync(invoices);
-for (const name of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', 'src', 'Dockerfile.payouts', 'railway.json']) cpSync(join(snapshot, name), join(invoices, name), { recursive: true });
-writeFileSync(join(invoices, '.dockerignore'), 'node_modules\n');
-if (digest(join(out, 'dao/web/dist'), []) !== record.frontend.build) throw new Error('The packaged frontend differs from the tested build');
 // The platform: the headless engine, with the confirm page's files alone, each byte-equal to the tested build's.
 execFileSync(process.execPath, ['scripts/package-platform.mjs', join(out, 'platform')], { cwd: snapshot, stdio: 'inherit' });
 const platformFiles = JSON.parse(readFileSync(join(out, 'platform/manifest.json'), 'utf8')).files;
@@ -126,11 +116,8 @@ for (const [file, hash] of Object.entries(platformFiles))
 
 record.runDigest = runDigest;
 record.snapshot = snapshot;
-record.inputs = Object.fromEntries(required.filter(name => !name.endsWith('-change')).map(name => [name.slice(2), { path: flag(name), digest: digest(flag(name), []) }]));
-record.changes = { payables: inputs[inputs.indexOf('--payables-change') + 1], treasury: inputs[inputs.indexOf('--treasury-change') + 1] };
-record.packages = { dao: { path: join(out, 'dao'), manifestSha256: sha256(join(out, 'dao/manifest.json')), treasury: digest(shipped.treasury, []), payables: digest(shipped.payables, []) },
-  platform: { path: join(out, 'platform'), manifestSha256: sha256(join(out, 'platform/manifest.json')) },
-  invoices: { path: invoices, sourceDigest: digest(invoices, []) } };
+record.inputs = Object.fromEntries(required.map(name => [name.slice(2), { path: flag(name), digest: digest(flag(name), []) }]));
+record.packages = { platform: { path: join(out, 'platform'), manifestSha256: sha256(join(out, 'platform/manifest.json')) } };
 if (sdk) {
   const pack = readdirSync(join(snapshot, '.test-artifacts/contract')).find(name => name.endsWith('.tgz'));
   record.sdk = { tarball: join(snapshot, '.test-artifacts/contract', pack), sha256: sha256(join(snapshot, '.test-artifacts/contract', pack)) };

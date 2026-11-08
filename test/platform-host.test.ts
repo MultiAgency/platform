@@ -157,8 +157,8 @@ test("a headless config refuses every sign-in or owner-app feature, and each dep
   } finally { rmSync(dir, { recursive: true, force: true }); }
   // The prototype's configs keep both setup paths as before; the platform's are headless: staging sets up Treasury and
   // Payables agents (user, 2026-11-02), production Payables only until a staging run of the Treasury path is recorded.
-  // (shared-demos and shared-frontends name frontend directories that exist only in the deployed image: read as written.)
-  for (const name of ["dashboard.json", "multiagency.json", "shared-demos.json", "shared-frontends.json"]) {
+  // (shared-demos names frontend directories that existed only in the prototype's image: read as written.)
+  for (const name of ["dashboard.json", "multiagency.json", "shared-demos.json"]) {
     const config = ["dashboard.json", "multiagency.json"].includes(name) ? loadConfig(join("deploy", name)) : JSON.parse(readFileSync(join("deploy", name), "utf8"));
     assert.deepEqual([config.headless ?? false, config.selfService, config.appSetup], [false, true, ["treasury", "payables"]], name);
   }
@@ -175,7 +175,7 @@ test("the platform package carries the gateway and the confirm entry's files onl
   const write = (path: string, content = path) => { mkdirSync(join(tree, path, ".."), { recursive: true }); writeFileSync(join(tree, path), content); };
   try {
     for (const path of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json", "src/gateway/server.ts", "Dockerfile.platform",
-      "deploy/railway.gateway.json", "deploy/platform-entrypoint.sh", "deploy/platform-staging.json", "deploy/platform.json", "deploy/shared-frontends.json",
+      "deploy/railway.gateway.json", "deploy/platform-entrypoint.sh", "deploy/platform-staging.json", "deploy/platform.json", "deploy/dashboard.json",
       "web/dist/index.html", "web/dist/confirm.html", "web/dist/static/js/index.1.js", "web/dist/static/js/confirm.2.js", "web/dist/static/js/lib.3.js",
       "web/dist/static/js/lib.3.js.LICENSE.txt", "web/dist/static/css/c.4.css", "web/dist/static/font/f.5.woff2", "frontends/treasury/index.html"]) write(path);
     write("package.json", JSON.stringify({ name: "platform-tree", private: true, type: "module" }));

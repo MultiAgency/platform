@@ -1,5 +1,9 @@
 # Independently built product frontends
 
+Historical: this describes the prototype's shared frontends (the `dao` host's Treasury and Payables builds), retired on
+2026-11-08 with `scripts/test-shared-frontend.mjs` and the `dao` package. The platform host serves no product frontend;
+each app tests its own against a pinned platform and SDK.
+
 Local infrastructure hardening changes the error contract: arbitrary exceptions now return generic
 `INTERNAL_SERVER_ERROR`, while explicitly public application errors and provider codes remain
 available. See [errors at the RPC boundary](architecture.md#errors-at-the-rpc-boundary).

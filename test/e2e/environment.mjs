@@ -43,9 +43,7 @@ async function freePort(host = '127.0.0.1') {
   const port = server.address().port; await close(server); return port;
 }
 /**
- * `secondAccount`: SECOND exists on chain and the host allows sessions without an agent (account-switch scenarios).
- * `daoOwned`: the owner app's agent belongs to the simulated Sputnik DAO, whose council (OWNER) and member (SECOND)
- * can both read it with different permissions (shared-reader scenarios). Test-only: no authorization code changes.
+ * `secondAccount`: SECOND exists on chain and the host allows sessions without an agent.
  * `onChainPolicyEdits`: the simulator signs freeze, unfreeze and provider-enforced policy edits as NEP-366 (see provider.mjs).
  * `daoPortfolio`: the Treasury agent (`portfolio`) belongs to the simulated DAO, without an owner app: apps reach it only
  *   under a DAO's consent, and its owner actions are DAO votes the `daoVote` control passes.
@@ -55,13 +53,10 @@ async function freePort(host = '127.0.0.1') {
  * `selfService`: owners (on the host) and app deployments (through `/apps/v1/setup`) may set up hosted agents; `hostedAreas` names the
  * areas a `frontendDist` host may set up.
  */
-export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoOwned = false, daoPortfolio = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false, appSetup = ['payables'] } = {}) {
+export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoPortfolio = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false, appSetup = ['payables'] } = {}) {
   await requireConfirmBuild();
-  const daoArea = daoOwned ? ownerApp?.product : undefined;
-  if (daoOwned &&!['payables', 'treasury'].includes(daoArea)) throw new Error('daoOwned requires an owner app');
-  if (daoArea === 'payables') owner = DAO;
-  if (daoArea === 'treasury' || daoPortfolio) { workspace = true; portfolioOwner = DAO; }
-  const dao = daoOwned || daoPortfolio;
+  if (daoPortfolio) { workspace = true; portfolioOwner = DAO; }
+  const dao = daoPortfolio;
   mkdirSync(directory, { recursive: true });
   const services = [], proxies = [];
   const accounts = [...(secondAccount || dao ? [SECOND] : []), ...(dao ? [OWNER, DAO_SIGNER] : []), ...extraAccounts];
@@ -93,28 +88,6 @@ export async function environment(directory, { workspace = false, portfolioOwner
   }
   const dashboard = `https://127.0.0.1:${await proxy(() => gatewayPort, '127.0.0.1')}`;
   const invoices = `https://localhost:${await proxy(() => invoicePort, '::1')}`;
-  // The actual Invoices release runs as its own process with no Proto configuration or credentials.
-  let payeeFrontend, frontendProcess;
-  const frontendProcesses = new Set();
-  // The shared release server: a release is staged and activated without restarting the process.
-  const invoicesReleases = join(directory, 'invoices-releases');
-  mkdirSync(invoicesReleases);
-  const frontendEnv = { HOST: '127.0.0.1', PORT: '', RELEASES_ROOT: invoicesReleases };
-  const invoicesRelease = dist => activate(invoicesReleases, stage(invoicesReleases, dist)).id;
-  async function startFrontend(dist = process.env.PROTO_E2E_INVOICES_DIST) {
-    invoicesRelease(dist);
-    const child = spawn(process.execPath, ['--require', EXIT_WITH_PARENT_FILE, join(import.meta.dirname, '../../src/contract/release-server.mjs')],
-      { cwd: directory, env: frontendEnv, stdio: ['ignore', 'pipe', 'pipe'] });
-    services.push(child); frontendProcesses.add(frontendProcess = child);
-    let output = '';
-    for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { output += chunk; appendFileSync(join(directory, 'invoices-frontend.log'), chunk); });
-    const deadline = Date.now() + 20_000;
-    while (!/(Invoices|Release) asset server ready/.test(output)) {
-      if (child.exitCode !== null || child.signalCode) { await new Promise(resolve => child.stderr.once('close', resolve)); throw new Error(`invoices frontend exited (${child.exitCode ?? child.signalCode}): ${output}`); }
-      if (Date.now() > deadline) throw new Error(`invoices frontend startup timed out: ${output}`);
-      await delay(50);
-    }
-  }
   // P2: an owner app's actual builds as releases A, B and an incompatible C, served by the shared release
   // server as its own process. Activation is the app operator's action, done here through the same code.
   let release;
@@ -128,7 +101,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
     release = { root, ids, env: { HOST: '127.0.0.1', PORT: String(await freePort()), RELEASES_ROOT: root }, activate: name => activate(root, ids[name]) };
     const child = spawn(process.execPath, ['--require', EXIT_WITH_PARENT_FILE, join(import.meta.dirname, '../../src/contract/release-server.mjs')],
       { cwd: directory, env: release.env, stdio: ['ignore', 'pipe', 'pipe'] });
-    services.push(child); frontendProcesses.add(child);
+    services.push(child);
     let output = '';
     for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { output += chunk; appendFileSync(join(directory, 'release-server.log'), chunk); });
     for (const deadline = Date.now() + 20_000; !output.includes('Release asset server ready');) {
@@ -140,7 +113,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
   }
   const common = { ...offlineEnvironment(), NODE_OPTIONS: `--require ${JSON.stringify(join(root, 'test/fixtures/offline-network.cjs'))} --require ${JSON.stringify(join(root, 'test/e2e/fastnear-fixture.cjs'))} ${EXIT_WITH_PARENT}`, AGENT_ID: simulated.id, AGENT_GRANT_TOKEN: simulated.token,
     NEAR_INTENTS_AGENT_API_URL: simulated.url, NEAR_RPC_URL: `${simulated.url}/chain`, AUTOPILOT: 'off',
-    SESSION_SECRET: 'local-only-session-secret-with-more-than-32-characters', DASHBOARD_AREA: 'payables', ...(payeeFrontend && { INVOICES_FRONTEND_URL: payeeFrontend }) };
+    SESSION_SECRET: 'local-only-session-secret-with-more-than-32-characters', DASHBOARD_AREA: 'payables' };
   async function start(name, cwd, entry, env, ready) {
     const child = spawn(process.execPath, ['--import', 'tsx', join(root, entry)], { cwd, env: { ...common, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     services.push(child);
@@ -178,15 +151,6 @@ export async function environment(directory, { workspace = false, portfolioOwner
     if (portfolio) await portfolio.close();
   }
   try {
-    if (process.env.PROTO_E2E_INVOICES_DIST) {
-      // A concurrent stack can take a probed port before the child binds it: the first start retries
-      // on a fresh port. Later releases keep this port, which the gateway is configured with.
-      for (let attempt = 1; ; attempt++) {
-        frontendEnv.PORT = String(await freePort());
-        try { await startFrontend(); break; } catch (error) { if (attempt === 3) throw error; }
-      }
-      common.INVOICES_FRONTEND_URL = payeeFrontend = `http://127.0.0.1:${frontendEnv.PORT}`;
-    }
     await startExecutor();
     await startReviewer();
     const agents = [{ name: 'payout', owner, area: 'payables', port: reviewerPort, executor: false, invoices: `${invoices}/submit` }];
@@ -238,14 +202,8 @@ export async function environment(directory, { workspace = false, portfolioOwner
     ownerRecords() { const path = join(reviewerDir, '.owner-intents', '.env.json'); return existsSync(path) ? JSON.parse(readFileSync(path)) : {}; },
     async restartExecutor() { await stop(executor); await startExecutor(); },
     async restartReviewer() { await stop(reviewer); await startReviewer(); },
-    release, frontendEnv, protoPids: () => services.filter(c => !frontendProcesses.has(c)).map(c => c.pid),
     /** Every process this stack started that is still running. */
     servicePids: () => services.filter(c => c.exitCode === null && !c.signalCode).map(c => c.pid),
-    async stopFrontend() { await stop(frontendProcess); },
-    async releaseFrontend(dist) {
-      if (frontendProcess.exitCode !== null || frontendProcess.signalCode) return startFrontend(dist);
-      return invoicesRelease(dist);
-    },
     async close() { await dispose(); writeFileSync(join(directory, 'observations.json'), JSON.stringify({ requests: simulated.requests, errors: simulated.errors, records: records(), owner: this.ownerRecords(), portfolio: portfolio ? { requests: portfolio.requests, errors: portfolio.errors, grants: portfolio.grants, state: this.portfolioState() } : null, browser: this.browserVersion ?? null }, null, 2)); },
   };
 }

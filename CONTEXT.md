@@ -421,8 +421,8 @@ docs/app-access.md.
 The platform's own host for apps (`api.dev.multiagency.ai` for staging, later `api.multiagency.ai`), run from the
 `platform` package as a headless gateway: it serves only `/health`, app access (`/apps/v1`) and the confirm page, with
 app setup for the areas its config lists (Payables). It has no sign-in, owner app, owner RPC or machine credentials;
-those stay on the prototype's hosts (the `dao` package). Offline- and stack-tested; staging has run it since
-2026-10-31 (read-only checks); not in production. See docs/operations.md, "Platform staging".
+those stay with the prototype, whose hosts were retired on 2026-11-08 (its source still runs locally). Offline- and
+stack-tested; staging has run it since 2026-10-31 and production since 2026-11-07. See docs/operations.md, "Platform staging".
 
 
 **App setup**:
