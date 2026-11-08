@@ -434,13 +434,20 @@ gateway, machine failure or detached descendant still needs the stopped-writer c
 `toClientError` in `src/rpc/base.ts` decides what a caller sees. Clients branch on `data.kind`, never
 on message text, and never infer from a failed response that an action was not accepted:
 - `unresolved` and `busy` (CONFLICT): raised before anything is sent.
-- `refused` (BAD_REQUEST): a `PublicError`, work-order or compensation refusal, or a send held by this
+- `refused` (BAD_REQUEST): a `PublicError`, work-order or compensation refusal, a send refused by `dispatch`'s
+  local checks (`LocalRefusal`: `authorize`, the recipient, a reviewed policy; with its code), or a send held by this
   server's own checks (`local_authorization_held`); proven not to have taken effect.
 - `provider` (BAD_REQUEST): a provider failure on a read, or one whose answer proves nothing executed. It carries
   the provider's code and validated refusal metadata, never its title or detail text.
 - Anything else is INTERNAL_SERVER_ERROR with fixed guidance, which the SDK reports as `unknown`. The
   server logs an `unclassified_error` line with the procedure, error class, throw site and provider
   status/code/request ID, never a message or body.
+
+A send's refusal (`LocalRefusal`, `local_authorization_held`, or a provider refusal) describes that one send, so a call
+that sends more than once never lets it answer for the whole call. A stream reports every send in an event before it
+can fail, and the SDK reads any failure after an event as `unknown`: a plan leg whose shield was sent ends with the
+leg's `NOT_SENT` event and `rejected`, not a refusal. A proposal's execution answers with its view, read from the
+journal, which lists what was sent and what was refused (`src/treasury.ts` `executeLeg`, `src/proposals/service.ts`).
 
 To give a workflow a specific message, raise a reviewed `PublicError` where the refusal happens; never
 echo arbitrary exception text.

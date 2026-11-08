@@ -23,6 +23,11 @@ const hash = (value: string) => createHash("sha256").update(value).digest();
 const deployment = z.string().regex(/^[a-z0-9-]{1,32}$/);
 const DAY = 86_400_000;
 export const MAX_CREDENTIAL_DAYS = 365, MAX_CONSENT_DAYS = 366;
+/**
+ * Requests an hour per app credential: the default, and the most the operator may set. The gateway's limiter keeps
+ * one timestamp per request in the hour, so the ceiling also bounds its memory per credential.
+ */
+export const DEFAULT_REQUESTS_PER_HOUR = 1_200, MAX_REQUESTS_PER_HOUR = 12_000;
 
 export function appMayCall(scopes: readonly AppScope[], access: Access, path: string) {
   return mayCall(access, path) && appScopesCover(scopes, path);
@@ -89,9 +94,15 @@ const jsonFiles = (dir: string) => {
 
 const Credential = z.strictObject({ version: z.literal(1), id: z.uuid(), secretHash: z.string().regex(/^[a-f0-9]{64}$/),
   deployment, host: z.string().min(1), label: z.string().trim().min(1).max(80), createdAt: z.number().int().nonnegative(),
-  expiresAt: z.number().int().positive(), revoked: z.boolean() });
+  expiresAt: z.number().int().positive(), revoked: z.boolean(),
+  /** Set only when the operator chose another limit than the default, so records at the default keep their earlier form. */
+  perHour: z.number().int().min(1).max(MAX_REQUESTS_PER_HOUR).optional() });
 type Credential = z.infer<typeof Credential>;
-const publicCredential = ({ secretHash: _hash, ...record }: Credential) => record;
+const publicCredential = ({ secretHash: _hash, perHour = DEFAULT_REQUESTS_PER_HOUR, ...record }: Credential) => ({ ...record, perHour });
+const requestsPerHour = (perHour: number) => {
+  if (!Number.isInteger(perHour) || perHour < 1 || perHour > MAX_REQUESTS_PER_HOUR) throw new BadRequest(`Choose 1 to ${MAX_REQUESTS_PER_HOUR} requests an hour.`);
+  return perHour === DEFAULT_REQUESTS_PER_HOUR ? {} : { perHour };
+};
 
 /** Service credentials: one per app deployment and host, issued and revoked by the platform operator. */
 export class AppCredentials {
@@ -101,12 +112,13 @@ export class AppCredentials {
     if (!z.uuid().safeParse(id).success) return null;
     return readRecord(join(this.dir, `${id}.json`), Credential);
   }
-  issue(input: { deployment: string; host: string; label: string; days: number }, now = Date.now()) {
+  issue(input: { deployment: string; host: string; label: string; days: number; perHour?: number }, now = Date.now()) {
     if (!Number.isInteger(input.days) || input.days < 1 || input.days > MAX_CREDENTIAL_DAYS) throw new BadRequest(`Choose 1 to ${MAX_CREDENTIAL_DAYS} days.`);
+    const limit = requestsPerHour(input.perHour ?? DEFAULT_REQUESTS_PER_HOUR);
     privateDirectory(this.dir);
     const id = randomUUID(), secret = randomBytes(32).toString("base64url");
     const record = Credential.parse({ version: 1, id, secretHash: hash(secret).toString("hex"), deployment: input.deployment,
-      host: input.host.toLowerCase(), label: input.label, createdAt: now, expiresAt: now + input.days * DAY, revoked: false });
+      host: input.host.toLowerCase(), label: input.label, createdAt: now, expiresAt: now + input.days * DAY, revoked: false, ...limit });
     writeAtomic(join(this.dir, `${id}.json`), JSON.stringify(record) + "\n", 0o600);
     return { credential: publicCredential(record), token: `tap_${id}.${secret}` };
   }
@@ -122,6 +134,14 @@ export class AppCredentials {
     const record = this.read(id);
     if (!record) return false;
     writeAtomic(join(this.dir, `${id}.json`), JSON.stringify({ ...record, revoked: true }) + "\n", 0o600);
+    return true;
+  }
+  /** Sets a credential's hourly request limit in place: the token stays, and the gateway reads it on the next call. */
+  limit(id: string, perHour: number) {
+    const limit = requestsPerHour(perHour), record = this.read(id);
+    if (!record) return false;
+    const { perHour: _old, ...rest } = record;
+    writeAtomic(join(this.dir, `${id}.json`), JSON.stringify(Credential.parse({ ...rest, ...limit })) + "\n", 0o600);
     return true;
   }
 }

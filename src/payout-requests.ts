@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { ORPCError } from "@orpc/server";
-import { dispatch, LocalRefusal } from "./agent.js";
+import { dispatch } from "./agent.js";
 import { readStatus } from "./api.js";
 import { executes } from "./env.js";
 import { withMoneyLock } from "./lock.js";
@@ -73,10 +73,7 @@ export async function requestPayout(actor: string | undefined, input: { requestI
   } catch (error) {
     // Recorded: the journal holds the outcome (a refusal, or none proven). Not recorded: nothing reached the send site,
     // and a refusal made before recording keeps its code, so the same requestId can be asked again.
-    if (!find(key)) {
-      if (error instanceof LocalRefusal) throw new ORPCError("BAD_REQUEST", { message: error.detail, data: { kind: "refused", code: error.code } });
-      throw error;
-    }
+    if (!find(key)) throw error;
   }
   return answer(input.requestId, recorded());
 }

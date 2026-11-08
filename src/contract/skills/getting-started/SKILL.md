@@ -10,7 +10,7 @@ metadata:
   purpose: 'Orients an app or agent author: the three clients, the identities and their server-side limits, result kinds and when to send again, and the supported surface of this package version.'
   type: lifecycle
   library: '@multiagency/sdk'
-  library_version: '0.5.3'
+  library_version: '0.5.4'
 sources:
   - 'MultiAgency/platform:src/contract/index.ts'
   - 'MultiAgency/platform:src/contract/payee-entry.ts'
@@ -88,7 +88,7 @@ to a browser: `JSON.stringify(value, (_key, v) => typeof v === "bigint" ? v.toSt
 
 ## What this package version supports
 
-`@multiagency/sdk` 0.5.3, entries:
+`@multiagency/sdk` 0.5.4, entries:
 - `@multiagency/sdk`: `ownerClient` with `OwnerResult`/`OwnerFailure`, `appClient` with `AppRouteResult` and the
   consent and setup texts (`consentMessage`, `setupMessage`), `ownerOutputs` and `OwnerInputs`/`OwnerOutput`
   per procedure, `ownerCapabilities` and `mayCall` (display only), gateway discovery (`gatewayDiscovery`,

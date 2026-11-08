@@ -1,5 +1,5 @@
 import type { StatusResponse } from "@near-intents-agent-api/sdk";
-import { agent, dispatch, type Sending } from "./agent.js";
+import { agent, dispatch, LocalRefusal, sendRefusal, type Sending } from "./agent.js";
 import { agentId } from "./env.js";
 import { budgetRemaining, type Holding, holdings } from "./holdings.js";
 import { acquireMoneyLock, type MoneyLock } from "./lock.js";
@@ -133,9 +133,13 @@ export function quoteOf(leg: Leg, amountOut: string, minAmountOut: string, warni
 
 /**
  * Executes one quoted leg. Swaps spend the confidential balance, so any part still public is
- * shielded first; `swapped` is absent when that shield did not succeed.
+ * shielded first; `swapped` is absent when that shield did not succeed, or when the swap was proven
+ * not sent after it (`refused`: its code, and a reason fit for the owner, never the provider's text).
+ * A leg whose shield was sent always returns, so its caller reports the shield: refusing the whole
+ * call would say nothing took effect.
  */
-export async function executeLeg(lock: MoneyLock, leg: Leg, minAmountOut: string, kind: string, sending?: Sending) {
+export async function executeLeg(lock: MoneyLock, leg: Leg, minAmountOut: string, kind: string, sending?: Sending):
+  Promise<{ shortfall: bigint; shielded?: StatusResponse; swapped?: StatusResponse; refused?: { code: string; reason: string } }> {
   const shortfall = leg.amount - leg.from.confidential;
   let shielded: StatusResponse | undefined;
   if (shortfall > 0n) {
@@ -144,8 +148,13 @@ export async function executeLeg(lock: MoneyLock, leg: Leg, minAmountOut: string
     if (shielded.status !== "SUCCESS") return { shortfall, shielded };
   }
   const request = { ...swapRequest(leg), min_amount_out: minAmountOut };
-  const swapped = await dispatch(lock, kind, { method: "swap", request }, sending);
-  return { shortfall, shielded, swapped };
+  try { return { shortfall, shielded, swapped: await dispatch(lock, kind, { method: "swap", request }, sending) }; }
+  catch (error) {
+    const code = shielded ? sendRefusal(error) : undefined;
+    if (code === undefined) throw error;
+    const reason = error instanceof LocalRefusal ? error.message : `${code}: the swap was refused before it was sent`;
+    return { shortfall, shielded, refused: { code, reason } };
+  }
 }
 
 type SweepEvent =

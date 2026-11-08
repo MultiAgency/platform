@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { DelegateAction, encodeSignedDelegateAction, generateKey, Near, parsePublicKey, serializeDelegateAction, type PrivateKey } from "near-kit";
 import { consentMessage, parseConsentMessage, parseSetupMessage, setupMessage } from "../src/contract/app-consent.js";
-import { AppConsents, AppCredentials, MAX_CONSENTS_PER_DEPLOYMENT, sweepConsentKeys, verifyConsent, verifySetup, type VerifiedConsent } from "../src/gateway/app-access.js";
+import { AppConsents, AppCredentials, DEFAULT_REQUESTS_PER_HOUR, MAX_CONSENTS_PER_DEPLOYMENT, MAX_REQUESTS_PER_HOUR, sweepConsentKeys, verifyConsent, verifySetup, type VerifiedConsent } from "../src/gateway/app-access.js";
 import { APP_ROOT, appRoutes, confirms, type HostedSetup } from "../src/gateway/app-routes.js";
 import { AppConfirms, confirmRoutes } from "../src/gateway/app-confirm.js";
 import { APP_GATEWAY_CODES } from "../src/contract/app-access.js";
@@ -18,7 +18,7 @@ import { BadRequest, sendFailure } from "../src/http.js";
 import { daoPolicy } from "../src/chain.js";
 import { payoutPolicy } from "../src/policy.js";
 import { AuthorityUnanswered, resolveMachineAccess, resolveWalletAuthority } from "../src/gateway/machine-authority.js";
-import { chainKeyState, type KeyLookup, type KeyState, type KeyStateLookup } from "../src/signin.js";
+import { chainKeyState, hourlyLimit, type KeyLookup, type KeyState, type KeyStateLookup } from "../src/signin.js";
 
 const HOST = "platform.test", NOW = Date.parse("2026-10-26T12:00:00Z");
 const fullAccess: KeyLookup = async () => "FullAccess";
@@ -78,6 +78,42 @@ test("service credentials bind deployment and host, expire, and revoke", t => {
   assert.throws(() => store.issue({ deployment: "staging", host: HOST, label: "x", days: 366 }, NOW), BadRequest);
   assert.equal(store.revoke(credential.id), true);
   assert.equal(store.authenticate(`Bearer ${token}`, HOST, NOW), null);
+});
+
+test("a credential's hourly request limit is the operator's: set at issue or later, the default written nowhere (#15)", t => {
+  const dir = mkdtempSync(join(tmpdir(), "app-credentials-")); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = new AppCredentials(join(dir, "access"));
+  const file = (id: string) => JSON.parse(readFileSync(join(dir, "access", "credentials", `${id}.json`), "utf8"));
+  const plain = store.issue({ deployment: "staging", host: HOST, label: "staging", days: 30 }, NOW);
+  assert.equal(plain.credential.perHour, DEFAULT_REQUESTS_PER_HOUR);
+  assert.ok(!("perHour" in file(plain.credential.id)), "a credential at the default stores no limit, so its record stays as before");
+  const set = store.issue({ deployment: "production", host: HOST, label: "production", days: 30, perHour: 6_000 }, NOW);
+  assert.equal(file(set.credential.id).perHour, 6_000);
+  assert.equal(store.authenticate(`Bearer ${set.token}`, HOST, NOW)?.perHour, 6_000);
+  for (const perHour of [0, -1, 1.5, MAX_REQUESTS_PER_HOUR + 1, Number.NaN])
+    assert.throws(() => store.issue({ deployment: "staging", host: HOST, label: "x", days: 30, perHour }, NOW), BadRequest, String(perHour));
+  // Changed in place: the token stays the same, and the next call reads the new limit.
+  assert.equal(store.limit(plain.credential.id, 60), true);
+  assert.equal(store.authenticate(`Bearer ${plain.token}`, HOST, NOW)?.perHour, 60);
+  assert.equal(store.limit(set.credential.id, DEFAULT_REQUESTS_PER_HOUR), true);
+  assert.ok(!("perHour" in file(set.credential.id)), "back at the default, the record stores none");
+  assert.throws(() => store.limit(plain.credential.id, MAX_REQUESTS_PER_HOUR + 1), BadRequest);
+  assert.equal(store.limit("00000000-0000-4000-8000-000000000000", 60), false);
+});
+
+test("the hourly limiter takes each call's limit, and a lowered one waits until enough requests leave the hour", () => {
+  const allow = hourlyLimit(5), hour = 3_600_000;
+  for (let i = 0; i < 5; i++) assert.equal(allow("k", NOW + i * 1_000), true);
+  assert.equal(allow("k", NOW + 5_000), false);
+  assert.equal(allow.retryAfterSeconds("k", NOW + 5_000), (hour - 5_000) / 1_000, "the oldest leaves first");
+  // Lowered to 2 with 5 in the hour: 4 must leave, so the 4th oldest (at +3 s) decides.
+  assert.equal(allow("k", NOW + 5_000, 2), false);
+  assert.equal(allow.retryAfterSeconds("k", NOW + 5_000, 2), (hour + 3_000 - 5_000) / 1_000);
+  assert.equal(allow("k", NOW + hour + 3_000, 2), true, "at that moment one remains, so one more fits");
+  assert.equal(allow("k", NOW + hour + 3_000, 2), false);
+  // Raised: more fit at once.
+  assert.equal(allow("k", NOW + hour + 3_000, 10), true);
+  assert.equal(allow.retryAfterSeconds("k", NOW + hour + 3_000, 10), 0);
 });
 
 test("a signed consent is verified against this host, the calling deployment, expiry and the owner's full-access key", async () => {
@@ -818,6 +854,19 @@ test("each credential has an hourly request limit, and its 429 says when to try 
   // A proxy's 429 page isn't the gateway's answer: the routes keep their old kind for it.
   const proxied = appClient({ base: `http://127.0.0.1:${port}`, credential: staging, fetch: async () => new Response("<html>slow down</html>", { status: 429 }) });
   assert.deepEqual(await proxied.identity("payout"), { ok: false, kind: "refused", status: 429, error: "HTTP 429" });
+});
+
+test("the gateway holds each credential to the limit the operator set, read on every call (#15)", async t => {
+  const { port, production } = await routeHarness(t);
+  const credentials = new AppCredentials(".app-access");
+  const { credential, token } = credentials.issue({ deployment: "small", host: HOST, label: "small", days: 30, perHour: 2 });
+  const statuses: number[] = [];
+  for (let i = 0; i < 3; i++) statuses.push((await call(port, "/apps/v1/agents/payout", "GET", token)).status);
+  assert.deepEqual(statuses.map(s => s === 429), [false, false, true], `statuses ${statuses}`);
+  assert.notEqual((await call(port, "/apps/v1/agents/payout", "GET", production)).status, 429, "another deployment keeps its own budget");
+  // Raised in place: the same token passes at once, with no restart.
+  assert.equal(credentials.limit(credential.id, 10), true);
+  assert.notEqual((await call(port, "/apps/v1/agents/payout", "GET", token)).status, 429);
 });
 
 test("app access state is written only into a directory no one else can read", t => {

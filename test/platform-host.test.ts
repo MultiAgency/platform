@@ -11,6 +11,7 @@ import { generateKey, Near, type PrivateKey } from "near-kit";
 import { setupMessage } from "../src/contract/app-consent.js";
 import { AppCredentials } from "../src/gateway/app-access.js";
 import { AppConfirms, confirmAssets } from "../src/gateway/app-confirm.js";
+import { EVERY_AGENT, walletStopMessage } from "../src/gateway/wallet-stop-text.js";
 import { sessions } from "../src/signin.js";
 import { holdHostedPorts } from "./fixtures/hosted-ports.js";
 
@@ -70,7 +71,7 @@ async function startGateway(t: { after: (fn: () => Promise<void>) => void }, con
     const signature = await new Near({ network: "mainnet", privateKey: ownerKey.secretKey as PrivateKey, defaultSignerId: "carol.near" }).signMessage({ message, recipient: HOST, nonce });
     return { message, nonce: nonce.toString("base64"), publicKey: signature.publicKey, signature: signature.signature };
   };
-  return { root, dir, secret, token, call, app, signedSetup, diagnostics: () => diagnostics };
+  return { root, dir, secret, token, call, app, signedSetup, ownerKey, diagnostics: () => diagnostics };
 }
 
 /**
@@ -79,7 +80,7 @@ async function startGateway(t: { after: (fn: () => Promise<void>) => void }, con
  * read; app setup is limited to the areas `appSetup` lists.
  */
 test("a headless host serves only app access and the confirm page, and sets up only the listed areas", { timeout: 60_000 }, async t => {
-  const { root, dir, token, call, app, signedSetup, diagnostics } = await startGateway(t, { host: HOST, headless: true, appSetup: ["payables"], agents: [] });
+  const { root, dir, token, call, app, signedSetup, ownerKey, diagnostics } = await startGateway(t, { host: HOST, headless: true, appSetup: ["payables"], agents: [] });
   const confirm = new AppConfirms(join(dir, ".app-access")).hold({ deployment: "staging", host: HOST, organization: "org_1", owner: "carol.near",
     agent: "own-000000000000000000000000", agentId: "provider-agent", consent: "c", correlationId: "c-platform", type: "agent_freeze",
     action: { type: "agent_freeze" }, policy: null, summary: null, expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -105,6 +106,20 @@ test("a headless host serves only app access and the confirm page, and sets up o
   assert.equal((await call(`/confirm/v1/${confirm}/open`, { body: {} })).status, 403, "opening still needs the owner's signature");
   for (const path of ["/confirm/", "/confirm/abc", "/confirm/v1/x", "/confirm/v1/x/open", `/confirm/${confirm}/x`]) await absent(path);
   await absent("/confirm/abc", "POST");
+  // A wallet owner's stop answers here with no app: its page, and its call, which needs the owner's signature.
+  // The page is the confirm build's: served when the web build is present, else the file server's own 404, never the host's.
+  for (const path of ["/confirm/wallet/stop", "/confirm/wallet/stop/own-000000000000000000000000"]) {
+    const page = await call(path);
+    assert.ok(page.status === 200 ? /html/.test(page.type) : page.status === 404 && page.body === "Not found", `${path}: ${page.status} ${page.body.slice(0, 80)}`);
+  }
+  await absent("/confirm/wallet/stop/Bad_Name");
+  const unsigned = await call("/confirm/v1/wallet-stop", { body: {} });
+  assert.deepEqual([unsigned.status, JSON.parse(unsigned.body).error], [400, "Send the signed stop: message, nonce, publicKey and signature."]);
+  const stopMessage = walletStopMessage({ host: HOST, owner: "carol.near", agent: EVERY_AGENT, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() });
+  const stopNonce = randomBytes(32);
+  const stopSigned = await new Near({ network: "mainnet", privateKey: ownerKey.secretKey as PrivateKey, defaultSignerId: "carol.near" }).signMessage({ message: stopMessage, recipient: HOST, nonce: stopNonce });
+  const none = await call("/confirm/v1/wallet-stop", { body: { message: stopMessage, nonce: stopNonce.toString("base64"), publicKey: stopSigned.publicKey, signature: stopSigned.signature } });
+  assert.deepEqual([none.status, JSON.parse(none.body).error], [404, "No agent of carol.near on this host. Nothing changed."], "her key is checked on chain first");
   // Only the confirm entry's own assets are served, as the web build's manifest lists them; the owner app's are not.
   const built = (() => { try { return JSON.parse(readFileSync(join(root, "web/dist/build-manifest.json"), "utf8")).entries as Record<string, { initial?: { js?: string[] } }>; } catch { return null; } })();
   for (const path of ["/static/js/missing.js", ...(built?.index?.initial?.js ?? []).filter(file => !built?.confirm?.initial?.js?.includes(file))]) await absent(path);

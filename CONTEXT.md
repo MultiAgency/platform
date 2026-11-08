@@ -381,9 +381,20 @@ Treasury agent by vote; the app never gets a text to sign. A **DAO stop** is the
 page with no app, that ends every consent for its agent given before the stop is applied (and every consent request
 filed by then) and turns its autopilot off; consents the DAO gives after it applied stay live. The DAO parts are
 offline- and stack-tested; setup, creation, consent, the grant and the stop are mainnet-observed on platform staging
-(2026-11-04). Revocable by the deployment or the operator, and a DAO's consent by its own stop; a
+(2026-11-04). A **wallet stop** is the same for a wallet owner: one NEP-413 signature over a canonical text, sent
+from the platform's stop page or any tool, for one agent or every agent the wallet owns on the host (offline-tested).
+Revocable by the deployment or the operator, and an owner's consents by their own stop; a
 revocation is a permanent tombstone. A wallet's consent is offline- and stack-tested and mainnet-observed on platform
 staging (2026-10-28); not in production. See docs/app-access.md.
+
+**DAO request**:
+A text the gateway files for a DAO to sign by its own vote: a DAO consent, a DAO setup, a vote on a Treasury proposal,
+or a DAO stop. The platform picks its NEP-413 nonce, so its hash is unique, and records the block before which no
+proposal can have signed it. It is pending until the DAO's signature over that hash is found on chain and verified; the
+signature is recorded before anything is done with it. An app's request lapses when its vote window closes and
+completes only until what it signs expires; a stop is honoured whenever its page is next opened after a passed vote,
+and lapses only when a last search finds none. Not an **owner intent**: those are the agent's own actions a DAO
+approves by vote. `src/gateway/app-dao.ts` (`DaoRequests`).
 
 
 **Treasury proposal**:

@@ -1,6 +1,7 @@
 import type { Intent } from "@near-intents-agent-api/sdk";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { EVERY_AGENT, walletStopMessage } from "../../src/gateway/wallet-stop-text.js";
 import { connect, signIntent, useWallet } from "./features/owner/wallet";
 import { Badge, Button, Card, ErrorBox, Loading } from "./shared/ui";
 import "./styles.css";
@@ -116,6 +117,86 @@ function ConfirmPage() {
   </Card>;
 }
 
+type Stopped = { at: string; agents: { agent: string; agentId: string | null; consentsEnded: number; autopilot: string }[] };
+type StopBody = { message: string; nonce: string; publicKey: string; signature: string };
+/** The agent this page's link names (`/confirm/wallet/stop/<agent>`), if any. */
+const stopNamed = location.pathname.match(/^\/confirm\/wallet\/stop\/([a-z0-9-]{1,32})$/)?.[1] ?? null;
+
+/**
+ * A wallet owner's own stop (src/gateway/wallet-stop.ts): no app and no platform session. The owner connects the wallet
+ * that owns the agents, reads the exact text, and signs it; the platform then ends every app consent given for them before
+ * it applies the stop and turns their autopilot off. The same signed stop is sent again to finish an autopilot not yet
+ * confirmed off.
+ */
+function StopPage() {
+  const wallet = useWallet();
+  const [scope, setScope] = useState<string>(stopNamed ?? EVERY_AGENT);
+  const [sent, setSent] = useState<StopBody>();
+  const [stopped, setStopped] = useState<Stopped>();
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const account = wallet.status === "connected" ? wallet.accountId : null;
+  const [expiresAt, setExpiresAt] = useState(() => new Date(Date.now() + 10 * 60_000).toISOString());
+  const message = account ? walletStopMessage({ host: location.host, owner: account, agent: scope, expiresAt }) : null;
+
+  async function send(body: StopBody) {
+    setError(undefined); setBusy(true);
+    try {
+      const response = await fetch("/confirm/v1/wallet-stop", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      if (!response.ok) throw new Error(await errorOf(response));
+      setSent(body);
+      setStopped(await response.json() as Stopped);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally { setBusy(false); }
+  }
+  async function sign() {
+    if (!message) return;
+    const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+    setError(undefined); setBusy(true);
+    try {
+      const signed = await signIntent({ standard: "nep413", payload: { message, recipient: location.host, nonce } } as Intent) as { public_key: string; signature: string };
+      await send({ message, nonce, publicKey: signed.public_key, signature: signed.signature });
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+      setBusy(false);
+    }
+  }
+
+  const unconfirmed = stopped?.agents.some(a => a.autopilot === "not confirmed off");
+  return <Card>
+    <h1 className="text-xl font-semibold">Stop your agents</h1>
+    <p>
+      Signed by the wallet that owns them, this ends every app consent you gave for them before the stop is applied, and
+      turns their autopilot off. No app is involved. It only removes authority: it doesn't freeze an agent or revoke its
+      grant, so an app you consent to again may turn autopilot back on. A swap already under way finishes through the
+      platform's guarded send path.
+    </p>
+    <p className="text-sm text-muted-foreground">Check that this page is on <strong>{location.host}</strong>.</p>
+    {error && <ErrorBox error={error} />}
+    {stopped ? <>
+      <Badge tone={unconfirmed ? "warning" : "success"}>{unconfirmed ? "Consents ended; some autopilot not confirmed off" : "Stopped"}</Badge>
+      <table className="text-sm"><thead><tr><th className="text-left">Agent</th><th className="text-left">Consents ended</th><th className="text-left">Autopilot</th></tr></thead>
+        <tbody>{stopped.agents.map(a => <tr key={a.agent}><td>{a.agent}</td><td>{a.consentsEnded}</td><td>{a.autopilot}</td></tr>)}</tbody></table>
+      <p className="text-sm text-muted-foreground">Applied {new Date(stopped.at).toLocaleString()}.</p>
+      {unconfirmed && sent && <Button onClick={() => void send(sent)} disabled={busy}>{busy ? "Sending…" : "Send the same stop again"}</Button>}
+    </> : !account ? <Button onClick={() => void connect()} disabled={wallet.status === "connecting"}>Connect the owner's wallet</Button>
+      : <>
+        <p>Connected as <strong>{account}</strong>.</p>
+        {stopNamed && <fieldset className="grid gap-1">
+          <label><input type="radio" checked={scope === stopNamed} onChange={() => setScope(stopNamed)} /> Only agent <strong>{stopNamed}</strong></label>
+          <label><input type="radio" checked={scope === EVERY_AGENT} onChange={() => setScope(EVERY_AGENT)} /> Every agent of {account} on this host</label>
+        </fieldset>}
+        <h2 className="font-medium">The exact text your wallet signs</h2>
+        <pre className="whitespace-pre-wrap break-all text-sm">{message}</pre>
+        <p className="text-sm text-muted-foreground">{scope === EVERY_AGENT ? "\"agent\": \"*\" means every agent this wallet owns here. " : ""}Valid until {new Date(expiresAt).toLocaleString()}.</p>
+        <Button onClick={() => { if (Date.parse(expiresAt) < Date.now() + 60_000) setExpiresAt(new Date(Date.now() + 10 * 60_000).toISOString()); else void sign(); }} disabled={busy}>
+          {busy ? "Signing…" : Date.parse(expiresAt) < Date.now() + 60_000 ? "Renew the text" : "Sign and stop"}</Button>
+      </>}
+  </Card>;
+}
+
 const dark = matchMedia("(prefers-color-scheme: dark)");
 document.documentElement.classList.toggle("dark", dark.matches);
-createRoot(document.getElementById("root")!).render(<StrictMode><main className="mx-auto flex max-w-2xl flex-col gap-4 p-6"><ConfirmPage /></main></StrictMode>);
+const stopPage = location.pathname.startsWith("/confirm/wallet/stop");
+createRoot(document.getElementById("root")!).render(<StrictMode><main className="mx-auto flex max-w-2xl flex-col gap-4 p-6">{stopPage ? <StopPage /> : <ConfirmPage />}</main></StrictMode>);

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, mock, test } from "node:test";
 import { createRouterClient, ORPCError } from "@orpc/server";
+import { LocalRefusal } from "../src/agent.js";
 import { api } from "../src/api.js";
 import { CompensationError } from "../src/compensation-store.js";
 import { MoneyLockBusy, UnresolvedOperations } from "../src/lock.js";
@@ -43,6 +44,8 @@ test("each pre-send refusal reaches the client as a distinguishable typed kind",
   assert.deepEqual([(await rejection(new MoneyLockBusy())).code, (await rejection(new MoneyLockBusy())).data], ["CONFLICT", { kind: "busy" }]);
   assert.deepEqual((await rejection(new WorkOrderRefusal("work_order_not_ready", "Not ready."))).data, { kind: "refused", code: "work_order_not_ready" });
   assert.deepEqual((await rejection(new CompensationError("stale_request", "Refresh."))).data, { kind: "refused", code: "stale_request" });
+  const local = await rejection(new LocalRefusal("grant_missing", "No live grant is held for this agent"));
+  assert.deepEqual([local.code, local.data, local.message], ["BAD_REQUEST", { kind: "refused", code: "grant_missing" }, "No live grant is held for this agent"]);
   assert.deepEqual((await rejection(new PublicError("Reviewed guidance."))).data, { kind: "refused" });
   const internal = await rejection(new Error("private detail /var/secret"));
   assert.deepEqual([internal.code, internal.data], ["INTERNAL_SERVER_ERROR", undefined]);

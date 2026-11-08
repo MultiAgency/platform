@@ -6,16 +6,18 @@ the platform's confirm page), what a dishonest app can still do, and how each pa
 [building an app](integration-path.md) and the SDK's `app-server` and `treasury-app` skills; this page is the platform
 side.
 
-The platform's own host (`api.dev.multiagency.ai` for staging; `api.multiagency.ai` later) runs the `platform` package
-headless: only `/health`, these routes and the confirm page with its own assets, and app setup for Payables agents only
-(`deploy/platform*.json`; offline-tested in `test/platform-host.test.ts`, E2E on a headless stack). Staging has run it
-since 2026-10-31 (read-only checks in [platform staging](platform-staging.md)); no production
-host yet. The prototype's hosts (the `dao` package) serve these routes beside their owner app.
+The platform's own host (`api.dev.multiagency.ai` for staging; `api.multiagency.ai` for production) runs the
+`platform` package headless: only `/health`, these routes and the confirm page with its own assets, and app setup for
+Payables agents only (`deploy/platform*.json`; offline-tested in `test/platform-host.test.ts`, E2E on a headless
+stack). Staging has run it since 2026-10-31 (read-only checks in [platform staging](platform-staging.md)); production
+since 2026-11-07, with no app credential issued yet ([platform production](platform-production.md)). The `dao`
+package serves these routes beside its owner app wherever it runs; its hosted prototype was retired on 2026-11-08.
 
 An app deployment (for example the MultiAgency dashboard's `staging`) reaches agents under `/apps/v1` with its service
 credential (`Authorization: Bearer
 tap_<id>.<secret>`, no cookies or Origin). The operator issues it on the gateway host: `pnpm app-credential issue
-<deployment> <host> [days]` (1–365 days, default 90; the token prints once), `list`, `revoke <id>`, and for consents
+<deployment> <host> [days] [label] [--per-hour <n>]` (1–365 days, default 90; the token prints once; the request limit
+below), `list`, `limit <id> <n>`, `revoke <id>`, and for consents
 `consents [deployment]`, `revoke-consent <id>` and `check-keys` (checks every live consent's signing key and revokes those
 the chain reports removed; exits non-zero if any lookup went unanswered).
 
@@ -196,6 +198,25 @@ the DAO's own stop; on 2026-11-05 ([mainnet log](mainnet-log.md#a-dao-funds-its-
 `deposit` by the DAO's vote and an app's proposal approved by DAO vote, then executed. Not observed: freeze and unfreeze.
 Not in production.
 
+**A wallet owner's own stop, with no app** (`src/gateway/wallet-stop.ts`): the counterpart of a DAO's stop for an agent a
+wallet owns. The owner opens `/confirm/wallet/stop` (or `/confirm/wallet/stop/<agent>`), part of the confirm build,
+connects the owning wallet and signs the canonical text with NEP-413 (recipient the host):
+`{"type":"multiagency.wallet-stop","version":1,"host","owner","agent","expiresAt"}`, where `agent` names one agent or is
+`"*"` for every agent the wallet owns on the host, and `expiresAt` is at most an hour away. Anyone may send the signed
+text to `POST /confirm/v1/wallet-stop` (`{ message, nonce, publicKey, signature }`), so any tool that signs NEP-413
+works too. The platform checks the exact text, this host and the signature, then that the key is a full-access key of
+the owner now (before saying whether any agent of theirs is here), then each agent's owner as its server reports it. It
+records the stop and its cutoff, the moment it first applies, and then revokes every app consent the owner gave for those
+agents by that cutoff, whatever provider ID it names, and turns each created agent's autopilot off. Sending the same stop
+again only retries an autopilot not yet confirmed off; it never ends a consent given after the cutoff, even after the
+text's expiry. An agent found replaced or owned by someone else on a retry is reported as such and not asked. At most 60
+sends an hour per address. It only removes authority, with the same limits as a DAO's stop: the provider grant stands, so
+an app the owner consents to afterwards may turn autopilot on again, and a tick or forwarded call already running
+finishes through the guarded send path. Offline-tested (`test/wallet-stop.test.ts`), and on a headless gateway process
+for the route and the chain key check (`test/platform-host.test.ts`). The page is browser-tested with a stand-in wallet
+(`test/browser/wallet-stop.cjs`): the text it shows is canonical, the wallet signs exactly that text for this host, the
+page sends it as signed, and a retry resends it unchanged. Signing with a real wallet is untested. Not deployed.
+
 **Funding through an app:** found on that run, a DAO's consent couldn't reach `deposit`, which was in the `payout`
 scope only. From 0.5.1 the `treasury` scope reaches it too: offline-tested, and mainnet-observed on platform staging
 on 2026-11-05, where the DAO funded its agent with the calls `fundingTransaction` builds, filed as one proposal. See
@@ -222,19 +243,24 @@ resends, and nothing an app calls is needed for that. An app follows that work t
   - `payouts/status` by `requestId` for a payout
   - `owner/status` by `correlationId` for an owner action
 
-  It never resends while that record reads `unknown`, `executing` or `processing`. `recover` stays owner-session only
-  (platform#14). Poll only while a record is unresolved, and budget the deployment's polls as a whole:
-  its 1,200 calls an hour are 20 a minute across all its agents and every other call. One poll a minute per open record
+  It never resends while that record reads `unknown`, `executing` or `processing`. The `recover` procedure isn't
+  on app access and isn't needed: the platform's own reconciliation is what resolves these (platform#14). Poll only while a record is unresolved, and budget the deployment's polls as a whole:
+  at the default 1,200 calls an hour, that's 20 a minute across all its agents and every other call. One poll a minute per open record
   fits about 15 agents with room for other calls; every 10 seconds fits only 3. On `rate_limited`, wait
   `retryAfterSeconds`.
 
-The limit is per app credential, 1,200 requests an hour across every owner and Organization of the deployment. Over it,
-the gateway answers 429 before forwarding anything, with `Retry-After` (delay-seconds until the oldest request leaves
-the hour) and `{ error, retryAfterSeconds }`. From SDK 0.5.2 `appClient` reports that as `kind: "rate_limited"` with
+The limit is per app credential, across every owner and Organization of the deployment: 1,200 requests an hour unless
+the operator sets another, from 1 to 12,000, at issue (`--per-hour`) or later (`app-credential limit <id> <n>`, in place:
+the token stays, and the gateway reads the new limit on the next call). A credential at the default stores no limit, so
+its record is unchanged; one with a limit set can't be read by a gateway from before limits (0.5.3 and earlier), so before
+rolling back to one, set each such credential back to 1,200. Over it,
+the gateway answers 429 before forwarding anything, with `Retry-After` (delay-seconds until enough requests leave
+the hour to bring the credential under its limit: the oldest one, unless the limit was just lowered) and `{ error, retryAfterSeconds }`. From SDK 0.5.2 `appClient` reports that as `kind: "rate_limited"` with
 `retryAfterSeconds`, for its own routes and for agent calls alike, so it's never mistaken for a refusal or an unknown
 outcome; the same request may be sent again once it clears. A 429 that isn't the gateway's JSON answer (a proxy page)
-keeps its earlier kind: `refused` on the app routes, `unavailable` or `unknown` on agent calls. A limit the operator sets per deployment or per Organization isn't built (#15).
-Offline-tested (`test/app-access.test.ts`, `test/contract-owner.test.ts`).
+keeps its earlier kind: `refused` on the app routes, `unavailable` or `unknown` on agent calls. A limit per
+Organization, within a deployment's, isn't built (#15). Offline-tested (`test/app-access.test.ts`,
+`test/contract-owner.test.ts`).
 
 DAO requests are bounded per deployment: at most 64 waiting for a vote and 256 filed a day. A finished one (completed,
 ended by a stop, lapsed with no signature found, or past what it signed) is removed 30 days later; the access log keeps

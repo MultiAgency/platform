@@ -12,6 +12,31 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
+## 0.5.4
+
+No change to the package's API yet.
+
+Platform changes in this release, outside the package:
+- **A request limit per app credential** (platform#15): the operator sets each credential's hourly limit, 1 to 12,000,
+  at issue (`app-credential issue … --per-hour <n>`) or later in place (`app-credential limit <id> <n>`, same token,
+  read on the next call); 1,200 stays the default and `list` shows each limit. A credential at the default stores no
+  limit, so its record is unchanged; one with a limit set can't be read by 0.5.3 or earlier, so set it back to 1,200
+  before rolling back to one. `Retry-After` after a lowered limit now counts until enough requests leave the hour (it
+  named the oldest only). A limit per Organization isn't built. Offline-tested.
+- **A wallet owner's own stop, with no app** (`/confirm/wallet/stop`, `POST /confirm/v1/wallet-stop`): one NEP-413
+  signature over a canonical text, for one agent or every agent the wallet owns on the host, ends every app consent the
+  owner gave for them before it first applies and turns their autopilot off. It doesn't freeze or revoke the grant.
+  New state: `.app-access/wallet-stops/` (additive, inside the preserved `.app-access/`). Offline-tested, and on a
+  headless gateway process for the route and the chain key check; the page is browser-tested with a stand-in wallet,
+  and signing with a real wallet is untested ([app access](app-access.md)).
+- **A send's refusal reads as a refusal, and never as the whole call's:** a send the platform refuses before sending it
+  (`grant_missing`, `per_transaction_exceeded`, `policy_not_in_force` and the like) reaches the owner or app as `refused`
+  with its `code`, where a plan whose first send was refused read `unknown`. A call that sends more than once never lets
+  one send's refusal answer for it: a plan leg whose shield was sent and whose swap was then refused, by these checks or
+  the provider, ends with the leg's event (`NOT_SENT`, the shield, `failureCode` naming the refusal) and `rejected`,
+  where it ended as a refusal before any event; a proposal's execution answers with its view, `stopped`, listing what
+  was sent and what was refused, where it answered `unknown` or a refusal. Offline-tested.
+
 ## 0.5.3 (2026-11-06)
 
 - **Refusal codes from the app routes** (addition): the gateway names why it refused, and `appClient` passes it on as

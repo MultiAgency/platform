@@ -16,7 +16,7 @@ export type PlanEvent =
       action: PlannedAction;
       /** The shield a swap needed first, when part of its input was public. */
       shield?: { amount: string; status: string };
-      /** `NOT_SENT` when the shield before it did not succeed. */
+      /** `NOT_SENT` when the shield before it did not succeed, or the swap was proven not sent after it (`failureCode`: why). */
       status: string;
       correlationId: string;
       failureCode: string | null | undefined;
@@ -91,10 +91,12 @@ export async function* executePlan(id: string, now = () => new Date(), { autopil
         if (settled.status !== "SUCCESS") return;
         continue;
       }
-      const { shortfall, shielded, swapped } = await executeLeg(lock, legFor(current.book, action), action.minAmountOut, plan.source, sending(action));
+      const { shortfall, shielded, swapped, refused } = await executeLeg(lock, legFor(current.book, action), action.minAmountOut, plan.source, sending(action));
       const shield = shielded && { amount: shortfall.toString(), status: shielded.status };
       if (!swapped) {
-        yield { type: "action", index, action, shield, status: "NOT_SENT", correlationId: "", failureCode: null };
+        yield { type: "action", index, action, shield, status: "NOT_SENT", correlationId: "", failureCode: refused?.code ?? null };
+        // A swap refused after its shield ends the plan as any refusal between its sends does.
+        if (refused) yield { type: "rejected", problems: [refused.reason] };
         return;
       }
       yield { type: "action", index, action, shield, status: swapped.status, correlationId: swapped.correlation_id, failureCode: swapped.failure_code };

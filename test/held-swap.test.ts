@@ -56,7 +56,8 @@ test("inspect-held-swap only reads: it reports the matching shape of a held swap
   const dir = mkdtempSync(join(tmpdir(), "held-swap-"));
   t.after(() => { provider.close(); rmSync(dir, { recursive: true, force: true }); });
   const { stdout } = await promisify(execFile)(process.execPath, ["--import", resolve("node_modules/tsx/dist/loader.mjs"), resolve("src/inspect-held-swap.ts"), correlation], {
-    cwd: dir, env: { ...process.env, AGENT_ID: agent, NEAR_INTENTS_AGENT_API_URL: `http://127.0.0.1:${(provider.address() as AddressInfo).port}` } });
+    // FORCE_COLOR from the caller's terminal would colour console.dir and break the matches below.
+    cwd: dir, env: { ...process.env, FORCE_COLOR: "0", AGENT_ID: agent, NEAR_INTENTS_AGENT_API_URL: `http://127.0.0.1:${(provider.address() as AddressInfo).port}` } });
   assert.match(stdout, /matched: 'confidential swap op'/);
   assert.match(stdout, /outcome: 'A'/);
   assert.match(stdout, /available_raw: '10000'/);

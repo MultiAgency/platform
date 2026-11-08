@@ -264,6 +264,17 @@ test("an unknown outcome reads unknown, blocks, and is never resent", async () =
   assert.deepEqual(sends, ["swap"]);
 });
 
+test("a send refused by its local checks after one was sent stops the proposal, read with both, not refused as a whole", async () => {
+  const proposal = await propose("r1", { legs: [{ from: usdc, to: wnear, amount: "15" }, { from: usdc, to: wnear, amount: "15" }] });
+  await approve(proposal);
+  // The grant ends once the first swap is sent: the second is refused before it is sent.
+  mock.method(api, "listGrants", async () => sends.length ? [] : [fixtureGrant(label)]);
+  const done = await executeProposal(app, { id: proposal.id });
+  assert.equal(done.state, "stopped");
+  assert.deepEqual(done.operations.map(op => [op.status, op.refused]), [["SUCCESS", null], [null, "grant_missing"]]);
+  assert.deepEqual(sends, ["swap"]);
+});
+
 test("a proposal's plan runs only as its proposal, and no other plan runs as one", async () => {
   const { snapshot } = await observe();
   const leg = { type: "swap" as const, from: usdc, to: wnear, amount: "15", amountOut: "15", minAmountOut: "15", costBps: 0 };

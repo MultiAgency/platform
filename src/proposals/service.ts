@@ -1,5 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
+import { sendRefusal } from "../agent.js";
 import { api } from "../api.js";
 import { notInForce } from "../authorize.js";
 import { agentId, executes } from "../env.js";
@@ -246,6 +247,11 @@ export async function executeProposal(context: CallContext, input: unknown, now 
   const events: PlanEvent[] = [];
   running.add(id);
   try { for await (const event of executePlan(plan.id, now, { proposal: id, beforeClaim })) events.push(event); }
+  catch (error) {
+    // A send proven not made comes after the claim and is journaled: the proposal's view below reads it with whatever
+    // was sent before it, where refusing the whole call would say nothing took effect.
+    if (sendRefusal(error) === undefined) throw error;
+  }
   finally { running.delete(id); }
   const final = readFinal(id);
   if (final?.state !== "claimed") {

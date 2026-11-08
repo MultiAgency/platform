@@ -246,13 +246,20 @@ Each line is a gap; the linked page says how the rest is known. The
   `balances.near` as received, so on a 0.5.3 server its Funding line shows raw yoctoNEAR. 0.5.3 deployed only the
   headless `platform` gateway; the `dao` service was deleted without being redeployed. Moving the `dao` package's
   Treasury input to `MultiAgency/treasury`, or removing it, is planned separately.
+- The owner session (`/a/<agent>/`, the `dao` package's owner app, `ownerClient`, `/gw/agents` and `steward/propose`)
+  has had no production host since 2026-11-08; owner UIs move to app access (platform#14). It stays until the apps
+  replace it: Treasury's app-server pages (MultiAgency/treasury#138) and a Payables owner UI on `/apps/v1`, which doesn't
+  exist yet: as of 2026-11-08, `MultiAgency/payables` (last commit 2026-10-19) uses only the owner session, and no
+  branch of `MultiAgency/dashboard` calls app access, although staging holds its credential. Until then a wallet
+  owner of a Payables agent has no hosted owner UI, only the stop page with no app.
 - A new prototype must reuse a fixed host `demo` value and agent area; owner-app `contract.json` is checked at runtime
   only on hosts served by the shared release server (offline E2E, not deployed). See the
   [integration path](docs/integration-path.md#gaps).
 - Payables' frontend (`97ddec7`, 2026-10-16) passes the source contract preflight only; its build isn't in the
   real-stack E2E suite. See
   [consumer compatibility](docs/shared-frontend-integration.md#consumer-source-contract-preflight).
-- App access (`/apps/v1`) isn't in production. Mainnet-observed on staging: confidential USDC payouts (2026-10-28) and
+- App access (`/apps/v1`) runs in production on api.multiagency.ai since 2026-11-07, with no app credential issued yet
+  ([platform production](docs/platform-production.md)). Mainnet-observed on staging: confidential USDC payouts (2026-10-28) and
   withdrawals of wNEAR or USDC to agreed NEAR accounts (2026-10-30), and DAO-owned agents (below) ([mainnet log](docs/mainnet-log.md)).
   A held withdrawal can be rejected, not approved, so under the payout template it is paid only once the
   owner turns approval off; at most 32 hosted agents per host. A dishonest app can still get a blind NEP-366 signature
@@ -272,6 +279,9 @@ Each line is a gap; the linked page says how the rest is known. The
   can't turn on autopilot (#20). A DAO's own stop (no app) ends what was given before it is applied; that happens only
   when someone opens its page after the vote, and the provider grant stands, so a consent the DAO gives later can turn
   autopilot on again. See [app access](docs/app-access.md).
+- A wallet owner's own stop (no app; `/confirm/wallet/stop`) ends app consents and turns autopilot off for one agent or
+  all of the wallet's, offline- and browser-tested with a stand-in wallet, not deployed; signing with a real wallet is untested. It
+  doesn't freeze or revoke the grant: freezing still needs an app to prepare it ([enforcement](docs/enforcement.md)).
 - Agent connections exist only for a contractor's own reports (offline- and stack-tested, not deployed); a token is a
   bearer for at most 24 hours; owner connections aren't built. See
   [agent access](docs/agent-access.md#agent-connections-contractor-reports).

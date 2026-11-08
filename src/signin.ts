@@ -29,21 +29,27 @@ export const clientAddress = (req: IncomingMessage) =>
   (process.env.TRUST_PROXY === "true" && String(req.headers["x-forwarded-for"] ?? "").split(",").at(-1)?.trim()) ||
   req.socket.remoteAddress || "unknown";
 
-/** A per-key hourly limit. Once there are many keys, idle ones are forgotten, so distinct callers can't grow memory without bound. */
+/**
+ * A per-key hourly limit: `perHour`, or the `limit` a call passes for its key. Once there are many keys, idle ones are
+ * forgotten, so distinct callers can't grow memory without bound.
+ */
 export function hourlyLimit(perHour: number) {
   const hits = new Map<string, number[]>();
   const recent = (key: string, now: number) => (hits.get(key) ?? []).filter((t) => now - t < 3_600_000);
-  const allow = (key: string, now = Date.now()) => {
+  const allow = (key: string, now = Date.now(), limit = perHour) => {
     if (hits.size > 10_000) for (const [k, times] of hits) if (now - (times.at(-1) ?? 0) >= 3_600_000) hits.delete(k);
     const inWindow = recent(key, now);
-    if (inWindow.length >= perHour) return false;
+    if (inWindow.length >= limit) return false;
     hits.set(key, [...inWindow, now]);
     return true;
   };
-  /** Seconds until a refused key may send again: when its oldest request leaves the hour (0 if it may now). */
-  allow.retryAfterSeconds = (key: string, now = Date.now()) => {
+  /**
+   * Seconds until a refused key may send again (0 if it may now): when enough of its requests have left the hour to
+   * bring it under `limit`, which is the oldest one unless the limit was lowered.
+   */
+  allow.retryAfterSeconds = (key: string, now = Date.now(), limit = perHour) => {
     const inWindow = recent(key, now);
-    return inWindow.length < perHour ? 0 : Math.max(1, Math.ceil((inWindow[0]! + 3_600_000 - now) / 1000));
+    return inWindow.length < limit ? 0 : Math.max(1, Math.ceil((inWindow[inWindow.length - limit]! + 3_600_000 - now) / 1000));
   };
   return allow;
 }

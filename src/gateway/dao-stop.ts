@@ -1,12 +1,9 @@
-import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { join } from "node:path";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import { proposalTransaction } from "../dao-owner.js";
 import { sendJson as json } from "../http.js";
-import { nep413Hash, verifyEd25519 } from "../nep413.js";
 import type { Router } from "../router.js";
 import { clientAddress, hourlyLimit } from "../signin.js";
 import { appendSynced } from "../synced.js";
@@ -65,42 +62,32 @@ async function openStop(send: (status: number, body: string) => boolean, host: s
     return send(503, "<h1>The agent's ownership couldn't be checked now</h1><p>Nothing changed. Open this page again.</p>");
   }
   if (!authority || authority.agentId === null) return send(404, "<h1>No such DAO-owned agent here</h1><p>Only a created agent owned by a Sputnik DAO can be stopped from this page.</p>");
-  const requests = new DaoRequests(root), now = Date.now();
+  const requests = new DaoRequests(root, daoVotes), now = Date.now();
   const filedPageOf = (record: DaoStopRequest, previous?: DaoStopRequest) =>
     filedPage(record, proposalTransaction(agent.owner, record.id, record.description, authority.policy.proposal_bond), previous);
-  let [latest] = requests.stops(agent.name, host);
+  const [latest] = requests.stops(agent.name, host);
 
   // The open stop: applied once the DAO's signature is found. A vote that passed is honoured whenever the page is next
-  // opened: after its window the signature is looked for once more, and only then is the stop lapsed.
+  // opened (`DaoRequests.follow`): after its window the signature is looked for once more, and only then is the stop lapsed.
   if (latest && !latest.done?.autopilotOff && !latest.lapsed) {
-    let signature: Buffer | null = latest.signature ? Buffer.from(latest.signature, "base64") : null;
-    if (!signature) {
-      let found: Buffer | null = null;
-      try { found = await daoVotes.findSignature(latest.dao, { owner: latest.signer, hash: latest.id, since: latest.since }); }
-      catch { return send(503, "<h1>The DAO's proposals couldn't be read now</h1><p>Nothing changed. Open this page again.</p>"); }
-      let verified = false;
-      try { verified = !!found && verifyEd25519(latest.signer.public_key, Buffer.from(latest.id, "hex"), found); } catch { verified = false; }
-      if (verified) { latest = requests.signed(latest.id, found!) as DaoStopRequest; signature = found; }
-    }
-    if (signature) {
+    const followed = await requests.follow(latest, now);
+    if (followed.state === "unreadable") return send(503, "<h1>The DAO's proposals couldn't be read now</h1><p>Nothing changed. Open this page again.</p>");
+    if (followed.state === "signed") {
       if (stopping()) return send(503, "<h1>The platform is restarting</h1><p>Nothing was applied yet. Open this page again.</p>");
-      const done = await apply(root, requests, new AppConsents(root), latest, agent, authority.agentId, stopAutopilot, now);
+      const done = await apply(root, requests, new AppConsents(root), followed.record, agent, authority.agentId, stopAutopilot, now);
       return send(200, donePage(done));
     }
-    if (now < latest.votingUntil) return send(200, filedPageOf(latest));
-    requests.lapse(latest.id);
+    if (followed.state === "pending") return send(200, filedPageOf(latest));
   }
 
   // None open: file one. Only the DAO's vote over its exact text gives it any effect.
-  if (stopping()) return send(503, "<h1>The platform is restarting</h1><p>Nothing was filed. Open this page again.</p>");
-  let since: number;
-  try { since = await daoVotes.latestBlock(); } catch { return send(503, "<h1>The chain couldn't be read now</h1><p>Nothing was filed. Open this page again.</p>"); }
-  const message = daoStopText({ host, dao: agent.owner, agent: agent.name, agentId: authority.agentId });
-  const nonce = randomBytes(32), id = nep413Hash(message, nonce, host).toString("hex");
-  const filed = requests.fileStop({ id, host, dao: agent.owner, agent: agent.name, agentId: authority.agentId, expiresAt: now + STOP_MS,
-    createdAt: now, message, nonce: nonce.toString("base64"), signer: { account_id: authority.signer.account_id, public_key: authority.signer.public_key }, since }, now);
-  appendSynced(accessLog(root), { at: new Date(now).toISOString(), event: "dao-stop-filed", request: id, owner: agent.owner, agent: agent.name });
-  return send(200, filedPageOf(filed, latest));
+  const filed = await requests.file({ kind: "stop", host, dao: agent.owner, agent: agent.name, agentId: authority.agentId, expiresAt: now + STOP_MS,
+    message: daoStopText({ host, dao: agent.owner, agent: agent.name, agentId: authority.agentId }),
+    signer: { account_id: authority.signer.account_id, public_key: authority.signer.public_key } }, { bond: authority.policy.proposal_bond, stopping, now,
+    log: record => ({ event: "dao-stop-filed", request: record.id, owner: agent.owner, agent: agent.name }) });
+  if (filed.state === "stopping") return send(503, "<h1>The platform is restarting</h1><p>Nothing was filed. Open this page again.</p>");
+  if (filed.state === "unreadable") return send(503, "<h1>The chain couldn't be read now</h1><p>Nothing was filed. Open this page again.</p>");
+  return send(200, filedPageOf(filed.record, latest));
 }
 
 /**

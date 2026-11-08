@@ -3,7 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { test } from "node:test";
 import type { Intent } from "@near-intents-agent-api/sdk";
 import { DelegateAction, encodeSignedDelegateAction, generateKey, parsePublicKey, serializeDelegateAction } from "near-kit";
-import { checkRequest, type DaoRequest, decodeProposals, readDelegate } from "../src/gateway/proposals.js";
+import { checkRequest, type PendingOwnerIntent, decodeProposals, readDelegate } from "../src/gateway/proposals.js";
 import type { DaoProposal } from "../src/gateway/sign-requests.js";
 import { proposalAndVote, proposalTransaction } from "../src/dao-owner.js";
 import { proposalDescription } from "../src/owner-intents.js";
@@ -12,7 +12,7 @@ import { nep413Hash } from "../src/nep413.js";
 const DAO = "agentic.sputnik-dao.near";
 
 /** A NEP-413 owner intent, as the API generates one, and the request an agent server keeps for it. */
-function nep413Request(message = JSON.stringify({ action: "agent_freeze", agent_id: "a".repeat(64) })): DaoRequest {
+function nep413Request(message = JSON.stringify({ action: "agent_freeze", agent_id: "a".repeat(64) })): PendingOwnerIntent {
   const nonce = randomBytes(32);
   const intent = { standard: "nep413", payload: { message, nonce: nonce.toString("base64"), recipient: "api.agentsonintents.com" } } as unknown as Intent;
   const hash = nep413Hash(message, nonce, "api.agentsonintents.com").toString("hex");
@@ -20,7 +20,7 @@ function nep413Request(message = JSON.stringify({ action: "agent_freeze", agent_
 }
 
 /** A NEP-366 owner intent with a real signed delegate action, built and signed with near-kit. */
-function nep366Request(method = "freeze_wallet"): DaoRequest {
+function nep366Request(method = "freeze_wallet"): PendingOwnerIntent {
   const key = generateKey();
   const publicKey = parsePublicKey(key.publicKey.toString());
   const call = { functionCall: { methodName: method, args: new TextEncoder().encode('{"wallet":"w"}'), gas: 30_000_000_000_000n, deposit: 1n } };

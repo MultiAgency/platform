@@ -1,18 +1,14 @@
-import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { join } from "node:path";
 import { daoPolicy } from "../chain.js";
 import { z } from "zod";
-import { proposalAndVote, proposalTransaction } from "../dao-owner.js";
 import { readJson, sendJson as json } from "../http.js";
-import { nep413Hash, verifyEd25519 } from "../nep413.js";
 import { chainKeyState, hourlyLimit, type KeyLookup, type KeyStateLookup } from "../signin.js";
 import { appendSynced } from "../synced.js";
 import type { AgentEntry } from "./config.js";
 import { daoScopesCover } from "../contract/app-access.js";
 import { ownerPrepareOutput } from "../contract/owner-outputs.js";
 import { mayCall } from "./allowlist.js";
-import { accessLog, consentKeyHolds, AppConsents, AppCredentials, appMayCall, appMayPrepare, appMayPrepareForDao, proposalSignatureProblem, setupConsent, submittedCorrelation, UNBORN, verifyConsent, verifySetup, type ConsentRecord } from "./app-access.js";
+import { accessLog, consentKeyHolds, AppConsents, AppCredentials, appMayCall, DEFAULT_REQUESTS_PER_HOUR, appMayPrepare, appMayPrepareForDao, proposalSignatureProblem, setupConsent, submittedCorrelation, UNBORN, verifyConsent, verifySetup, type ConsentRecord } from "./app-access.js";
 import { AppConfirms } from "./app-confirm.js";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
@@ -20,15 +16,16 @@ import type { RouterClient } from "@orpc/server";
 import { proposalText, proposalView } from "../contract/treasury-proposals.js";
 import type { Router } from "../router.js";
 import { agentOrigin } from "./agent-origin.js";
-import { chainDaoVotes, daoConsent, type DaoConsentRequest, type DaoRequest, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
+import { chainDaoVotes, daoConsent, type DaoConsentRequest, type DaoFiled, type DaoRequest, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
 import { AuthorityUnanswered, chainDaoOwner, type DaoOwnerReads, resolveDaoAuthority, resolveWalletAuthority } from "./machine-authority.js";
 import { forwardRpc } from "./rpc-proxy.js";
 
 const ROOT = ".app-access";
-const credentials = new AppCredentials(ROOT), consents = new AppConsents(ROOT), daoRequests = new DaoRequests(ROOT);
+const credentials = new AppCredentials(ROOT), consents = new AppConsents(ROOT);
 export const confirms = new AppConfirms(ROOT);
 export const APP_ROOT = ROOT;
-const mayUse = hourlyLimit(1_200);
+/** Each credential's requests in the hour, held to its own limit (`perHour`, which the operator sets). */
+const mayUse = hourlyLimit(DEFAULT_REQUESTS_PER_HOUR);
 const publicConsent = ({ message: _m, nonce: _n, signature: _s, ...record }: ConsentRecord) => record;
 
 const FOLLOW_CREATION = new Set(["owner/status", "owner/actions", "owner/pending"]);
@@ -84,7 +81,7 @@ export async function appRoutes(req: IncomingMessage, res: ServerResponse, pathn
 async function route(req: IncomingMessage, res: ServerResponse, pathname: string, host: string,
   selected: AgentEntry[], stopping: () => boolean, options: AppRouteOptions): Promise<boolean> {
   const keyState = options.keyState ?? chainKeyState;
-  const daoOwner = options.daoOwner ?? chainDaoOwner, daoVotes = options.daoVotes ?? chainDaoVotes;
+  const daoOwner = options.daoOwner ?? chainDaoOwner, daoRequests = new DaoRequests(ROOT, options.daoVotes ?? chainDaoVotes);
   const lookup: KeyLookup = async (account, key) => {
     let state: Awaited<ReturnType<KeyStateLookup>>;
     try { state = await keyState(account, key); } catch { throw new AuthorityUnanswered(); }
@@ -96,26 +93,30 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   const credential = credentials.authenticate(req.headers.authorization, host);
   if (!credential) { json(res, 401, { error: "Invalid, expired or revoked app credential" }); return true; }
   // The SDK reads this as `rate_limited` (#15): refused before forwarding, so the same request may be sent once it clears.
-  if (!mayUse(credential.id)) { const after = mayUse.retryAfterSeconds(credential.id); json(res, 429, { error: "Request limit reached", retryAfterSeconds: after }, { "retry-after": String(after) }); return true; }
+  const now = Date.now();
+  if (!mayUse(credential.id, now, credential.perHour)) {
+    const after = mayUse.retryAfterSeconds(credential.id, now, credential.perHour);
+    json(res, 429, { error: "Request limit reached", retryAfterSeconds: after }, { "retry-after": String(after) }); return true;
+  }
   const url = new URL(req.url ?? "/", "http://gateway");
   /**
-   * The DAO's signature for a request: the one recorded when it was found, or searched for now while its vote window is
-   * open, verified against the DAO's derived key over the exact hash and recorded before anything is done with it.
-   * Answers the request itself (410, 503 or `pending`) and returns null when there is none to act on. Nothing completes
-   * once the signed text has expired (its `expiresAt`: the consent's, the setup's or the proposal's), whatever was found.
+   * The DAO's signature for a request (`DaoRequests.follow`), or its answer written here (410, 503 or `pending`) and null
+   * when there is none to act on.
    */
   const daoSignature = async (record: DaoRequest, pending: () => object): Promise<Buffer | null> => {
-    if (Date.now() >= record.expiresAt) { json(res, 410, { code: "signed_expired", error: `What the DAO signed expired at ${new Date(record.expiresAt).toISOString()}. Nothing was done; file it again.` }); return null; }
-    if (record.signature) return Buffer.from(record.signature, "base64");
-    if (Date.now() >= record.votingUntil) { json(res, 410, { code: "vote_lapsed", error: `The DAO's vote didn't pass before ${new Date(record.votingUntil).toISOString()}. Nothing was done; file it again.` }); return null; }
-    let found: Buffer | null;
-    try { found = await daoVotes.findSignature(record.dao, { owner: record.signer, hash: record.id, since: record.since }); }
-    catch { json(res, 503, { error: "The DAO's proposals couldn't be read now. Nothing changed; read again." }); return null; }
-    let verified = false;
-    try { verified = !!found && verifyEd25519(record.signer.public_key, Buffer.from(record.id, "hex"), found); } catch { verified = false; }
-    if (!verified) { json(res, 200, pending()); return null; }
-    daoRequests.signed(record.id, found!);
-    return found;
+    const followed = await daoRequests.follow(record);
+    if (followed.state === "signed") return followed.signature;
+    if (followed.state === "expired") json(res, 410, { code: "signed_expired", error: `What the DAO signed expired at ${new Date(record.expiresAt).toISOString()}. Nothing was done; file it again.` });
+    else if (followed.state === "lapsed") json(res, 410, { code: "vote_lapsed", error: `The DAO's vote didn't pass before ${new Date(record.votingUntil).toISOString()}. Nothing was done; file it again.` });
+    else if (followed.state === "unreadable") json(res, 503, { error: "The DAO's proposals couldn't be read now. Nothing changed; read again." });
+    else json(res, 200, pending());
+    return null;
+  };
+  /** A filing's request and transactions, or its answer written here (503) and null when nothing was filed. */
+  const daoFiled = <R extends DaoRequest>(filing: DaoFiled<R>) => {
+    if (filing.state === "filed") return filing;
+    json(res, 503, { error: filing.state === "stopping" ? "Gateway is stopping. Nothing was filed." : "The chain couldn't be read. Nothing was filed; try again." });
+    return null;
   };
   /** The chain reads above wait: a credential revoked meanwhile ends the request before anything is stored or relayed. */
   const stillAuthorized = () => credentials.authenticate(req.headers.authorization, host) !== null;
@@ -219,21 +220,13 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     if (!authority) { json(res, 409, { code: "owner_changed", error: "This agent isn't owned by that DAO's derived account now. Nothing was filed." }); return true; }
     if (authority.agentId === null) { json(res, 409, { code: "not_created", error: "This agent isn't created yet. Nothing was filed." }); return true; }
     if (authority.agentId !== text.agentId) { json(res, 409, { code: "agent_changed", error: "The consent names another agent identity. Read the agent again. Nothing was filed." }); return true; }
-    daoRequests.admit(credential.deployment);
-    const nonce = randomBytes(32), hash = nep413Hash(body.data.message, nonce, text.host).toString("hex");
-    let since: number, next: number | null;
-    try { [since, next] = await Promise.all([daoVotes.latestBlock(), daoVotes.nextProposalId(text.owner).catch(() => null)]); }
-    catch { json(res, 503, { error: "The chain couldn't be read. Nothing was filed; try again." }); return true; }
-    if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was filed." }); return true; }
-    const record = daoRequests.file({ id: hash, deployment: credential.deployment, host: text.host, organization: text.organization,
-      dao: text.owner, agent: agent.name, agentId: text.agentId, scopes: text.scopes, expiresAt, createdAt: Date.now(), message: body.data.message,
-      nonce: nonce.toString("base64"), signer: { account_id: authority.signer.account_id, public_key: authority.signer.public_key }, since });
-    appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
-      event: "dao-consent-filed", request: record.id, organization: record.organization, owner: record.dao, agent: record.agent, scopes: record.scopes });
-    const bond = authority.policy.proposal_bond;
-    json(res, 201, { request: publicDaoRequest(record), transactions: {
-      proposal: proposalTransaction(record.dao, record.id, record.description, bond),
-      proposalAndVote: next === null ? null : proposalAndVote(record.dao, record.id, record.description, bond, next) } }); return true;
+    const filed = daoFiled(await daoRequests.file({ kind: "consent", deployment: credential.deployment, host: text.host, organization: text.organization,
+      dao: text.owner, agent: agent.name, agentId: text.agentId, scopes: text.scopes, expiresAt, message: body.data.message,
+      signer: { account_id: authority.signer.account_id, public_key: authority.signer.public_key } }, { bond: authority.policy.proposal_bond, stopping,
+      log: record => ({ deployment: credential.deployment, credential: credential.id, event: "dao-consent-filed", request: record.id,
+        organization: record.organization, owner: record.dao, agent: record.agent, scopes: record.scopes }) }));
+    if (!filed) return true;
+    json(res, 201, { request: publicDaoRequest(filed.record), transactions: filed.transactions }); return true;
   }
   const daoState = pathname.match(/^\/apps\/v1\/dao-consents\/([a-f0-9]{64})$/);
   if (daoState) {
@@ -278,20 +271,13 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     try { policy = await daoOwner.policy(text.owner); signer = policy ? await daoOwner.owner(text.owner) : undefined as never; }
     catch { throw new AuthorityUnanswered(); }
     if (!policy) { json(res, 409, { code: "not_dao", error: "The setup's owner isn't a Sputnik DAO. A wallet owner signs /apps/v1/setup. Nothing was filed." }); return true; }
-    daoRequests.admit(credential.deployment);
-    const nonce = randomBytes(32), hash = nep413Hash(body.data.message, nonce, text.host).toString("hex");
-    let since: number, next: number | null;
-    try { [since, next] = await Promise.all([daoVotes.latestBlock(), daoVotes.nextProposalId(text.owner).catch(() => null)]); }
-    catch { json(res, 503, { error: "The chain couldn't be read. Nothing was filed; try again." }); return true; }
-    if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was filed." }); return true; }
-    const record = daoRequests.fileSetup({ id: hash, deployment: credential.deployment, host: text.host, organization: text.organization,
-      dao: text.owner, agent: "", agentId: UNBORN, area: text.area, expiresAt, createdAt: Date.now(), message: body.data.message,
-      nonce: nonce.toString("base64"), signer: { account_id: signer.account_id, public_key: signer.public_key }, since });
-    appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
-      event: "dao-setup-filed", request: record.id, organization: record.organization, owner: record.dao, area: record.area });
-    json(res, 201, { request: publicDaoSetup(record), transactions: {
-      proposal: proposalTransaction(record.dao, record.id, record.description, policy.proposal_bond),
-      proposalAndVote: next === null ? null : proposalAndVote(record.dao, record.id, record.description, policy.proposal_bond, next) } }); return true;
+    const filed = daoFiled(await daoRequests.file({ kind: "setup", deployment: credential.deployment, host: text.host, organization: text.organization,
+      dao: text.owner, agent: "", agentId: UNBORN, area: text.area, expiresAt, message: body.data.message,
+      signer: { account_id: signer.account_id, public_key: signer.public_key } }, { bond: policy.proposal_bond, stopping,
+      log: record => ({ deployment: credential.deployment, credential: credential.id, event: "dao-setup-filed", request: record.id,
+        organization: record.organization, owner: record.dao, area: record.area }) }));
+    if (!filed) return true;
+    json(res, 201, { request: publicDaoSetup(filed.record), transactions: filed.transactions }); return true;
   }
   const setupState = pathname.match(/^\/apps\/v1\/dao-setups\/([a-f0-9]{64})$/);
   if (setupState) {
@@ -349,21 +335,13 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     // The vote must pass while both the proposal and the consent it is relayed under are live.
     const validUntil = Math.min(Date.parse(proposal.expiresAt), consent.expiresAt);
     if (!Number.isFinite(validUntil) || validUntil <= Date.now() + 60_000) { json(res, 409, { code: "expires_too_soon", error: "This proposal, or the consent it would be relayed under, expires too soon for a vote. Nothing was filed." }); return true; }
-    daoRequests.admit(credential.deployment);
-    const message = proposalText(proposal, verdict), nonce = randomBytes(32), hash = nep413Hash(message, nonce, host.toLowerCase()).toString("hex");
-    let since: number, next: number | null;
-    try { [since, next] = await Promise.all([daoVotes.latestBlock(), daoVotes.nextProposalId(agent.owner).catch(() => null)]); }
-    catch { json(res, 503, { error: "The chain couldn't be read. Nothing was filed; try again." }); return true; }
-    if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was filed." }); return true; }
-    const record = daoRequests.fileVote({ id: hash, deployment: credential.deployment, host: host.toLowerCase(), organization, dao: agent.owner,
-      agent: name, agentId: consent.agentId, proposal: id, verdict, under: consent.id, expiresAt: validUntil, createdAt: Date.now(),
-      message, nonce: nonce.toString("base64"), signer: { account_id: authority.signer.account_id, public_key: authority.signer.public_key }, since });
-    appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
-      event: "dao-vote-filed", request: record.id, consent: consent.id, organization, owner: agent.owner, agent: name, proposal: id, verdict });
-    const bond = authority.policy.proposal_bond;
-    json(res, 201, { request: publicDaoVote(record), transactions: {
-      proposal: proposalTransaction(record.dao, record.id, record.description, bond),
-      proposalAndVote: next === null ? null : proposalAndVote(record.dao, record.id, record.description, bond, next) } }); return true;
+    const filed = daoFiled(await daoRequests.file({ kind: "proposal", deployment: credential.deployment, host: host.toLowerCase(), organization, dao: agent.owner,
+      agent: name, agentId: consent.agentId, proposal: id, verdict, under: consent.id, expiresAt: validUntil, message: proposalText(proposal, verdict),
+      signer: { account_id: authority.signer.account_id, public_key: authority.signer.public_key } }, { bond: authority.policy.proposal_bond, stopping,
+      log: record => ({ deployment: credential.deployment, credential: credential.id, event: "dao-vote-filed", request: record.id,
+        consent: consent.id, organization, owner: agent.owner, agent: name, proposal: id, verdict }) }));
+    if (!filed) return true;
+    json(res, 201, { request: publicDaoVote(filed.record), transactions: filed.transactions }); return true;
   }
   const voteState = pathname.match(/^\/apps\/v1\/dao-votes\/([a-f0-9]{64})$/);
   if (voteState) {

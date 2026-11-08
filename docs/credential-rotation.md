@@ -15,7 +15,13 @@ deploy a build with provider SDK 0.8.0 first (0.7.3 refuses a key that isn't `na
 a portal key is opaque), then create a portal key, set it on the service, restart, check an existing agent's read,
 and revoke the old key. Portal keys expire 365 days after creation; a partner holds at most 10 live ones. When the
 provider retires old keys was not announced; on 2026-11-06 at 20:53Z the live API didn't yet answer as 0.8.0 describes.
-Production deploys are paused: replacing production's key needs the user's go-ahead for its deploy.
+State on 2026-11-08: staging's `gateway` runs on a partner portal key since 2026-11-07T05:00Z (deployment `54fa8a24`;
+an existing agent read through treasury.dev, and two swaps were sent with it). Production's `gateway`
+(`api.multiagency.ai`) shares that key, staging's FastNEAR key and its session secret, production app credentials
+included (the user's decision, [platform production](platform-production.md)): rotating or retiring the key stops both
+hosts' agents at once. Production `dao`, `invoices` and the other prototype services were
+deleted on 2026-11-08, so their keys need only revoking, not replacing. Whether the old pre-portal staging key was
+revoked isn't recorded.
 
 ## Names-only matrix
 

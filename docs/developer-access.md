@@ -2,7 +2,8 @@
 
 How a developer gets a service credential (`tap_…`) for an app deployment, and how it's rotated and revoked. Until
 self-registration exists, the platform operator issues each credential by hand. This page is the process both sides
-follow. Status: staging only (api.dev.multiagency.ai); production (api.multiagency.ai) isn't set up yet.
+follow. Status: staging (api.dev.multiagency.ai) issues credentials; production (api.multiagency.ai) runs from
+2026-11-07 but has issued none yet.
 
 ## Before asking: build on the local stack
 
@@ -34,8 +35,8 @@ secret in it. It asks for:
 2. The domain proof answers over HTTPS with exactly that deployment id and account.
 3. The requested scopes fit what the app says it does.
 4. Issue the credential on the requested host, for at most 90 days, from the gateway's state directory
-   (`app-credential issue <deployment> <host> <days> "<display name>"`; see [platform staging](platform-staging.md),
-   step 5).
+   (`app-credential issue <deployment> <host> <days> "<display name>"`, with `--per-hour <n>` when the request
+   justifies more than the default; see [platform staging](platform-staging.md), step 5).
 5. Arrange delivery with the requester through their GitHub account, and deliver the token privately: never in the
    issue, a URL or a log. Close the issue with the credential id and expiry only.
 
@@ -43,8 +44,9 @@ secret in it. It asks for:
 
 - **Keep it server-side.** The credential is a bearer secret for every consent your deployment holds: never send it to
   a browser, and keep it out of URLs, logs and source control. `appClient({ base, credential })` adds it to each call.
-- **Limits:** 1,200 requests an hour per credential, shared by every owner of the deployment. Over it, calls answer
-  `rate_limited` with `retryAfterSeconds`.
+- **Limits:** 1,200 requests an hour per credential by default, shared by every owner of the deployment. Ask for more
+  when you request the credential, or later, with your expected owners and calls; the operator sets up to 12,000 without
+  changing your token. Over it, calls answer `rate_limited` with `retryAfterSeconds`.
 - **Rotation:** before it expires, ask for a new one (comment on the closed issue or open a new one). Both work until
   you switch; then ask for the old one to be revoked.
 - **Revocation:** ask the operator at once if a credential may be exposed (`app-credential revoke <id>`). The operator

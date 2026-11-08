@@ -2,7 +2,7 @@ import { authorityFixture, policyView } from "./fixtures/authority.js";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, mock, test } from "node:test";
 import { AgentApiError, type Policy } from "@near-intents-agent-api/sdk";
-import { ORPCError } from "@orpc/server";
+import { createRouterClient, ORPCError } from "@orpc/server";
 import { api } from "../src/api.js";
 import { acquireMoneyLock, MoneyLockBusy, UnresolvedOperations } from "../src/lock.js";
 import { mandateDigest } from "../src/mandate.js";
@@ -12,11 +12,14 @@ import { payoutStatus, requestKey, requestPayout } from "../src/payout-requests.
 import { payoutRequestInput } from "../src/contract/inputs.js";
 import { ASSETS, payoutPolicy } from "../src/policy.js";
 import { PublicError } from "../src/public-error.js";
+import { router } from "../src/router.js";
 import { freshDirectory, offline } from "./fixtures/harness.js";
 
 /** Payout requests through the real money path: the journal, the money lock, `authorize` and the one send site. */
 
 const APP = "app:staging:org_1";
+/** A request through its procedure, as the app reaches it: a refusal before recording arrives in its public form. */
+const viaProcedure = (input: Parameters<typeof requestPayout>[1]) => createRouterClient(router, { context: { actor: APP } }).payouts.request(input);
 let policy: Policy;
 let sends: { key: string; recipient: string }[];
 let transfer: (key: string, request: { recipient: string }) => Promise<{ correlation_id: string }>;
@@ -249,7 +252,7 @@ test("a withdrawal to a named account that doesn't exist on NEAR is refused befo
   mock.method(api, "forGrant", () => ({ withdraw: assert.fail, transfer: assert.fail, swap: assert.fail, shield: assert.fail, unshield: assert.fail }));
   const { recipientChain } = await import("../src/recipients.js");
   mock.method(recipientChain, "exists", async () => false);
-  await assert.rejects(requestPayout(APP, withdrawal("g-1", ASSETS.USDC, "ghost.near")), (error: unknown) =>
+  await assert.rejects(viaProcedure(withdrawal("g-1", ASSETS.USDC, "ghost.near")), (error: unknown) =>
     error instanceof ORPCError && (error.data as { code?: string }).code === "recipient_not_found");
   assert.equal((await payoutStatus(APP, "g-1")).state, "not_found");
 });
@@ -263,7 +266,7 @@ test("a USDC withdrawal to an account not registered on the USDC contract is ref
     balances: [{ asset_id: ASSETS.wNEAR, balance_raw: "5000000" }, { asset_id: ASSETS.USDC, balance_raw: "5000000" }] }));
   const { recipientChain } = await import("../src/recipients.js");
   const read = mock.method(recipientChain, "registered", async () => false);
-  await assert.rejects(requestPayout(APP, withdrawal("u-1", ASSETS.USDC)), (error: unknown) =>
+  await assert.rejects(viaProcedure(withdrawal("u-1", ASSETS.USDC)), (error: unknown) =>
     error instanceof ORPCError && (error.data as { kind?: string; code?: string }).kind === "refused" && (error.data as { code?: string }).code === "recipient_not_registered");
   assert.deepEqual(read.mock.calls.map(call => call.arguments), [[ASSETS.USDC.replace(/^nep141:/, ""), "payee.near"]], "read on the token's own contract");
   assert.equal((await payoutStatus(APP, "u-1")).state, "not_found", "nothing recorded, so the requestId is kept");
@@ -272,7 +275,7 @@ test("a USDC withdrawal to an account not registered on the USDC contract is ref
   assert.equal((await requestPayout(APP, request("t-1"))).state, "succeeded", "a transfer stays inside NEAR Intents");
   assert.equal(read.mock.callCount(), 1, "no registration read for a transfer");
   read.mock.mockImplementation(async () => { throw new Error("rpc down"); });
-  await assert.rejects(requestPayout(APP, withdrawal("u-2", ASSETS.USDC)), (error: unknown) =>
+  await assert.rejects(viaProcedure(withdrawal("u-2", ASSETS.USDC)), (error: unknown) =>
     error instanceof ORPCError && (error.data as { code?: string }).code === "recipient_unchecked");
   read.mock.mockImplementation(async () => true);
   assert.equal((await requestPayout(APP, withdrawal("u-1", ASSETS.USDC))).state, "succeeded", "once registered, the same requestId is sent once");
@@ -305,7 +308,7 @@ test("a payout to a named account that doesn't exist on NEAR is refused before a
   const { recipientChain } = await import("../src/recipients.js");
   mock.method(recipientChain, "exists", async (account: string) => account !== "ghost.near");
   const missing = { ...request("r-1"), recipient: "ghost.near" };
-  await assert.rejects(requestPayout(APP, missing), (error: unknown) =>
+  await assert.rejects(viaProcedure(missing), (error: unknown) =>
     error instanceof ORPCError && (error.data as { kind?: string; code?: string }).kind === "refused" && (error.data as { code?: string }).code === "recipient_not_found");
   assert.equal((await payoutStatus(APP, "r-1")).state, "not_found", "nothing recorded");
   assert.deepEqual(await pay({ recipient: "ghost.near", asset: ASSETS.USDC, amount: "1", confidential: true }, reviewed()), { outcome: "refused", code: "recipient_not_found" });
@@ -316,7 +319,7 @@ test("a payout to a named account that doesn't exist on NEAR is refused before a
 test("when the chain doesn't answer, the payout is refused unchecked and the same requestId can be asked again", async () => {
   const { recipientChain } = await import("../src/recipients.js");
   const read = mock.method(recipientChain, "exists", async () => { throw new Error("rpc down"); });
-  await assert.rejects(requestPayout(APP, request("r-1")), (error: unknown) =>
+  await assert.rejects(viaProcedure(request("r-1")), (error: unknown) =>
     error instanceof ORPCError && (error.data as { code?: string }).code === "recipient_unchecked");
   assert.equal(sends.length, 0);
   read.mock.mockImplementation(async () => true);

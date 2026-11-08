@@ -695,7 +695,7 @@ export const executePlanEvent = z.discriminatedUnion("type", [
     index: z.number(),
     action: plannedAction,
     shield: z.looseObject({ amount: z.string(), status: z.string() }).optional(),
-    /** `NOT_SENT` when the shield before it did not succeed. */
+    /** `NOT_SENT` when the shield before it did not succeed, or the swap was proven not sent after it (`failureCode`: why). */
     status,
     correlationId: z.string(),
     failureCode: z.string().nullable().optional(),

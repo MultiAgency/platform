@@ -251,6 +251,16 @@ export class LocalRefusal extends Error {
   }
 }
 
+/**
+ * The code of a send `dispatch` proved was never made, as the journal records it: refused by this server's checks, held
+ * by them before submission, or refused by the provider. Undefined when the send may have been made.
+ */
+export function sendRefusal(error: unknown) {
+  if (error instanceof LocalRefusal) return error.code;
+  if (error instanceof AuthorizationHeld) return "local_authorization_held";
+  return provenRefusal(error);
+}
+
 /** One transfer to a NEAR Intents account. The policy decides whether it may go: a refusal moves nothing. */
 export async function pay(request: { asset: string; amount: string; recipient: string; confidential: boolean }, expectedPolicy?: ReviewedPolicy) {
   // Capture before waiting for the money lock; callers cannot alter reviewed terms while queued.

@@ -4,6 +4,10 @@
 browser suites, the offline application E2E suites, then generated-evidence drift checks. It does not run live verification. Live checks
 remain explicit and owner-authorized; passing fixtures does not establish deployed behavior.
 
+GitHub Actions runs `pnpm verify` on Node 24 for every push to `main` and every pull request
+(`.github/workflows/verify.yml`), with no secrets and actions pinned by commit. On failure it uploads
+`.test-artifacts/`. A CI pass is the narrow E2E run, not release-candidate evidence.
+
 ## What earns a test
 
 Each case must identify an important regression and assert its observable consequence. A failure
@@ -65,7 +69,7 @@ Install the pinned Chromium with `pnpm exec playwright install chromium`, then r
 The platform's suites cover its own pages: sign-in and the public entry (`showcase.cjs`, `public-overview.cjs`), setup and
 onboarding (`setup.cjs`, `first-owner.cjs`, `walkthrough-entry.cjs`), walkthroughs and the rehearsal
 (`live-demo.cjs`, `signing-walkthrough.cjs`, `payables-player.cjs`), the redirect map (`app-redirects.cjs`), agent
-access (`agent-access.cjs`), demo hosts (`demo-hosts.cjs`) and the payee pages the platform serves (`invoices.cjs`, `hosted-payee.cjs`, `work-orders.cjs`).
+access (`agent-access.cjs`), a wallet owner's stop (`wallet-stop.cjs`), demo hosts (`demo-hosts.cjs`) and the payee pages the platform serves (`invoices.cjs`, `hosted-payee.cjs`, `work-orders.cjs`).
 The agents' operational screens and their suites (payments, funding, policy, strategy, runs, recovery and Activity)
 are in the Payables and Treasury repositories. A new test belongs beside its task, in the repository that serves it.
 

@@ -27,7 +27,7 @@ const OWNER_PATH = "agent-owner";
  * One request an agent server asked the DAO to sign (`owner.pending` there): still waiting for the
  * vote, done, or expired (the API's signing window closed first, so a signature can no longer be used).
  */
-export type DaoRequest = {
+export type PendingOwnerIntent = {
   correlationId: string;
   type: string;
   expiresAt: string;
@@ -52,7 +52,7 @@ export function readDelegate(signedDelegate: Uint8Array) {
 }
 
 /** Whether `request`'s hash really is the hash of its payload, and what that payload says. */
-export function checkRequest(request: DaoRequest): Check {
+export function checkRequest(request: PendingOwnerIntent): Check {
   const { intent } = request;
   if (intent.standard === "nep413") {
     const { message, nonce, recipient } = intent.payload;
@@ -81,7 +81,7 @@ export type { Decoded } from "../contract/proposals.js";
  * Every `v1.signer` proposal among `proposals`, newest first, matched against what the agents wait for.
  * An agent's requests are `null` when it didn't answer: that is no evidence it prepared nothing.
  */
-export function decodeProposals(dao: string, proposals: DaoProposal[], requests: Record<string, DaoRequest[] | null>): Decoded[] {
+export function decodeProposals(dao: string, proposals: DaoProposal[], requests: Record<string, PendingOwnerIntent[] | null>): Decoded[] {
   const byHash = new Map(Object.entries(requests).flatMap(([agent, list]) => (list ?? []).map((r) => [r.hash.toLowerCase(), { agent, request: r }] as const)));
   const unanswered = Object.keys(requests).filter((agent) => requests[agent] === null);
   return proposals
@@ -113,12 +113,12 @@ export function decodeProposals(dao: string, proposals: DaoProposal[], requests:
 const near = new Near(mainnet);
 
 /** What an agent server waits for the DAO to sign, read over loopback; null if it doesn't answer. */
-async function agentRequests(agent: AgentEntry): Promise<DaoRequest[] | null> {
+async function agentRequests(agent: AgentEntry): Promise<PendingOwnerIntent[] | null> {
   let origin: string;
   try { origin = agentOrigin(agent); } catch { return null; }
   const client: RouterClient<Router> = createORPCClient(new RPCLink({ origin, url: "/rpc" }));
-  // The server's `state` is a plain string in its type; it only ever holds DaoRequest's three.
-  return client.owner.pending(undefined, { signal: AbortSignal.timeout(10_000) }).then((r) => r as DaoRequest[], () => null);
+  // The server's `state` is a plain string in its type; it only ever holds PendingOwnerIntent's three.
+  return client.owner.pending(undefined, { signal: AbortSignal.timeout(10_000) }).then((r) => r as PendingOwnerIntent[], () => null);
 }
 
 /** The DAO's latest `limit` proposals that ask v1.signer to sign, decoded against every agent. */

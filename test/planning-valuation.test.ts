@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, mock, test } from "node:test";
+import { AgentApiError } from "@near-intents-agent-api/sdk";
+import { createRouterClient, ORPCError } from "@orpc/server";
 import { api } from "../src/api.js";
 import { dispatch } from "../src/agent.js";
 import { withMoneyLock } from "../src/lock.js";
 import { executePlan, observe, savePlan, type Plan, type PlanEvent, type PlannedAction } from "../src/plans.js";
 import { ASSETS, treasuryPolicy } from "../src/policy.js";
 import { claimSubmission, readOps, record, submittedSwapValues, type Method } from "../src/ops.js";
+import { router } from "../src/router.js";
 import { loadStrategy, saveStrategy } from "../src/strategy.js";
 import { withinRunCeiling } from "../src/strategy-value.js";
 import { authorityFixture, balanceView, marketTokens, policyView, quoteAt, timedPrices } from "./fixtures/authority.js";
@@ -291,4 +294,32 @@ test("a plan refused for valuation stays claimed after prices recover and is nev
   assert.deepEqual(await execute(plan), [{ type: "rejected", problems: ["the plan was already executed"] }]);
   assert.deepEqual(sends, []);
   assert.equal(readOps().length, 1);
+});
+
+test("a send refused for a code outside the plan's own reaches the owner as refused with its code, not unknown", async () => {
+  const plan = savePlan((await observe()).snapshot, "rebalance", "grant ended before the send", [swap()]);
+  mock.method(api, "listGrants", async () => []);
+  const stream = await createRouterClient(router).executePlan({ planId: plan.id });
+  await assert.rejects(async () => { for await (const _ of stream) { /* drain */ } },
+    (error: unknown) => { assert.ok(error instanceof ORPCError); assert.deepEqual([error.code, error.data], ["BAD_REQUEST", { kind: "refused", code: "grant_missing" }]); return true; });
+  assert.deepEqual(sends, []);
+  assert.equal(readOps()[0]?.refused, "grant_missing");
+});
+
+for (const [refusal, code, reason, refuse] of [
+  ["the grant ending", "grant_missing", "grant_missing: No live grant is held for this agent", () => mock.method(api, "listGrants", async () => [])],
+  // The provider's own title and detail never reach the owner.
+  ["the provider", "policy_denied", "policy_denied: the swap was refused before it was sent", () => mock.method(api, "forGrant", () => ({ swap: async () => {
+    throw new AgentApiError(403, { errors: [{ status: "403", code: "policy_denied", title: "provider-title", detail: "provider-detail" }] } as never); } }))],
+] as const) test(`a swap refused by ${refusal} after its shield was sent ends the leg with both, not a refused call`, async () => {
+  balances[input] = { public: 5n, confidential: 0n };
+  const plan = savePlan((await observe()).snapshot, "rebalance", "shield, then a refused swap", [swap()]);
+  const { shield, swap: quote } = (api.forGrant as unknown as () => { shield: (...args: never[]) => Promise<unknown>; swap: (...args: never[]) => Promise<unknown> })();
+  mock.method(api, "forGrant", () => ({ swap: quote, shield: async (...args: never[]) => { const sent = await shield(...args); refuse(); return sent; } }));
+  const events: PlanEvent[] = [];
+  for await (const event of await createRouterClient(router).executePlan({ planId: plan.id })) events.push(event as PlanEvent);
+  assert.deepEqual(events.map(e => e.type === "action" ? [e.status, e.shield, e.failureCode] : e.problems),
+    [["NOT_SENT", { amount: "5", status: "SUCCESS" }, code], [reason]]);
+  assert.deepEqual(sends, ["shield"]);
+  assert.deepEqual(readOps().map(op => [op.method, op.status ?? null, op.refused ?? null]), [["shield", "SUCCESS", null], ["swap", null, code]]);
 });

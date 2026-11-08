@@ -34,13 +34,15 @@ directory, hosted agents and consents are kept, and the host is unchanged, so si
    The build log should show the Dockerfile's steps, and the upload is the package's size (about 0.9 MB for 0.5.0). To check before DNS, set
    `DASHBOARD_HOST` to the Railway domain, then point a CNAME for `api.dev.multiagency.ai` (Namecheap) at the domain
    `railway domain status` shows and remove `DASHBOARD_HOST`.
-4. Read-only checks: `/health` 200; `/apps/v1/agents/x` without a credential 401, with a browser `Origin` 403;
+4. Read-only checks, all in `PLATFORM_URL=https://api.dev.multiagency.ai pnpm smoke` (#37; passed 2026-11-07):
+   `/health` 200; `/apps/v1/agents/x` without a credential 401, with a browser `Origin` 403;
    `/`, `/gw/challenge` and `/a/x/access` 404; one of the confirm page's own scripts 200 (from the package copy,
    `node -p 'require("./web/dist/build-manifest.json").entries.confirm.initial.js[0]'`), since a package without that
    manifest serves the page blank (seen 2026-11-06). Another host gets 421 from the gateway (offline-tested in
    `test/platform-host.test.ts`), but through Railway's edge it can't be checked: a request for a host not attached to
    the service gets Railway's own 404 "Application not found" (`x-railway-fallback: true`, seen 2026-11-05) and never
-   reaches the gateway.
+   reaches the gateway. The smoke check also fetches every script and stylesheet the confirm page loads, which needs no
+   package copy.
 5. On the staging service, the operator issues the dashboard's credential from the gateway's own state directory (it
    writes `.app-access/` there, beside the gateway): `cd /data/state && /app/node_modules/.bin/tsx
    /app/src/app-credential.ts issue multiagency-dashboard api.dev.multiagency.ai 90 "MultiAgency dashboard"`. The token
@@ -52,9 +54,11 @@ directory, hosted agents and consents are kept, and the host is unchanged, so si
 6. Rollback: redeploy the previous image; state stays on the staging volume. Nothing here touches proto.multiagency.ai
    or invoices.multiagency.ai.
 
-Production (`api.multiagency.ai`, not set up) is the same package with `deploy/platform.json`, the image's default
-`DASHBOARD_FILE`: a new service in the platform's Railway project with its own volume, its own provider key and session
-secret, and the production app credentials issued on it. Production's `dao` service is unchanged.
+Production (`api.multiagency.ai`, set up 2026-11-07: [platform production](platform-production.md)) is the same
+package with `deploy/platform.json`, the image's default `DASHBOARD_FILE`: since 2026-11-08 the project's `gateway`
+service, synced into the production environment, with its own volume and domain. It shares staging's provider key,
+FastNEAR key and session secret, production app credentials included (a known shortcut, [platform
+production](platform-production.md)); rotating or revoking one rotates both.
 
 ## Staging evidence on a test agent (run 2026-10-28: [mainnet log](mainnet-log.md#app-access-on-platform-staging-2026-10-28-utc))
 
