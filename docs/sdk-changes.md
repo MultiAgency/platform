@@ -31,6 +31,10 @@ Platform changes in this release, outside the package:
   than 20 as incomplete instead of looping. The 20 pages (1,000 entries) count everything the history read returns,
   which may include other agents' entries on the same API key; past that, the held list says it's incomplete and changes
   nothing. Offline-tested.
+- **The `platform` image installs production dependencies only:** `tsx`, the one devDependency the gateway runs (its
+  entrypoint, and agents started with `--import tsx`), moved to dependencies, and `Dockerfile.platform` installs with
+  `--prod`: 203 packages instead of 461, 645 MB instead of 778 (measured locally). The image check (two offline boots,
+  the platform smoke checks, state kept) passed on it.
 
 ## 0.5.4 (2026-11-08)
 

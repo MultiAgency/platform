@@ -86,7 +86,10 @@ export async function environment(directory, { workspace = false, portfolioOwner
     });
     proxies.push(server); return listen(server);
   }
-  const dashboard = `https://127.0.0.1:${await proxy(() => gatewayPort, '127.0.0.1')}`;
+  // The gateway listens on the wildcard `::`. On macOS another process can still listen on 127.0.0.1 at the same port
+  // (a browser's DevTools endpoint, say), before or after it, and then takes every connection to 127.0.0.1 there: a
+  // page showed "WebSockets request was expected" (docs/testing.md). Over ::1 only the gateway answers.
+  const dashboard = `https://127.0.0.1:${await proxy(() => gatewayPort, '::1')}`;
   const invoices = `https://localhost:${await proxy(() => invoicePort, '::1')}`;
   // P2: an owner app's actual builds as releases A, B and an incompatible C, served by the shared release
   // server as its own process. Activation is the app operator's action, done here through the same code.

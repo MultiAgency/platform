@@ -10,7 +10,7 @@ metadata:
   purpose: 'An app server''s access to agents: credential, consents, relayed owner actions, and payout requests by requestId with recovery by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.5.4'
+  library_version: '0.5.5'
 requires:
   - getting-started
   - owner-workflows

@@ -8,7 +8,14 @@ Payables only, no configured agents). The production environment's earlier proto
 checked: no balances, journals or agent lists were read); proto.multiagency.ai, invoices.multiagency.ai,
 payables.multiagency.ai and treasury.multiagency.ai no longer answer.
 
-**Running since 2026-11-08:** the project's `gateway` service, synced into production from staging, so each
+**Runs 0.5.4 since 2026-11-08T22:17Z:** candidate `2d8d30d6` (commit `f2c7b7f`, the release candidate whose last gate
+booted this package's image offline twice), Railway deployment `b9ab9792` on the `gateway` service (image
+`sha256:fd7992ae…`, base `node:24.22.0-slim`), deployed from a copy of the candidate's `platform` package identical
+to it. It signs for `api.multiagency.ai` and started no hosted agents. At 22:17Z the platform smoke checks passed (18 of
+18) and the confirm page's 6 assets were each fetched and byte-equal to the package's. Before it switched, the same
+checks passed on 0.5.3.
+
+**Running since 2026-11-08 (04:54Z, 0.5.3):** the project's `gateway` service, synced into production from staging, so each
 environment has its own instance with its own volume, variables, domain and deployments. Deployment `c34b1867`
 (04:54Z, image `sha256:bb1d820b…`), built from the same upload of candidate `a434f381`'s package as `api` below
 (snapshot `sha256:b45bdb10…`); it signs for `api.multiagency.ai`, and

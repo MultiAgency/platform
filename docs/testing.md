@@ -111,12 +111,17 @@ the skill. Until 2026-11-08 the suite also took the prototype's app builds (Invo
 owner-session build, frozen 2026-10-26); those cases retired with the prototype's hosts, and app frontends are tested in
 each app's own CI.
 
-Known intermittent failure, not yet explained: on 2026-11-08 "chosen swaps: lost provider response never duplicates
-submissions" (`treasury-interruption`) timed out once in a challenge run's baseline, on Node 24.22.2. Its page at
-`/a/portfolio/access` showed only "WebSockets request was expected", which is Chromium's reply on its remote-debugging
-port, though the gateway's configuration and the agent's bind agreed on the agent's port. The same case passed in that
-run's E2E gate and in four other runs on the same tree, including a full release candidate. A rerun is evidence only of
-itself: a repeat failure is investigated, not rerun away.
+A once-intermittent failure, explained and fixed (2026-11-08): "chosen swaps: lost provider response never duplicates
+submissions" timed out once, its page showing only "WebSockets request was expected", Chromium's reply on its
+remote-debugging port. The harness bound the gateway on the wildcard `::` and dialed it at 127.0.0.1. On macOS another
+process can listen on 127.0.0.1 at the same port, before or after the gateway, and it then takes every connection to
+127.0.0.1 there: a browser's DevTools endpoint did. The dashboard proxy now dials the gateway over `::1`, where only the
+gateway answers; `gateway-port.spec.mjs` squats 127.0.0.1 on the gateway's port and fails without the fix.
+
+Run one E2E suite per machine at a time. Hosted agents take ports from 9000 (`src/gateway/hosted-agents.ts`), checked
+free only when reserved, so two suites at once (two checkouts, say) can reserve the same port and the second agent can't
+bind it (`EADDRINUSE`, then restarts with backoff): on 2026-11-08 a stack's setup waited 30 s for such an agent while
+another checkout's suite ran. One gateway per host, as deployed, doesn't race itself.
 
 Each run records a fingerprint of the installed dependency tree (`scripts/dependency-tree.mjs`: pnpm's installed
 lockfile and every installed package directory); `node_modules` is shared, not copied. A run from a frozen snapshot whose

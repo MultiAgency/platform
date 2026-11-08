@@ -3,7 +3,7 @@ FROM node:24.22.0-slim
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --prod
 COPY tsconfig.json ./
 COPY src ./src
 COPY web/dist ./web/dist
