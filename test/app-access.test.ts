@@ -904,8 +904,8 @@ test("under a wallet's consent, read reaches account and reconcileBooks, treasur
     assert.equal((await call(port, rpc("org_2", procedure), "POST", staging, {})).status, 200, procedure);
   for (const procedure of ["setup", "recover", "treasury/fund", "steward/propose"])
     assert.equal((await call(port, rpc("org_2", procedure), "POST", staging, {})).status, 403, `${procedure}: owner-session only, whatever the scopes`);
-  for (const procedure of ["treasury/link", "treasury/unlink", "treasury/setConfidential", "autopilot/tick"])
-    assert.equal((await call(port, rpc("org_2", procedure), "POST", staging, { json: { accountId: "treasury.near", confidential: true } })).status, 200,
+  for (const procedure of ["treasury/link", "treasury/unlink", "autopilot/tick"])
+    assert.equal((await call(port, rpc("org_2", procedure), "POST", staging, { json: { accountId: "treasury.near" } })).status, 200,
       `${procedure}: a wallet owner's treasury consent reaches it`);
   assert.equal((await consent({ organization: "org_3", scopes: ["read"] })).status, 201);
   for (const procedure of ["treasury/link", "autopilot/tick"])

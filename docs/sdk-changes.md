@@ -14,6 +14,16 @@ platform-only fixes are listed separately.
 
 ## 0.5.5 (unreleased)
 
+- **`treasury/setConfidential` is removed** (platform#41): `treasury/get` reads whether a linked DAO is confidential from
+  chain, so nothing sets it. A DAO is confidential when `intents.near.public_keys_of` holds its key on Trezu's path, the
+  DAO's own name (`v1.signer.derived_public_key({ path: <dao>, predecessor: <dao>, domain_id: 1 })`), which Trezu's
+  confidential setup registers; an account that isn't a DAO never is. A chain read that fails fails `treasury/get`; it
+  never answers `false`. The procedure leaves `OwnerInputs`, `ownerOutputs`, `owner-treasury-v1`, `APP_TREASURY` and
+  `DAO_APP_REFUSED`, and a host on this version refuses it, so an app drops its call before moving to this platform.
+  `TREASURY_CONFIDENTIAL` in an agent's settings is no longer written or read. This removal ships in a patch version,
+  by the user's decision, although the rule above bumps the minor version. Offline-tested (each answer and each failed
+  read) and stack-tested: the stack's `daoConfidentialSetup` control registers the simulated DAO's key. Mainnet
+  observation (2026-11-08) matched both keys for agentic.sputnik-dao.near.
 - **`payment.terms.chain`** (addition): an `approval_vote`'s proven terms in `owner/prepare` carry `chain: "near"` when
   the held payment is a withdrawal to a NEAR account, and nothing for a transfer. Optional, so older apps and servers are
   unaffected.

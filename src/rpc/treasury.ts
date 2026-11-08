@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { depositAddress } from "../agent.js";
 import { api } from "../api.js";
-import { accountExists, daoPayees, describeTreasury, fundingTransaction } from "../chain.js";
+import { accountExists, confidentialSetup, daoPayees, describeTreasury, fundingTransaction } from "../chain.js";
 import { status as autopilotStatus, tick } from "../autopilot.js";
 import { ticks } from "../evidence.js";
 import { exportRunLog } from "../run-log-export.js";
@@ -31,26 +31,24 @@ export const treasuryRoutes = {
   },
   /**
    * The account the agent works for, set by the owner: any NEAR account, or a DAO voting through
-   * Trezu. A confidential treasury pays on its private side, so its public proposals show no real
-   * payees; it gets no payee candidates from the chain.
+   * Trezu. A DAO is confidential when the chain shows it set up for confidential intents (chain.ts
+   * `confidentialSetup`); any other account never is. A confidential treasury pays on its private
+   * side, so its public proposals show no real payees; it gets no payee candidates from the chain.
    */
   treasury: {
     get: os.use(readOutput("treasury/get")).handler(async () => {
       const id = process.env.TREASURY_ACCOUNT;
       if (!id) return null;
-      const confidential = process.env.TREASURY_CONFIDENTIAL === "true";
       const treasury = await describeTreasury(id);
+      const confidential = treasury.dao !== null && await confidentialSetup(id);
       return { ...treasury, confidential, payees: treasury.dao && !confidential ? await daoPayees(id) : [] };
     }),
     link: os.input(z.object({ accountId: account })).handler(async ({ input }) => {
       checkHostedTreasury(input.accountId);
       if (!(await accountExists(input.accountId))) throw new PublicError("That NEAR account does not exist. Check the account name; nothing was linked.");
-      saveEnv({ TREASURY_ACCOUNT: input.accountId, TREASURY_CONFIDENTIAL: "" });
+      saveEnv({ TREASURY_ACCOUNT: input.accountId });
     }),
-    unlink: os.handler(() => { checkHostedTreasury(""); saveEnv({ TREASURY_ACCOUNT: "", TREASURY_CONFIDENTIAL: "" }); }),
-    setConfidential: os
-      .input(z.object({ confidential: z.boolean() }))
-      .handler(({ input }) => saveEnv({ TREASURY_CONFIDENTIAL: input.confidential ? "true" : "" })),
+    unlink: os.handler(() => { checkHostedTreasury(""); saveEnv({ TREASURY_ACCOUNT: "" }); }),
     /** A fresh deposit address and the one transaction that pays into it, for the treasury to sign. */
     fund: os.input(z.object({ asset: z.enum(["USDC", "NEAR"]), amount: units })).handler(async ({ input }) => {
       const deposit = await depositAddress(input.asset === "USDC" ? ASSETS.USDC : ASSETS.wNEAR);

@@ -13,7 +13,7 @@ import { stackControls } from './stack-controls.mjs';
 const LISTED = ['activity', 'autopilot/enable', 'autopilot/evidence', 'autopilot/get', 'autopilot/log', 'autopilot/stop', 'autopilot/tick', 'deposit', 'executePlan',
   'held', 'inbox/list', 'instance', 'ledgerCsv', 'overview', 'owner/actions', 'owner/pending', 'owner/prepare', 'owner/status', 'owner/submit', 'policyHistory',
   'rebalance', 'reconcileBooks', 'recover', 'setup', 'steward/propose', 'strategy/get', 'strategy/save', 'sweep', 'treasury/fund', 'treasury/get', 'treasury/link',
-  'treasury/setConfidential', 'treasury/unlink', 'unresolved', 'externalPlan'];
+  'treasury/unlink', 'unresolved', 'externalPlan'];
 
 test('Treasury: every listed procedure through ownerClient equals its raw answer, with each reachable error kind', async ({ browser }, info) => {
   test.setTimeout(240_000);
@@ -48,10 +48,9 @@ test('Treasury: every listed procedure through ownerClient equals its raw answer
     const runs = (await client.call('autopilot/evidence', {})).value;
     await check('autopilot/log', runs.length ? { tickId: runs.at(-1).id ?? runs.at(-1).tickId } : {}, undefined);
 
-    // Treasury link, confidentiality, funding, unlink (chain fixture: owner.near exists).
+    // Treasury link, funding, unlink (chain fixture: owner.near exists).
     await check('treasury/link', { accountId: OWNER }, 'ok');
     await check('treasury/get', undefined, 'ok');
-    await check('treasury/setConfidential', { confidential: true }, 'ok');
     await check('treasury/fund', { asset: 'USDC', amount: '1000000' }, 'ok');
     await check('treasury/unlink', undefined, 'ok');
     await check('deposit', undefined, 'ok');
@@ -68,7 +67,7 @@ test('Treasury: every listed procedure through ownerClient equals its raw answer
     // refused: invalid input never reaches a handler.
     for (const [procedure, input] of [['executePlan', { planId: 'not-a-plan' }], ['sweep', { execute: 'yes' }], ['externalPlan', { swaps: [] }], ['strategy/save', { strategy: {}, expectedDigest: 'x' }],
       ['autopilot/enable', { expectedDigest: 'x' }], ['autopilot/evidence', { since: 'yesterday' }], ['autopilot/log', { tickId: '' }], ['owner/prepare', { action: { type: 'nope' }, signer: 'wallet' }],
-      ['owner/submit', { correlationId: '', signedData: {} }], ['owner/status', { correlationId: 5 }], ['treasury/link', { accountId: 'x' }], ['treasury/setConfidential', { confidential: 'yes' }],
+      ['owner/submit', { correlationId: '', signedData: {} }], ['owner/status', { correlationId: 5 }], ['treasury/link', { accountId: 'x' }],
       ['treasury/fund', { asset: 'DOGE', amount: '1' }], ['steward/propose', { instruction: 'x'.repeat(3000) }]])
       await check(procedure, input, 'refused');
 

@@ -1115,8 +1115,8 @@ test("under a DAO's treasury consent, an app may run a tick, but never changes t
   assert.equal((await call(port, rpc("autopilot/tick"), "POST", staging, {})).status, 200, "a tick runs under the DAO-voted grant only");
   assert.equal(forwarded.at(-1)!.path, "/rpc/autopilot/tick");
   const before = forwarded.length;
-  for (const procedure of ["treasury/link", "treasury/unlink", "treasury/setConfidential"])
-    assert.equal((await call(port, rpc(procedure), "POST", staging, { json: { accountId: "other.near", confidential: true } })).status, 403,
+  for (const procedure of ["treasury/link", "treasury/unlink"])
+    assert.equal((await call(port, rpc(procedure), "POST", staging, { json: { accountId: "other.near" } })).status, 403,
       `${procedure}: a DAO-owned agent's link is the DAO, fixed at setup`);
   for (const procedure of ["setup", "recover", "treasury/fund", "steward/propose"])
     assert.equal((await call(port, rpc(procedure), "POST", staging, {})).status, 403, `${procedure}: owner-session only`);

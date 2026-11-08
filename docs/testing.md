@@ -280,7 +280,9 @@ strategy, which an app's or a machine credential's plans need; answers the diges
 asks; never the platform sign-in text), `signOwnerDelegate` (`receiverId`, `actions`: the owner's NEP-366 signature over a
 delegate action of function calls, as the platform's confirm page asks the wallet for it with `signDelegateActions`; answers
 `{ accountId, signedDelegate }`, base64), `daoVote` (`hash`: the DAO passes the proposal that signs that 64-hex hash, as a member's
-transaction names it in its `v1.signer` call) or `machineCredential` (`scopes`, optional `label` and `ttlSeconds`: the owner
+transaction names it in its `v1.signer` call), `daoConfidentialSetup` (the DAO is set up for confidential intents: its key on
+Trezu's path, the DAO's own name, is registered on `intents.near`, as Trezu's `add_public_key` does, and `treasury/get` reads it
+`confidential` from then on; with `--dao-treasury`) or `machineCredential` (`scopes`, optional `label` and `ttlSeconds`: the owner
 signs in with the fixture key and issues a `portfolio` credential); its result appears as `<name>.result.json`,
 `{ ok, value }` or `{ ok: false, error }`. Create `stack/stop` to stop. Every service the stack starts (gateway, agent
 servers, hosted agents, release servers) also ends on its own when the process that started it dies without stopping it,
@@ -291,7 +293,8 @@ pages: a page it opens itself has no local test wallet, and its own CDP connecti
 setup, consent, payout request held and released by the owner's vote, and a read-only machine credential, through the
 control files and `state.json`; a Treasury case (`--no-browser --treasury`) saves targets, sweeps a public balance,
 executes a rebalance into wNEAR and ETH, and sees a `portfolio`-only outage and a lost swap reply (`unknown`, then
-`unresolved`); a second case serves an app's own build (`--frontend`) whose near-connect asks which wallet
+`unresolved`); a DAO case (`--no-browser --dao-treasury --app`) passes the DAO's consent with `daoVote` and reads
+`treasury/get` as public, then confidential after `daoConfidentialSetup`; a second case serves an app's own build (`--frontend`) whose near-connect asks which wallet
 to use, and the stack still starts signed in. The routes' own behaviour is asserted in `app-access.spec.mjs` and `agent-access.spec.mjs`.
 Page dialogs (such as the payee's filing `confirm()`) are logged in `state.json` `dialogs` and left open
 for the attached client or person to answer; an attached Playwright client must register its own dialog

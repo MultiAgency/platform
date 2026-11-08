@@ -15,7 +15,7 @@ const executorDisabled = process.env.EXECUTOR === "off";
 export const ENV_FILE = process.env.ENV_FILE || ".env";
 // Schedule enablement belongs to this instance too. Inheriting it can start a second agent
 // whose owner authorized its strategy but never enabled its schedule.
-const INSTANCE_KEYS = ["AGENT_ID", "AGENT_GRANT_TOKEN", "AGENT_GRANT_TOKEN_PENDING", "TREASURY_ACCOUNT", "TREASURY_CONFIDENTIAL", "AUTOPILOT"];
+const INSTANCE_KEYS = ["AGENT_ID", "AGENT_GRANT_TOKEN", "AGENT_GRANT_TOKEN_PENDING", "TREASURY_ACCOUNT", "AUTOPILOT"];
 if (ENV_FILE !== ".env") {
   for (const key of INSTANCE_KEYS) delete process.env[key];
   if (existsSync(ENV_FILE)) Object.assign(process.env, parseEnv(readFileSync(ENV_FILE, "utf8")));

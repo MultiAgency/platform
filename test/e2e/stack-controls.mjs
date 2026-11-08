@@ -124,6 +124,11 @@ export function stackControls(stack, { owner }) {
       simulated.daoVote(hash);
     },
     /**
+     * The simulated DAO is set up for confidential intents, as Trezu's confidential setup registers its key on
+     * `intents.near` (`add_public_key`): `treasury/get` reads it `confidential` from then on. Start with `--dao-treasury`.
+     */
+    daoConfidentialSetup: () => simulated.daoConfidentialSetup(),
+    /**
      * The owner's NEP-413 signature over a text an app asked for: a consent, a setup, or a prepared intent's `payload`.
      * Never the platform's sign-in text, which an app must not ask an owner to sign (docs/app-access.md).
      */

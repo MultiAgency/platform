@@ -155,6 +155,10 @@ Each line is a gap; the linked page says how the rest is known. The
   configuration (`deploy/platform.json`) doesn't set up Treasury agents yet; staging's does. A proposal's approval is the platform's check, not the provider's: whoever holds
   the treasury grant can swap within the policy without it. Held swaps aren't used: what their vote commits to is
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
+- Whether a linked DAO is confidential (`treasury/get`) relies on Trezu's convention: its confidential setup registers
+  the DAO's MPC key at the DAO's own name on `intents.near` (Trezu's backend source; both keys read alike for one DAO on
+  mainnet, 2026-11-08). A DAO set up some other way, or under a path Trezu changes to, reads `false`. Set up for
+  confidential intents, a DAO can still act publicly. Stack-tested; the platform's read itself isn't mainnet-observed.
 - DAO-owned agents through apps: setup, creation, consent, the grant and the DAO's own stop are mainnet-observed on
   platform staging (2026-11-04, [mainnet log](docs/mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc)), and so are funding through an app (`deposit` under
   `treasury`, from 0.5.1) by the DAO's vote and an app's swap proposal approved by DAO vote and executed (2026-11-05,

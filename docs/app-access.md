@@ -151,8 +151,9 @@ policy). With `treasury`, an app reaches Treasury reads, strategy settings (whic
 [enforcement](enforcement.md#treasury-proposals-offline--and-stack-tested)), autopilot on and off, `autopilot/tick` (0.5.1: one pass now,
 swapping only under a grant that binds the saved strategy and within its per-run ceiling; the tick's evidence names the
 app), sweep, `deposit` (from 0.5.1: a one-time address crediting the agent, so the app can fund it; `fundingTransaction`
-in the SDK builds the transfer), for a wallet owner the linked treasury account (0.5.1: `treasury/link`, `unlink`,
-`setConfidential`; refused under a DAO's consent, whose link is the DAO, fixed at setup) and proposals:
+in the SDK builds the transfer), for a wallet owner the linked treasury account (0.5.1: `treasury/link`, `unlink`;
+refused under a DAO's consent, whose link is the DAO, fixed at setup; `setConfidential` was removed in 0.5.5, since
+`treasury/get` reads whether a linked DAO is confidential from chain) and proposals:
 its swaps run only after the owner signs each proposal's exact terms (`proposalText`), a check the platform makes, not
 the provider. With `treasury-execute` as well, it can prepare and execute plans within the policy and the strategy's
 cost limit without a signature per swap, only while the owner's live grant binds the plan's strategy

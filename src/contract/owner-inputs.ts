@@ -41,7 +41,7 @@ export type OwnerInputs = {
   "strategy/save": { strategy: Strategy; expectedDigest: string };
   "autopilot/set": { on: boolean; everyMin: number; maxUsd: number; expectedDigest?: string }; "autopilot/enable": { expectedDigest: string };
   "autopilot/stop": undefined; "autopilot/tick": undefined;
-  "treasury/link": { accountId: string }; "treasury/unlink": undefined; "treasury/setConfidential": { confidential: boolean };
+  "treasury/link": { accountId: string }; "treasury/unlink": undefined;
   "treasury/fund": { asset: "USDC" | "NEAR"; amount: string };
   externalPlan: { swaps: { from: string; to: string; amount: string; minAmountOut?: string }[] };
   "proposals/create": In<typeof proposalCreateInput>; "proposals/get": In<typeof proposalRef>; "proposals/list": undefined;
