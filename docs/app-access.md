@@ -198,24 +198,28 @@ the DAO's own stop; on 2026-11-05 ([mainnet log](mainnet-log.md#a-dao-funds-its-
 `deposit` by the DAO's vote and an app's proposal approved by DAO vote, then executed. Not observed: freeze and unfreeze.
 Not in production.
 
-**A wallet owner's own stop, with no app** (`src/gateway/wallet-stop.ts`): the counterpart of a DAO's stop for an agent a
-wallet owns. The owner opens `/confirm/wallet/stop` (or `/confirm/wallet/stop/<agent>`), part of the confirm build,
-connects the owning wallet and signs the canonical text with NEP-413 (recipient the host):
-`{"type":"multiagency.wallet-stop","version":1,"host","owner","agent","expiresAt"}`, where `agent` names one agent or is
-`"*"` for every agent the wallet owns on the host, and `expiresAt` is at most an hour away. Anyone may send the signed
-text to `POST /confirm/v1/wallet-stop` (`{ message, nonce, publicKey, signature }`), so any tool that signs NEP-413
-works too. The platform checks the exact text, this host and the signature, then that the key is a full-access key of
-the owner now (before saying whether any agent of theirs is here), then each agent's owner as its server reports it. It
-records the stop and its cutoff, the moment it first applies, and then revokes every app consent the owner gave for those
-agents by that cutoff, whatever provider ID it names, and turns each created agent's autopilot off. Sending the same stop
-again only retries an autopilot not yet confirmed off; it never ends a consent given after the cutoff, even after the
-text's expiry. An agent found replaced or owned by someone else on a retry is reported as such and not asked. At most 60
-sends an hour per address. It only removes authority, with the same limits as a DAO's stop: the provider grant stands, so
-an app the owner consents to afterwards may turn autopilot on again, and a tick or forwarded call already running
-finishes through the guarded send path. Offline-tested (`test/wallet-stop.test.ts`), and on a headless gateway process
-for the route and the chain key check (`test/platform-host.test.ts`). The page is browser-tested with a stand-in wallet
-(`test/browser/wallet-stop.cjs`): the text it shows is canonical, the wallet signs exactly that text for this host, the
-page sends it as signed, and a retry resends it unchanged. Signing with a real wallet is untested. Not deployed.
+**A wallet owner's own stop, with no app** (`src/gateway/wallet-stop.ts`): the counterpart of a DAO's stop, for agents a
+wallet owns.
+- **Signing:** on `/confirm/wallet/stop` (or `/confirm/wallet/stop/<agent>`), part of the confirm build, the owner
+  connects the owning wallet (any wallet that signs NEP-413 messages) and signs the canonical text, recipient the host:
+  `{"type":"multiagency.wallet-stop","version":1,"host","owner","agent","expiresAt"}`. `agent` is one agent, or `"*"`
+  for every agent the wallet owns on the host; `expiresAt` is at most an hour away, and the page renews its 10-minute
+  text before it runs out. Anyone may send the signature to `POST /confirm/v1/wallet-stop`
+  (`{ message, nonce, publicKey, signature }`), so any tool that signs NEP-413 works too; at most 60 sends an hour per
+  address.
+- **Checks:** the exact text, this host and the signature; then that the key is a full-access key of the owner now,
+  before saying whether any agent of theirs is here; then each agent's owner as its server reports it.
+- **Effect:** the stop's cutoff is the moment it first applies. Every app consent the owner gave for those agents by
+  then is revoked, whatever provider ID it names, and each created agent's autopilot is turned off. Sending the same
+  stop again only retries an autopilot not yet confirmed off, even after the text's expiry; an agent found replaced or
+  owned by someone else by then is reported and not asked.
+- **Limits:** as for a DAO's stop, it only removes authority. The provider grant stands, so an app the owner consents to
+  afterwards may turn autopilot on again, and a tick or forwarded call already running finishes through the guarded
+  send path.
+- **How it's known:** offline-tested (`test/wallet-stop.test.ts`), on a headless gateway process for the route and the
+  chain key check (`test/platform-host.test.ts`), and in a browser with a stand-in wallet (`test/browser/wallet-stop.cjs`:
+  the shown text is canonical and is what the wallet signs and the page sends; a retry resends it; a page left open
+  renews it; a message-only wallet is offered). Signing with a real wallet is untested. Not deployed.
 
 **Funding through an app:** found on that run, a DAO's consent couldn't reach `deposit`, which was in the `payout`
 scope only. From 0.5.1 the `treasury` scope reaches it too: offline-tested, and mainnet-observed on platform staging
@@ -244,7 +248,7 @@ resends, and nothing an app calls is needed for that. An app follows that work t
   - `owner/status` by `correlationId` for an owner action
 
   It never resends while that record reads `unknown`, `executing` or `processing`. The `recover` procedure isn't
-  on app access and isn't needed: the platform's own reconciliation is what resolves these (platform#14). Poll only while a record is unresolved, and budget the deployment's polls as a whole:
+  on app access and isn't needed: it runs the same pass the agent already runs every 10 seconds (platform#14). Poll only while a record is unresolved, and budget the deployment's polls as a whole:
   at the default 1,200 calls an hour, that's 20 a minute across all its agents and every other call. One poll a minute per open record
   fits about 15 agents with room for other calls; every 10 seconds fits only 3. On `rate_limited`, wait
   `retryAfterSeconds`.

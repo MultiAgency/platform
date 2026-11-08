@@ -128,6 +128,20 @@ export async function signChallenge({ message, recipient, nonce }: { message: st
 
 export const signOutMember = () => member.disconnect();
 
+/**
+ * A wallet owner's own stop (the confirm build's stop page): one NEP-413 signature is all it needs, so every wallet
+ * that signs messages is offered, not only those that also sign delegate actions. Its session is apart from the owner's.
+ */
+const stopper = walletSession(() => new NearConnector({ network: "mainnet", manifest: HOT_WALLETS, features: { signMessage: true }, storage: namespaced("stop") }));
+export const useStopWallet = stopper.use;
+export const connectStopWallet = () => stopper.connect();
+/** Signs the stop's text with the stop page's wallet, unchanged, for `recipient`. */
+export async function signStopMessage({ message, recipient, nonce }: { message: string; recipient: string; nonce: string }) {
+  const { wallet } = await stopper.connector.getConnectedWallet();
+  const signed = await wallet.signMessage({ message, recipient, nonce: fromBase64(nonce) });
+  return { publicKey: signed.publicKey, signature: signed.signature };
+}
+
 /** Sends a transaction from the signed-in member's own wallet, such as a DAO proposal they file. */
 export const sendAsMember = (transaction: Transaction) => member.send(transaction);
 export const connect = () => owner.connect();

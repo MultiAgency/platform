@@ -2,7 +2,8 @@ import type { Intent } from "@near-intents-agent-api/sdk";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { EVERY_AGENT, walletStopMessage } from "../../src/gateway/wallet-stop-text.js";
-import { connect, signIntent, useWallet } from "./features/owner/wallet";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { connect, connectStopWallet, signIntent, signStopMessage, useStopWallet, useWallet } from "./features/owner/wallet";
 import { Badge, Button, Card, ErrorBox, Loading } from "./shared/ui";
 import "./styles.css";
 
@@ -121,6 +122,9 @@ type Stopped = { at: string; agents: { agent: string; agentId: string | null; co
 type StopBody = { message: string; nonce: string; publicKey: string; signature: string };
 /** The agent this page's link names (`/confirm/wallet/stop/<agent>`), if any. */
 const stopNamed = location.pathname.match(/^\/confirm\/wallet\/stop\/([a-z0-9-]{1,32})$/)?.[1] ?? null;
+/** The stop text is good for 10 minutes; the page renews it once less than 2 remain, so what it shows is always signable. */
+const STOP_VALID_MS = 10 * 60_000, RENEW_BELOW_MS = 2 * 60_000;
+const stopExpiry = () => new Date(Date.now() + STOP_VALID_MS).toISOString();
 
 /**
  * A wallet owner's own stop (src/gateway/wallet-stop.ts): no app and no platform session. The owner connects the wallet
@@ -129,14 +133,18 @@ const stopNamed = location.pathname.match(/^\/confirm\/wallet\/stop\/([a-z0-9-]{
  * confirmed off.
  */
 function StopPage() {
-  const wallet = useWallet();
+  const wallet = useStopWallet();
   const [scope, setScope] = useState<string>(stopNamed ?? EVERY_AGENT);
   const [sent, setSent] = useState<StopBody>();
   const [stopped, setStopped] = useState<Stopped>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const account = wallet.status === "connected" ? wallet.accountId : null;
-  const [expiresAt, setExpiresAt] = useState(() => new Date(Date.now() + 10 * 60_000).toISOString());
+  const [expiresAt, setExpiresAt] = useState(stopExpiry);
+  useEffect(() => {
+    const timer = setInterval(() => setExpiresAt(current => Date.parse(current) - Date.now() < RENEW_BELOW_MS ? stopExpiry() : current), 15_000);
+    return () => clearInterval(timer);
+  }, []);
   const message = account ? walletStopMessage({ host: location.host, owner: account, agent: scope, expiresAt }) : null;
 
   async function send(body: StopBody) {
@@ -155,8 +163,8 @@ function StopPage() {
     const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
     setError(undefined); setBusy(true);
     try {
-      const signed = await signIntent({ standard: "nep413", payload: { message, recipient: location.host, nonce } } as Intent) as { public_key: string; signature: string };
-      await send({ message, nonce, publicKey: signed.public_key, signature: signed.signature });
+      const signed = await signStopMessage({ message, recipient: location.host, nonce });
+      await send({ message, nonce, ...signed });
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
       setBusy(false);
@@ -180,18 +188,17 @@ function StopPage() {
         <tbody>{stopped.agents.map(a => <tr key={a.agent}><td>{a.agent}</td><td>{a.consentsEnded}</td><td>{a.autopilot}</td></tr>)}</tbody></table>
       <p className="text-sm text-muted-foreground">Applied {new Date(stopped.at).toLocaleString()}.</p>
       {unconfirmed && sent && <Button onClick={() => void send(sent)} disabled={busy}>{busy ? "Sending…" : "Send the same stop again"}</Button>}
-    </> : !account ? <Button onClick={() => void connect()} disabled={wallet.status === "connecting"}>Connect the owner's wallet</Button>
+    </> : !account ? <Button onClick={() => void connectStopWallet()} disabled={wallet.status === "connecting"}>Connect the owner's wallet</Button>
       : <>
         <p>Connected as <strong>{account}</strong>.</p>
-        {stopNamed && <fieldset className="grid gap-1">
-          <label><input type="radio" checked={scope === stopNamed} onChange={() => setScope(stopNamed)} /> Only agent <strong>{stopNamed}</strong></label>
-          <label><input type="radio" checked={scope === EVERY_AGENT} onChange={() => setScope(EVERY_AGENT)} /> Every agent of {account} on this host</label>
-        </fieldset>}
+        {stopNamed && <ToggleGroup type="single" variant="outline" value={scope} onValueChange={value => { if (value) setScope(value); }} aria-label="Agents to stop" className="flex-wrap">
+          <ToggleGroupItem value={stopNamed}>Only agent {stopNamed}</ToggleGroupItem>
+          <ToggleGroupItem value={EVERY_AGENT}>Every agent of {account} on this host</ToggleGroupItem>
+        </ToggleGroup>}
         <h2 className="font-medium">The exact text your wallet signs</h2>
         <pre className="whitespace-pre-wrap break-all text-sm">{message}</pre>
         <p className="text-sm text-muted-foreground">{scope === EVERY_AGENT ? "\"agent\": \"*\" means every agent this wallet owns here. " : ""}Valid until {new Date(expiresAt).toLocaleString()}.</p>
-        <Button onClick={() => { if (Date.parse(expiresAt) < Date.now() + 60_000) setExpiresAt(new Date(Date.now() + 10 * 60_000).toISOString()); else void sign(); }} disabled={busy}>
-          {busy ? "Signing…" : Date.parse(expiresAt) < Date.now() + 60_000 ? "Renew the text" : "Sign and stop"}</Button>
+        <Button onClick={() => void sign()} disabled={busy}>{busy ? "Signing…" : "Sign and stop"}</Button>
       </>}
   </Card>;
 }

@@ -8,15 +8,17 @@ const HOST = 'platform.test', OWNER = 'owner.near';
 /** The gateway's canonical stop text (src/gateway/wallet-stop-text.ts): fixed key order, no whitespace. */
 const canonical = ({ host, owner, agent, expiresAt }) => JSON.stringify({ type: 'multiagency.wallet-stop', version: 1, host, owner, agent, expiresAt });
 
-async function stopPage(browser, root, { answers }) {
+async function stopPage(browser, root, { answers, clock = false, preselected = true }) {
   const walletCalls = [], posts = [], errors = [], network = [];
   const context = await browser.newContext({ viewport: { width: 390, height: 900 } });
+  if (clock) await context.clock.install();
   await context.exposeBinding('fixtureWalletCall', async (_, method, payload) => { walletCalls.push({ method, payload }); });
-  await context.addInitScript(({ host, owner }) => {
+  await context.addInitScript(({ host, owner, preselected }) => {
     if (location.host !== host) return;
-    localStorage.setItem('selected-wallet:mainnet', 'fixture-wallet');
+    // Chosen before in this browser, so the stop page's own wallet session restores on load.
+    if (preselected) localStorage.setItem('stop:selected-wallet:mainnet', 'fixture-wallet');
     const accounts = [{ accountId: owner, publicKey: 'ed25519:fixture' }];
-    const wallet = { manifest: { id: 'fixture-wallet', name: 'Offline wallet', features: { signMessage: true, signDelegateActions: true }, permissions: {} },
+    const wallet = { manifest: { id: 'fixture-wallet', name: 'Offline wallet', features: { signMessage: true }, permissions: {} }, // a message-only wallet: the stop needs nothing more
       getAccounts: async () => accounts, signIn: async () => accounts, signOut: async () => {},
       signMessage: async payload => {
         await window.fixtureWalletCall('message', { message: payload.message, recipient: payload.recipient, nonce: btoa(String.fromCharCode(...payload.nonce)) });
@@ -24,7 +26,7 @@ async function stopPage(browser, root, { answers }) {
       },
     };
     window.addEventListener('near-selector-ready', () => window.dispatchEvent(new CustomEvent('near-wallet-injected', { detail: wallet })));
-  }, { host: HOST, owner: OWNER });
+  }, { host: HOST, owner: OWNER, preselected });
   const tab = await context.newPage(); tab.setDefaultTimeout(10_000);
   tab.on('pageerror', e => errors.push(e.message));
   await tab.route('**/*', async route => {
@@ -50,17 +52,17 @@ async function stopPage(browser, root, { answers }) {
 /** Connects, reads the shown text, signs, and checks what was signed and sent is that exact canonical text. */
 async function signAndCheck(fixture, path, expectedAgent) {
   const { tab, walletCalls, posts } = fixture;
-  await tab.goto(`http://${HOST}${path}`);
+  if (path) await tab.goto(`http://${HOST}${path}`);
   await tab.getByRole('heading', { name: 'Stop your agents', exact: true }).waitFor();
   assert.equal(posts.length, 0, 'opening the page sends nothing');
   // The owner's wallet session restores on load (a wallet already chosen in this browser), so no picker opens.
   await tab.getByText(`Connected as ${OWNER}`).waitFor();
-  if (expectedAgent === '*' && path !== '/confirm/wallet/stop') await tab.getByRole('radio', { name: `Every agent of ${OWNER} on this host` }).check();
+  if (expectedAgent === '*' && path !== '/confirm/wallet/stop') await tab.getByRole('radio', { name: `Every agent of ${OWNER} on this host` }).click();
   const shown = await tab.getByRole('heading', { name: 'The exact text your wallet signs' }).locator('xpath=following-sibling::pre[1]').innerText();
   const parsed = JSON.parse(shown);
   assert.equal(shown, canonical(parsed), 'the shown text is canonical');
   assert.deepEqual([parsed.host, parsed.owner, parsed.agent], [HOST, OWNER, expectedAgent]);
-  const expiresIn = Date.parse(parsed.expiresAt) - Date.now();
+  const expiresIn = Date.parse(parsed.expiresAt) - await tab.evaluate(() => Date.now());
   assert.ok(expiresIn > 60_000 && expiresIn <= 3_600_000, `expires in ${expiresIn} ms: within the gateway's hour`);
   await tab.getByRole('button', { name: 'Sign and stop', exact: true }).click();
   await expect.poll(() => posts.length).toBe(1);
@@ -120,4 +122,39 @@ async function everyAgentRefused(browser, root) {
   } finally { await fixture.context.close(); }
 }
 
-runTask([namedAgentRetry, everyAgentFromNamedLink, everyAgentRefused]);
+/** A page left open past most of the text's 10 minutes still signs a text with time left, never a stale one. */
+async function openLongBeforeSigning(browser, root) {
+  const fixture = await stopPage(browser, root, { clock: true, answers: [
+    { status: 200, body: { at: '2026-11-08T12:00:00.000Z', agents: [{ agent: 'treasury', agentId: 'id-treasury', consentsEnded: 1, autopilot: 'off' }] } },
+  ] });
+  try {
+    const { tab } = fixture;
+    await tab.goto(`http://${HOST}/confirm/wallet/stop/treasury`);
+    await tab.getByText(`Connected as ${OWNER}`).waitFor();
+    const text = () => tab.getByRole('heading', { name: 'The exact text your wallet signs' }).locator('xpath=following-sibling::pre[1]').innerText();
+    const first = JSON.parse(await text()).expiresAt;
+    await tab.clock.runFor('09:30');
+    await expect.poll(async () => JSON.parse(await text()).expiresAt, { message: 'the shown text is renewed before it runs out' }).not.toBe(first);
+    await signAndCheck(fixture, null, 'treasury');
+    await tab.getByText('Stopped', { exact: true }).waitFor();
+    console.log('PASS a page left open renews its text before it expires, and signs the renewed text in one click');
+  } finally { await fixture.context.close(); }
+}
+
+/** A first visit: the owner picks a wallet that signs messages only, the one thing a stop needs. */
+async function firstVisitMessageOnlyWallet(browser, root) {
+  const fixture = await stopPage(browser, root, { preselected: false, answers: [
+    { status: 200, body: { at: '2026-11-08T12:00:00.000Z', agents: [{ agent: 'treasury', agentId: 'id-treasury', consentsEnded: 1, autopilot: 'off' }] } },
+  ] });
+  try {
+    const { tab } = fixture;
+    await tab.goto(`http://${HOST}/confirm/wallet/stop/treasury`);
+    await tab.getByRole('button', { name: "Connect the owner's wallet", exact: true }).click();
+    await tab.getByText('Offline wallet', { exact: true }).click();
+    await signAndCheck(fixture, null, 'treasury');
+    await tab.getByText('Stopped', { exact: true }).waitFor();
+    console.log('PASS a first visit lists a wallet that signs messages only, and it signs the stop');
+  } finally { await fixture.context.close(); }
+}
+
+runTask([namedAgentRetry, everyAgentFromNamedLink, everyAgentRefused, openLongBeforeSigning, firstVisitMessageOnlyWallet]);

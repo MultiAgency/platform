@@ -888,13 +888,10 @@ Limits:
   - It doesn't interrupt a tick already running, or an app's call already forwarded (an `executePlan`, say): their
     swaps still pass the guarded send path.
   - Owner actions already waiting for the DAO's vote (a grant, a freeze) still take effect if that vote passes.
-- **A wallet owner's own stop** (`/confirm/wallet/stop`, no app involved; [app access](app-access.md)) does the same for
-  agents a wallet owns, one named agent or every one on the host, once the owner signs its exact text with a full-access
-  key: every app consent the owner gave for them before it first applies is revoked, and each created agent's autopilot
-  is turned off. It has the DAO stop's limits above: the provider grant stands, and a running tick or forwarded call
-  finishes. Freezing still needs an app to prepare `agent_freeze` and the owner to sign it on the confirm page, so a
-  wallet owner without an app has no "no new sends" stop on the platform: the stop ends apps' access and the autopilot,
-  not the grant's holder. Offline-tested; not deployed.
+- **A wallet owner's own stop** (`/confirm/wallet/stop`, [app access](app-access.md)) does the same for agents a
+  wallet owns, signed by the owner's full-access key with no app, and has the DAO stop's limits above. Freezing still
+  needs an app to prepare `agent_freeze`, so a wallet owner without an app has no "no new sends" stop on the platform.
+  Offline- and browser-tested; not deployed.
   - A slow DAO's stop waits its voting period, and nothing changes until someone opens the page after the vote:
     autopilot and the consents it will end stay live until then.
 - A DAO's Treasury grant proposal says what it authorizes without a vote each time (autopilot, and plans of apps the DAO
