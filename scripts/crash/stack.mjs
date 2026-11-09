@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { request as httpsRequest } from 'node:https';
 import { setTimeout as delay } from 'node:timers/promises';
 import { appClient } from '../../src/contract/app-client.ts';
@@ -13,8 +15,9 @@ import { LOOKALIKE, PAYEE, SAFE } from './attacks.mjs';
 // as `test/e2e/app-access.spec.mjs` does it: the owner's consent, a grant, the payee agreed by a signed policy update,
 // and simulated funding. The lookalike and the "safe" account exist on chain but are never agreed payees.
 
-const localFetch = (url, options = {}) => new Promise((resolve, reject) => {
-  const req = httpsRequest(url, { method: options.method ?? 'GET', headers: Object.fromEntries(new Headers(options.headers)), rejectUnauthorized: false }, res => {
+// Trusts only the stack's own certificate (test/e2e/environment.mjs makes it for localhost and 127.0.0.1): validation stays on.
+const localFetch = ca => (url, options = {}) => new Promise((resolve, reject) => {
+  const req = httpsRequest(url, { method: options.method ?? 'GET', headers: Object.fromEntries(new Headers(options.headers)), ca }, res => {
     const chunks = []; res.on('data', chunk => chunks.push(chunk));
     res.on('end', () => resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers: res.headers })));
   }); req.on('error', reject); req.end(options.body);
@@ -32,7 +35,7 @@ async function until(read, done, what, timeout = 30_000) {
 export async function crashStack(directory) {
   const stack = await environment(directory, { headless: true, accounts: [PAYEE, LOOKALIKE, SAFE] });
   const host = new URL(stack.dashboard).host;
-  const app = appClient({ base: stack.dashboard, credential: await appCredential(stack, 'local'), fetch: localFetch });
+  const app = appClient({ base: stack.dashboard, credential: await appCredential(stack, 'local'), fetch: localFetch(readFileSync(join(directory, 'localhost.crt'))) });
   const ownerSigned = async message => {
     const nonce = randomBytes(32).toString('base64'), signed = await sign(OWNER, { message, recipient: host, nonce });
     return { message, nonce, publicKey: signed.publicKey, signature: signed.signature };
