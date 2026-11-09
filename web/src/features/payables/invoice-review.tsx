@@ -1,9 +1,10 @@
+import { isSettled } from "./payment-status";
 import { useAgent } from "../../app/agent-context";
 import { ConfirmButton } from "../owner/confirm-button";
 import { ago, client, fromUnits, useAttempt } from "../../shared/lib";
 import { useCanCall } from "../../app/viewer";
 import { refusalText } from "../../shared/words";
-import { Badge, Card, CopyButton, Details, ErrorBox, Section } from "../../shared/ui";
+import { Badge, Card, CopyButton, Details, ErrorBox, Section, statusTone } from "../../shared/ui";
 
 export type InvoiceRecord = Awaited<ReturnType<typeof client.invoices>>[number];
 
@@ -20,13 +21,13 @@ export function InvoiceReview({ invoice, readFailed = false }: { invoice: Invoic
   const { error, attempt } = useAttempt();
   if (!canReadInvoices) return null;
   const prepared = invoice.operation.submissionState === "PREPARED";
-  const unresolved = !prepared && !invoice.operation.refused && !["SUCCESS", "FAILED", "REFUNDED", "PENDING_APPROVAL"].includes(invoice.operation.status ?? "");
+  const unresolved = !prepared && !invoice.operation.refused && !isSettled(invoice.operation.status) && invoice.operation.status !== "PENDING_APPROVAL";
   return <Section title="Invoice details" description="Changed invoice details require review and never replace a payment already submitted.">
     <Card>
       <div className="flex min-w-0 flex-wrap justify-between gap-2">
         <span className="min-w-0 break-words">{invoice.payee} · {fromUnits(invoice.amount, 6)} USDC</span>
         <span className="min-w-0 max-w-full [&>span]:h-auto [&>span]:min-h-6 [&>span]:max-w-full [&>span]:whitespace-normal [&>span]:py-1">
-          <Badge tone={invoice.operation.status === "SUCCESS" ? "success" : "warning"}>{invoiceStatus(invoice)}</Badge>
+          <Badge tone={invoice.operation.refused ? "warning" : statusTone(invoice.operation.status)}>{invoiceStatus(invoice)}</Badge>
         </span>
       </div>
       <p className="text-sm text-muted-foreground">Reserved: {fromUnits(invoice.reservation, 6)} USDC · Filed {ago(invoice.at)}</p>

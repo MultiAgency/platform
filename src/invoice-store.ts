@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Line, Op } from "./ops.js";
+import { isTerminal, isUnknownOutcome } from "./operation-status.js";
 import { PublicError } from "./public-error.js";
 
 /** One authoritative store for invoice identity, revisions, payment attempts and reservations.
@@ -174,9 +175,11 @@ export function recordInvoiceOperation(line: Line): boolean {
       db.prepare("UPDATE payments SET state = 'RESOLVED', refused = ? WHERE key = ?").run(line.refused, row.key);
       db.prepare("UPDATE reservations SET released = 1 WHERE payment_key = ?").run(row.key);
     } else if ("correlation_id" in line) {
+      // As the journal reader requires of a versioned operation: no provider outcome before its submission claim.
+      if (row.state === "PREPARED") throw new Error("Invoice outcome without submission claim; replay is blocked");
       if (row.correlation_id && row.correlation_id !== line.correlation_id) throw new Error("Invoice correlation id changed");
-      const terminal = ["SUCCESS", "FAILED", "REFUNDED"].includes(line.status);
-      const unknown = ["UNKNOWN", "UNCERTAIN", "NEEDS_REVIEW"].includes(line.status);
+      const terminal = isTerminal(line.status);
+      const unknown = isUnknownOutcome(line.status);
       db.prepare("UPDATE payments SET state = ?, status = ?, correlation_id = ? WHERE key = ?")
         .run(terminal ? "RESOLVED" : unknown ? "UNKNOWN" : "OBSERVED", line.status, line.correlation_id, row.key);
       if (terminal) db.prepare("UPDATE reservations SET released = 1 WHERE payment_key = ?").run(row.key);

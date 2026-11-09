@@ -23,7 +23,7 @@ const READS = ["compensation/list", "instance", "account", "setup", "overview", 
  * Preparations require FunctionCall proposal permission. None executes money or replaces the
  * owner's signature. The first three retain their historical non-intervention classification.
  */
-const PROPOSES = ["owner/prepare", "agreements/propose", "agreements/offer", "rebalance", "externalPlan", "steward/propose", "deposit", "treasury/fund",
+const PROPOSES = ["owner/prepare", "agreements/propose", "agreements/offer", "rebalance", "externalPlan", "deposit", "treasury/fund",
   "workOrders/create", "workOrders/prepare", "workOrders/deposit", "proposals/create", "proposals/withdraw"];
 const EXECUTES = ["proposals/execute", "compensation/prepare", "compensation/send", "compensation/review", "workOrders/file", "pay", "payouts/request", "sweep", "executePlan", "autopilot/tick", "autopilot/enable"];
 const MANAGES = ["compensation/agreement", "strategy/save", "treasury/link", "treasury/unlink", "agreements/decline"];
@@ -47,11 +47,11 @@ const policy = {
 const owner = { account: "fixture.sputnik-dao.near", policy, signer: "s" };
 const access = (account: string) => accessOf(`${account}.near`, owner)!;
 
-test("every procedure is explicitly assigned, with the internal ownership read denied to all browser callers", () => {
-  const all = paths(router);
-  assert.deepEqual(all.sort(), [...READS, ...PROPOSES, ...EXECUTES, ...MANAGES, ...MAINTAINS, "autopilot/set", ...SIGNS, "ownerIdentity"].sort());
+test("every procedure is explicitly assigned, with the gateway's internal reads denied to all browser callers", () => {
+  const all = paths(router), internal = ["ownerIdentity", "payeeTerms"];
+  assert.deepEqual(all.sort(), [...READS, ...PROPOSES, ...EXECUTES, ...MANAGES, ...MAINTAINS, "autopilot/set", ...SIGNS, ...internal].sort());
   const wallet = accessOf("owner.near", { account: "owner.near", policy: null, signer: "owner.near" })!;
-  for (const path of all) assert.equal(mayCall(wallet, path), path !== "ownerIdentity", path);
+  for (const path of all) assert.equal(mayCall(wallet, path), !internal.includes(path), path);
   for (const granted of [wallet, access("council")])
     for (const path of ["futureProcedure"])
       assert.equal(mayCall(granted, path), false, `${path} is not a browser procedure`);

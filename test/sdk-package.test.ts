@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { bundleOrpcClient } from "../scripts/sdk-stage.js";
+import { bundleOrpcClient, bundleTesting } from "../scripts/sdk-stage.js";
 
 test("the packaged SDK carries its own oRPC client: no bare @orpc/client import for an app's bundler to share, with its licenses", async t => {
   const staging = mkdtempSync(join(tmpdir(), "sdk-package-")); t.after(() => rmSync(staging, { recursive: true, force: true }));
@@ -44,4 +44,21 @@ test("the main and payee entries load no oRPC package but the bundled client: on
     assert.deepEqual(files.filter(loadsContract), [], `${entry} reaches no module importing @orpc/contract or @orpc/server`);
   }
   assert.ok(loadsContract("src/contract/owner-contract.ts"), "the contract subpath does load it");
+});
+
+test("the testing entry is one bundle importing only zod, @orpc/contract and node:crypto, exporting the payout double its declaration names", async t => {
+  // Inside the repository, so the bundle's imports resolve as they would from the package's own dependencies.
+  mkdirSync(".test-artifacts", { recursive: true });
+  const staging = mkdtempSync(join(".test-artifacts", "sdk-testing-")); t.after(() => rmSync(staging, { recursive: true, force: true }));
+  const { packages, sources } = bundleTesting(staging);
+  const bundled = readFileSync(join(staging, "dist/testing/index.js"), "utf8");
+  assert.deepEqual([...new Set([...bundled.matchAll(/^import\s[^;]*?from\s*"([^"]+)"/gm)].map(m => m[1]))].sort(), ["@orpc/contract", "node:crypto", "zod"]);
+  assert.ok(sources.includes("src/authorize.ts") && sources.includes("src/mandate.ts"), "the platform's own rule and digest are inside");
+  assert.deepEqual(sources.filter(file => /^src\/(agent|api|ops|lock|payout-requests|chain|recipients)\.ts$/.test(file)), [], "nothing of the money path's I/O is");
+  assert.ok([...packages].some(dir => dir.endsWith("@orpc/server")));
+  const testing = await import(join(process.cwd(), staging, "dist/testing/index.js")) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(testing), ["payoutDouble"]);
+  assert.match(readFileSync(join(staging, "dist/testing/index.d.ts"), "utf8"), /export declare const payoutDouble: PayoutDoubleFactory;/);
+  for (const entry of ["src/contract/index.ts", "src/contract/payee-entry.ts", "src/contract/owner-contract.ts"])
+    assert.doesNotMatch(readFileSync(entry, "utf8"), /testing/, `${entry} doesn't load the testing entry`);
 });

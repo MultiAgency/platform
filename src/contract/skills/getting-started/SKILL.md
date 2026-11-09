@@ -103,6 +103,8 @@ to a browser: `JSON.stringify(value, (_key, v) => typeof v === "bigint" ? v.toSt
 - `@multiagency/sdk/release-server`: `stage`, `activate`, `readRelease`, `digest` and `releaseServer` for app
   releases, and the `multiagency-release-server` command. Node only: its types use `@types/node`.
 - `@multiagency/sdk/schemas/*`: JSON Schemas of the payee and compensation wire for non-JavaScript consumers.
+- `@multiagency/sdk/testing`: `payoutDouble`, an in-process stand-in for one app's payout agent behind `/apps/v1`, for
+  an app server's own tests (see app-server). Node only; it imports zod and `@orpc/contract` and bundles the rest.
 
 Other exports (the owner contract object, server input schemas, capability helpers the gateway uses) are available,
 but they follow the platform's needs and may change without notice.

@@ -190,7 +190,7 @@ test("a token-weighted role names no accounts: sign-in and the council read past
 
 test("private reads need membership; preparing and submitting owner actions need their own capabilities", () => {
   for (const path of ["overview", "activity", "held", "ledgerCsv", "owner/pending", "invoices"]) assert.ok(mayCall(readerAccess, path), path);
-  for (const path of ["owner/prepare", "agreements/offer", "pay", "sweep", "steward/propose", "executePlan", "autopilot/set", "autopilot/tick", "recover", "treasury/link", "owner/submit"])
+  for (const path of ["owner/prepare", "agreements/offer", "pay", "sweep", "executePlan", "autopilot/set", "autopilot/tick", "recover", "treasury/link", "owner/submit"])
     assert.ok(!mayCall(readerAccess, path), path);
   assert.ok(mayCall({ ...readerAccess, canPropose: true }, "owner/prepare"));
   assert.ok(!mayCall({ ...readerAccess, canPropose: true, canVote: true, canExecute: true, canManage: true }, "owner/submit"));

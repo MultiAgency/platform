@@ -135,13 +135,16 @@ export function authorize(action: Action, c: Case): Refusal | null {
     // The provider checked payee and cap when the payment was requested, under the policy then; the
     // owner signs now, so what the policy no longer allows is refused here.
     if (purpose === "approval") {
-      const { recipient, asset } = action.request;
+      const { asset } = action.request;
       if (!policy.actions.includes(action.method))
         return refuse("action_not_allowed", `The current policy does not permit ${action.method === "withdraw" ? "withdrawals" : "transfers"}`);
       if (policy.assets !== "any" && !policy.assets.includes(asset)) return refuse("asset_not_allowed", "The current policy does not permit this payment asset");
-      // A withdrawal's payee was checked against the policy's withdrawal destinations above.
-      if (action.method === "transfer" && !agreedPayees(policy).has(recipient)) return refuse("payee_not_agreed", `${recipient} is not an agreed payee`);
     }
+    // A withdrawal's payee was checked against the policy's withdrawal destinations above. A payout's transfer payee is
+    // checked here too: the provider refuses an unlisted one under a code not proven here (`policy_destination_denied`),
+    // which would leave the operation unknown and block the agent's sends. Invoices leave it to the provider.
+    if ((purpose === "payout" || purpose === "approval") && action.method === "transfer" && !agreedPayees(policy).has(action.request.recipient))
+      return refuse("payee_not_agreed", `${action.request.recipient} is not an agreed payee`);
     // The provider refuses an amount over the per-transaction cap under a code not proven here
     // (`policy_transaction_limit_exceeded`), which would leave the operation unknown and block the agent's sends:
     // refused before anything is sent instead.

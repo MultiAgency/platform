@@ -94,7 +94,9 @@ _Avoid_: rules, config
 The sha256 of a policy's canonical JSON, recorded with every plan and every money action.
 
 **Grant**:
-The owner's permission for this server to act for the agent, named by its **grant label**.
+The owner's permission for this server to act for the agent, named by its **grant label**. It ends at its
+**grant expiry**, which the owner signs: 30 days unless the owner names another (at least an hour and at most 365 days
+ahead), or a work order's deadline. Per the provider's docs, it then authorizes no new sends.
 _Avoid_: token, credential (the grant token is only the secret that proves the grant)
 
 **Grant label**:
@@ -115,6 +117,17 @@ _Avoid_: guard, gate, check
 A recipient listed as a confidential transfer destination in a policy whose destinations mode is
 `only`. A policy in `except` mode has no agreed payees.
 _Avoid_: allowlisted address, destination
+
+**Payee disclosure**:
+A wallet owner's NEP-413 signature over a canonical text naming the platform host, the agent and its provider ID, one
+payee account and an expiry of at most 366 days: the agent may show that payee their own terms. With it and a read the
+payee signs (at most an hour), the payee fetches from the platform host, with no app between, their own destination
+entries, the per-transaction caps of the assets the agent spends, `owner_approval`, `frozen`, whether the policy is in
+force, and its revision, read from the provider's current policy; never other payees, budgets or
+other limits. The mandate digest is added only when the owner opts in within the signed text (`"discloseDigest":true`):
+it commits to the whole policy, so a payee who can guess the rest of a simple policy could confirm the guess. Nothing is stored: it ends at its expiry, when the owner's signing key is removed, or when the agent is
+replaced. The answer is the platform's account of the provider's policy, not independently checkable. Offline-tested;
+not deployed. See docs/app-access.md.
 
 **Agreement**:
 An owner's consent to pay a payee, with **terms**: an amount ceiling per invoice and a deadline. A payee
@@ -152,8 +165,8 @@ could cost more than its cap at their floor are left out, and the rest are saved
 until the plan is executed.
 
 **Steward**:
-An experimental LLM that proposes a plan in conversation, its responses verified against its TEE. It only
-proposes; the plan executes like any other.
+The experimental LLM planner removed in SDK 0.5.5; stored plans it proposed keep `source: "steward"`. The platform
+keeps no model of its own in the money path: an app's agent proposes through `externalPlan` or a proposal.
 
 ## Money actions
 
@@ -177,8 +190,11 @@ refused before sending). The same identity is the provider's idempotency key, bu
 on the provider. Asked again, or read with `payouts/status` on the agent's executor, it answers what the journal proves
 (`succeeded`, `failed`, `held`, `processing`, `refused`, `unknown`, `not_found`) and sends nothing; other terms under
 the same `requestId` are refused. `processing` and `unknown` block the agent's sends and are never resent. `failed`
-(FAILED or REFUNDED) doesn't prove nothing moved, so a person checks before a new attempt; a new attempt is a new
-`requestId`, after `refused` or that check. An approve-only copy answers no request. A named recipient that doesn't exist
+(FAILED or REFUNDED) doesn't prove nothing moved, so a person checks before a new attempt, unless the answer's
+`neverExecuted` is true: the provider's own status of that operation reads FAILED with `never_executed` and no
+transaction, delivered amount or refund (per its docs, how an owner's rejection of a held payout ends). A `failed`
+answer also carries the provider's `failureCode`. A new attempt is a new `requestId`, after `refused`, `neverExecuted`
+or that check. The app that asked may read `payouts/status` under `read` consent too; it answers only its own requests. An approve-only copy answers no request. A named recipient that doesn't exist
 on NEAR is refused `recipient_not_found` before anything is recorded (every transfer, not only requests), and
 `recipient_unchecked` when the chain didn't answer; neither consumes the `requestId`. A request names `asset` and `delivery`: `intents`, a
 confidential USDC transfer to an agreed payee, or `{ chain: "near" }`, a withdrawal of wNEAR (arriving as native NEAR,
@@ -188,6 +204,12 @@ agrees to pay by withdrawal; a USDC withdrawal's recipient must be registered on
 approved like a transfer, its terms proven against the provider's request hash, or rejected.
 Mainnet-observed on platform staging (transfers 2026-10-28, withdrawals 2026-10-30); not in production.
 _Avoid_: retry (for a new attempt)
+
+**Payout double**:
+`@multiagency/sdk/testing`'s in-process stand-in for one app's payout agent behind `/apps/v1`, for an app server's own
+tests. It runs the platform's own `authorize`, mandate digest and input schemas; its restated request semantics are
+checked against the real money path by `test/payout-double.test.ts`. It authorizes nothing and moves nothing.
+_Avoid_: fake platform, mock (for this double)
 
 **Held payout**:
 A payout the provider holds for the owner's approval. Its outcome is open, but it can't be lost, so it
@@ -206,7 +228,9 @@ refused while an unresolved operation exists. It is single-host, not distributed
 
 **Owner intent**:
 An owner action (create, grant, freeze, policy update, approval vote) prepared by the server and signed
-by the owner's wallet or a DAO vote, kept `prepared → submitted → settled` so a restart follows it.
+by the owner's wallet or a DAO vote, kept `prepared → submitted → settled` so a restart follows it. Its **phase**
+(`open`, `expired`, `submitted`, `settled`) is that record's place in this lifecycle, named the same in every owner
+output; `expired` means its signing window closed unsubmitted. Each output's older `stage`/`state` word stays as it was.
 
 **Invoice**:
 A payee's request to be paid, which becomes one payout operation with a stable key and immutable terms. Until it is
@@ -362,10 +386,11 @@ deployment, never a user, and authorizes nothing on its own.
 
 **App consent**:
 An agent owner's NEP-413 signature over a canonical consent text naming the platform host, one app deployment,
-one Organization, the agent and its provider ID, and its scopes, with an expiry of at most 366 days. The platform checks the signature and
+one Organization, the agent and its provider ID, and its scopes, with an expiry of at most 366 days, signed with a NEP-413
+nonce the app picks or a **consent nonce** the platform issued (proof it was signed after any earlier wallet stop). The platform checks the signature and
 that the key is a full-access key of the configured owner, binds the consent to the agent's current provider ID, and
 re-checks ownership and the signing key on every call: once the chain reports the key removed (on a call or the operator's
-`check-keys` sweep), the consent is revoked for good. Scopes today: `read` (a fixed list of reads; no workflow records), `owner` (prepare, submit and follow owner actions,
+`check-keys` sweep), the consent is revoked for good. Scopes today: `read` (a fixed list of reads, including the app's own payout requests' status; no workflow records), `owner` (prepare, submit and follow owner actions,
 which only the owner's own wallet signature completes; the app receives an intent only when it is NEP-413, and a NEP-366
 one only as a confirm page link), `payout` (payout requests, their status, held payouts and a deposit address to fund the agent),
 `treasury` (Treasury reads, strategy settings, autopilot on and off and "Run now", sweep, a deposit address to fund the
@@ -414,8 +439,10 @@ holds the intent and gives the app only the link; the page shows the agent's rec
 deployment and Organization, agent, and for a policy edit each field before and after) to whoever holds the link, and
 releases the bytes to sign only after the owner's key signs the link's readable text. It submits only the owner's
 signature over the held bytes, once, before the intent expires. Offline- and stack-tested with a simulated wallet;
-mainnet-observed on platform staging (agent creation 2026-10-28; policy edits 2026-10-30); not in production. See
-docs/app-access.md.
+mainnet-observed on platform staging (agent creation 2026-10-28; policy edits 2026-10-30); not in production. A vote on
+a held payout (NEP-413, whose text names no payee or amount) gets a link too, showing the terms the agent proved against
+the provider's evidence; the app also gets the vote's text, so the page is optional and signs that text directly.
+Offline- and browser-tested only. See docs/app-access.md.
 
 **Platform host**:
 The platform's own host for apps (`api.dev.multiagency.ai` for staging, later `api.multiagency.ai`), run from the

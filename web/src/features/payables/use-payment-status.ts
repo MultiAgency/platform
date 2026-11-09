@@ -1,9 +1,9 @@
+import { isSettled } from "./payment-status";
 import { queries } from "../../shared/queries";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { client } from "../../shared/client";
 
-const TERMINAL = new Set(["SUCCESS", "FAILED", "REFUNDED"]);
 export function usePaymentStatus(id: string | undefined) {
   // The first read answers at once; each later one waits at the provider until the payment moves (up to
   // 25 s) and is asked again as soon as it answers: news arrives at once, in about 2 calls a minute. The
@@ -22,7 +22,7 @@ export function usePaymentStatus(id: string | undefined) {
       observation.seen = true;
       return result;
     },
-    refetchInterval: (q) => (q.state.error ? false : q.state.data && TERMINAL.has(q.state.data.status) ? false : observation.quick ? 4_000 : 500),
+    refetchInterval: (q) => (q.state.error ? false : q.state.data && isSettled(q.state.data.status) ? false : observation.quick ? 4_000 : 500),
   });
   return status;
 }

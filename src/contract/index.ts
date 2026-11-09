@@ -10,6 +10,7 @@ export * from "../compensation-contract.js";
 export * from "./payee.js";
 export * from "./client.js";
 export * from "./agent-connection.js";
+export * from "./payee-policy.js";
 export * from "./owner-outputs.js";
 export * from "./owner-client.js";
 export * from "./app-consent.js";

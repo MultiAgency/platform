@@ -251,3 +251,15 @@ test("legacy invoices are imported read-only, moved aside, and a stale writer ca
   assert.equal((await file(invoice, invoice.payee)).status, "needs_review");
   assert.deepEqual(sends, []);
 });
+
+test("an invoice payment follows the journal's transitions: no provider outcome before its submission claim", () => {
+  const prepared = prepareInvoice(invoice, ASSETS.USDC);
+  const key = prepared.operation.idempotencyKey;
+  assert.throws(() => record({ idempotencyKey: key, correlation_id: "unclaimed", status: "SUCCESS" }), /submission claim/);
+  assert.equal(getInvoice(prepared.id)!.operation.submissionState, "PREPARED");
+  assert.ok(claimInvoiceSubmission(key, JSON.parse(JSON.stringify(prepared.operation.request))));
+  record({ idempotencyKey: key, correlation_id: "claimed", status: "UNCERTAIN" });
+  assert.equal(getInvoice(prepared.id)!.operation.submissionState, "UNKNOWN");
+  record({ idempotencyKey: key, correlation_id: "claimed", status: "SUCCESS" });
+  assert.equal(getInvoice(prepared.id)!.operation.submissionState, "RESOLVED");
+});

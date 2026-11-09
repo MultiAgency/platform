@@ -7,7 +7,7 @@ import { tsImport } from 'tsx/esm/api';
 import { sign, signDelegate } from './provider.mjs';
 
 // The running stack's file controls (stack.mjs) and its app credential. Every signature comes from the stack's unfunded
-// fixture key, standing in for the owner's wallet. None of this is an application route.
+// fixture key, standing in for the owner's or a payee's wallet. None of this is an application route.
 
 /** A `fetch` for the stack's dashboard host, trusting only the stack's own certificate. */
 const stackFetch = stack => (url, { method = 'GET', headers, body } = {}) => {
@@ -48,9 +48,21 @@ export async function appCredential(stack, deployment) {
   return token;
 }
 
-/** Each command takes the control file's arguments and answers a JSON value (or nothing). */
-export function stackControls(stack, { owner }) {
+/**
+ * Each command takes the control file's arguments and answers a JSON value (or nothing). `payees`: the stack's payee
+ * accounts (`--payee`, `--builder`), which `signPayee` signs for.
+ * @param {any} stack
+ * @param {{ owner: string; payees?: string[] }} options
+ */
+export function stackControls(stack, { owner, payees = [] }) {
   const { simulated } = stack, host = new URL(stack.dashboard).host;
+  /** A NEP-413 signature by `account` over an app's text: never the platform's sign-in text, which an app must not ask anyone to sign (docs/app-access.md). */
+  const signText = async (account, { message, recipient, nonce }) => {
+    if (typeof message !== 'string' || typeof recipient !== 'string' || typeof nonce !== 'string') throw new Error('Give message, recipient and nonce');
+    if (message === `Sign in to ${host}`) throw new Error('An app never asks anyone to sign the platform sign-in text');
+    const { publicKey, signature } = await sign(account, { message, recipient, nonce });
+    return { accountId: account, publicKey, signature };
+  };
   const portfolio = () => { if (!stack.portfolio) throw new Error('Start the stack with --treasury'); return stack.portfolio; };
   /** The simulated provider behind `agent`: the payout agent's by default, or `portfolio` (the Treasury agent's own). */
   const providerOf = agent => {
@@ -69,8 +81,17 @@ export function stackControls(stack, { owner }) {
   };
   return {
     fund: ({ agent, amount }) => simulated.fund(agent, amount),
-    settle: ({ correlation }) => simulated.settle(correlation),
+    /** An approved payment ends: `outcome` `SUCCESS` (default), `FAILED` or `REFUNDED`. */
+    settle: ({ correlation, outcome }) => simulated.settle(correlation, outcome),
     dropTransferResponse: () => simulated.dropTransferResponse(),
+    /** The provider accepts the next withdrawal but its response is lost. */
+    dropWithdrawResponse: () => simulated.dropWithdrawResponse(),
+    /** `account` is not registered on `asset`'s token (default USDC): a USDC withdrawal to it is refused `recipient_not_registered`. */
+    unregister: ({ account, asset }) => simulated.unregister(account, asset),
+    /** The provider refuses the next transfer or withdrawal by its rules (`code`, at HTTP `status`), recording nothing. */
+    refuseNextPayout: ({ code, status }) => simulated.refuseNextPayout({ code, status }),
+    /** A held payment's approval reads expired: the platform refuses a vote on it. */
+    expireApproval: ({ correlation }) => simulated.expireApproval(correlation),
     fundPayout: ({ amount }) => simulated.fundPayout(amount),
     dropSignatureResponse: ({ agent } = {}) => providerOf(agent).dropSignatureResponse(),
     revealOwnerOutcome: ({ agent } = {}) => providerOf(agent).revealOwnerOutcome(),
@@ -132,11 +153,11 @@ export function stackControls(stack, { owner }) {
      * The owner's NEP-413 signature over a text an app asked for: a consent, a setup, or a prepared intent's `payload`.
      * Never the platform's sign-in text, which an app must not ask an owner to sign (docs/app-access.md).
      */
-    signOwner: async ({ message, recipient, nonce }) => {
-      if (typeof message !== 'string' || typeof recipient !== 'string' || typeof nonce !== 'string') throw new Error('Give message, recipient and nonce');
-      if (message === `Sign in to ${host}`) throw new Error('An app never asks the owner to sign the platform sign-in text');
-      const { publicKey, signature } = await sign(owner, { message, recipient, nonce });
-      return { accountId: owner, publicKey, signature };
+    signOwner: input => signText(owner, input),
+    /** A payee's NEP-413 signature over an app's own text (`account` one of the stack's payees), as for `signOwner`. */
+    signPayee: ({ account, ...input }) => {
+      if (!payees.includes(account)) return Promise.reject(new Error(`${account} is not one of the stack's payees (${payees.join(', ')})`));
+      return signText(account, input);
     },
     /**
      * The owner's NEP-366 signature over a delegate action, as the platform's confirm page asks the wallet for it

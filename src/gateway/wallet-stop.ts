@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
@@ -12,7 +13,7 @@ import type { Router } from "../router.js";
 import { chainKeyState, clientAddress, hourlyLimit, type KeyStateLookup } from "../signin.js";
 import { appendSynced, writeAtomic } from "../synced.js";
 import { agentOrigin } from "./agent-origin.js";
-import { accessLog, AppConsents, privateDirectory, readRecord } from "./app-access.js";
+import { accessLog, AppConsents, jsonFiles, privateDirectory, readRecord } from "./app-access.js";
 import type { AgentEntry } from "./config.js";
 import { resolveWalletAuthority } from "./machine-authority.js";
 import { EVERY_AGENT, MAX_WALLET_STOP_MS, parseWalletStopMessage } from "./wallet-stop-text.js";
@@ -46,6 +47,13 @@ class WalletStops {
   private readonly dir: string;
   constructor(root: string) { this.dir = join(root, "wallet-stops"); }
   read(id: string) { return readRecord(join(this.dir, `${id}.json`), WalletStopRecord); }
+  /** This owner's stops on this host. Another owner's record is read only as far as its owner and host, so it can't fail this one. */
+  ofOwner(host: string, owner: string) {
+    return jsonFiles(this.dir).flatMap(file => {
+      const raw = JSON.parse(readFileSync(join(this.dir, file), "utf8")) as { host?: unknown; owner?: unknown } | null;
+      return raw?.host === host && raw.owner === owner ? [WalletStopRecord.parse(raw)] : [];
+    });
+  }
   write(record: WalletStopRecord) {
     privateDirectory(this.dir);
     writeAtomic(join(this.dir, `${record.id}.json`), JSON.stringify(WalletStopRecord.parse(record)) + "\n", 0o600);
@@ -53,9 +61,21 @@ class WalletStops {
   }
 }
 
+/**
+ * The latest cutoff of the owner's wallet stops on this host covering `agent`: one naming it when first applied, or one
+ * for every agent (only those when `agent` isn't known yet). After it, a consent or setup for that agent is stored only
+ * if the platform issued its nonce later (`consent-nonce.ts`): any other nonce can't show the text wasn't signed before
+ * the stop. Null if none covers it.
+ */
+export function walletStopCutoff(root: string, { host, owner, agent }: { host: string; owner: string; agent?: string }) {
+  const cutoffs = new WalletStops(root).ofOwner(host.toLowerCase(), owner)
+    .filter(stop => stop.agent === EVERY_AGENT || (agent !== undefined && stop.targets.some(target => target.agent === agent))).map(stop => stop.at);
+  return cutoffs.length ? Math.max(...cutoffs) : null;
+}
+
 /** Who owns an agent now, as its server and the chain report it: its provider ID if this wallet does, else null. Throws if unanswered. */
 export type WalletOwnerRead = (account: string, agent: AgentEntry) => Promise<{ agentId: string | null } | null>;
-const walletOwner: WalletOwnerRead = async (account, agent) => {
+export const walletOwner: WalletOwnerRead = async (account, agent) => {
   const authority = await resolveWalletAuthority(account, agent);
   return authority && { agentId: authority.agentId };
 };

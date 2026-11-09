@@ -64,7 +64,7 @@ existing domain calls. Submission remains centralized in dispatch.
 |---|---|
 | Planning | `treasury.ts` (rebalance legs, quotes, sweep), `planning/` (plan model, checks, storage, observations and execution; `plans.ts` retains compatibility exports), `strategy.ts`, `strategy-digest.ts` |
 | Running alone | `autopilot.ts` (the scheduled tick: sweep, then rebalance within its limit) |
-| Experimental | `llm.ts` (the steward, reached through the `steward` procedure; its page is in the Treasury app) |
+| Experimental | `llm.ts` (verified NEAR AI inference for the Payables guide; the steward it served was removed in 0.5.5) |
 
 ## Around them
 
@@ -437,7 +437,8 @@ on message text, and never infer from a failed response that an action was not a
 - `refused` (BAD_REQUEST): a `PublicError`, work-order or compensation refusal, a send refused by `dispatch`'s
   local checks (`LocalRefusal`: `authorize`, the recipient, a reviewed policy; with its code), or a send held by this
   server's own checks (`local_authorization_held`); proven not to have taken effect.
-- `provider` (BAD_REQUEST): a provider failure on a read, or one whose answer proves nothing executed. It carries
+- `provider` (BAD_REQUEST): a provider failure on a read, while preparing an owner action (`owner/prepare`, whose only
+  provider write, `generate-intent`, executes nothing), or one whose answer proves nothing executed. It carries
   the provider's code and validated refusal metadata, never its title or detail text.
 - Anything else is INTERNAL_SERVER_ERROR with fixed guidance, which the SDK reports as `unknown`. The
   server logs an `unclassified_error` line with the procedure, error class, throw site and provider

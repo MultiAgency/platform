@@ -54,6 +54,11 @@ exit diagnostics; intentional crash cases must assert their expected crash statu
 Fixture builders provide valid starting evidence; scenario overrides must remain visible. Do not
 repair missing identity, synchronization, freshness or authorization evidence behind a test's back.
 
+`test/payout-double.test.ts` runs each payout scenario through the SDK's `appClient` twice, against
+`@multiagency/sdk/testing`'s payout double and against the agent's real procedures (journal, money lock, `dispatch`,
+`authorize`) behind a provider stand-in, and requires the same answers: the double's restated request semantics fail
+there before they can drift.
+
 Source-boundary checks parse TypeScript/TSX, including runtime re-exports and literal dynamic imports.
 They reject non-literal module loading in inspected dependency graphs and constrain grant-factory
 uses outside dispatch to direct, explicit dry quotes. These are structural regression checks, not a
@@ -267,8 +272,13 @@ rather than serve a confirm page that loads blank. `stack/state.json` lists the 
 owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`: the stack clicks a button named exactly
 "Connect wallet" and, if near-connect asks which wallet to use, picks the local test wallet), with `--treasury` the portfolio's access page and
 machine base (with `--dao-treasury` both `null`, since a DAO has no owner session, plus the DAO's account and Group members, the agent's owner and `signer: "dao"`), with `--app` the deployment, base and credential file, the simulated chain's RPC (`chain.rpc`), the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
-refreshed every 250 ms. Write `stack/controls/<name>.json` whole (write another name, then rename) with a `command` of `fund`, `fundPayout`, `settle`,
-`dropTransferResponse`, `dropSignatureResponse`, `revealOwnerOutcome`, `setUnavailable` (`value`; optional `agent`:
+refreshed every 250 ms. Write `stack/controls/<name>.json` whole (write another name, then rename) with a `command` of `fund`, `fundPayout`, `settle`
+(`correlation`; optional `outcome`: `SUCCESS`, the default, `FAILED` or `REFUNDED`), `dropTransferResponse`, `dropWithdrawResponse` (the provider
+accepts the next transfer, or withdrawal, and its reply is lost), `unregister` (`account`, optional `asset`, USDC by default: the account
+isn't registered on that token, so a USDC withdrawal to it is refused `recipient_not_registered`), `refuseNextPayout` (`code`, a 4xx `status`:
+the provider refuses the next transfer or withdrawal in its error shape and records nothing; budget and limit codes among them, since the simulator
+counts no budget, hourly or monthly limit), `expireApproval` (`correlation`: the held payment's approval reads expired, so the platform refuses a
+vote on it; what the provider then does with the payment isn't modelled), `dropSignatureResponse`, `revealOwnerOutcome`, `setUnavailable` (`value`; optional `agent`:
 `payout`, the default, or `portfolio`), `dropSwapResponse` (`portfolio` applies its next swap, or the `after`-th, and
 loses the reply: an `unknown` outcome), `fundPublic` (`asset`, raw `amount`: funds on `portfolio`'s public balance, which
 a sweep shields), `setPrice` (`asset`, a positive decimal USD `price`: a listed token's price moves for every later quote and
@@ -277,7 +287,8 @@ saves `portfolio`'s strategy through `strategy/save`, which turns autopilot off;
 `authorizeStrategy` (the owner signs, with the fixture key and through its own route, a grant bound to the saved
 strategy, which an app's or a machine credential's plans need; answers the digest it binds), `signOwner`
 (`message`, `recipient`, `nonce`: the owner's NEP-413 signature from the fixture key, standing in for the wallet an app
-asks; never the platform sign-in text), `signOwnerDelegate` (`receiverId`, `actions`: the owner's NEP-366 signature over a
+asks; never the platform sign-in text), `signPayee` (`account`, one of the stack's `--payee` or `--builder` accounts, and `message`,
+`recipient`, `nonce`: that payee's NEP-413 signature over an app's own text, likewise), `signOwnerDelegate` (`receiverId`, `actions`: the owner's NEP-366 signature over a
 delegate action of function calls, as the platform's confirm page asks the wallet for it with `signDelegateActions`; answers
 `{ accountId, signedDelegate }`, base64), `daoVote` (`hash`: the DAO passes the proposal that signs that 64-hex hash, as a member's
 transaction names it in its `v1.signer` call), `daoConfidentialSetup` (the DAO is set up for confidential intents: its key on
@@ -296,6 +307,10 @@ executes a rebalance into wNEAR and ETH, and sees a `portfolio`-only outage and 
 `unresolved`); a DAO case (`--no-browser --dao-treasury --app`) passes the DAO's consent with `daoVote` and reads
 `treasury/get` as public, then confidential after `daoConfidentialSetup`; a second case serves an app's own build (`--frontend`) whose near-connect asks which wallet
 to use, and the stack still starts signed in. The routes' own behaviour is asserted in `app-access.spec.mjs` and `agent-access.spec.mjs`.
+A request the simulator doesn't model that the real provider may accept (for example a grant label other than `treasury` for a
+Treasury agent, or than `payout` and `invoices` for a payout agent the owner created) is refused in the provider's error shape,
+400 `unsupported_by_simulator`, which the platform reports as a `provider` refusal; any other undeclared request still answers 500
+and lands in `state.json` `providerErrors`.
 Page dialogs (such as the payee's filing `confirm()`) are logged in `state.json` `dialogs` and left open
 for the attached client or person to answer; an attached Playwright client must register its own dialog
 handler, or it dismisses the dialog itself. `--accept-dialog '<exact message>'` (repeatable) instead accepts

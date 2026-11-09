@@ -19,6 +19,10 @@ import { DaoRequests, daoRequestPage, PAGE_HEADERS } from "./app-dao.js";
  * text that tells the owner in the wallet to sign it only on this page. Only the owner's signature over those bytes
  * submits, once. Additive state under `.app-access/confirm/`: one record per link, named by the token's hash; a hold marker per
  * held action, named by its correlation ID's hash; and a claim file beside the record once a submission was made.
+ *
+ * A vote on a held payout (NEP-413, whose text names no payee or amount) gets a link too, showing the terms the agent
+ * proved against the provider's evidence (#48). The app gets the vote's text as well, so the link is an offer: it holds
+ * nothing, has no opening step, and the page signs that text directly.
  */
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 /** Whether a file exists; anything but its absence is an error, never a "no". */
@@ -33,11 +37,19 @@ const Confirm = z.strictObject({ version: z.literal(1), id: z.string().regex(/^[
   correlationId: z.string().min(1), type: z.string(), action: z.record(z.string(), z.unknown()),
   /** The agent's own record of a creation's or edit's policy: what it asked the provider to sign, and what it replaces. */
   policy: z.looseObject({ current: z.unknown(), requested: z.unknown() }).nullable(), summary: z.string().nullable(), expiresAt: z.string(),
-  intent: z.looseObject({ standard: z.literal("nep366"), payload: z.record(z.string(), z.unknown()) }),
+  intent: z.looseObject({ standard: z.enum(["nep366", "nep413"]), payload: z.record(z.string(), z.unknown()) }),
   signer: z.looseObject({ type: z.literal("near"), account_id: z.string(), public_key: z.string() }),
-  /** The 32-byte NEP-413 nonce of the link's opening text. */
-  nonce: z.string(), createdAt: z.number().int(), submittedAt: z.number().int().nullable() });
+  /** The 32-byte NEP-413 nonce of the link's opening text: NEP-366 links only (a vote's link has no opening step). */
+  nonce: z.string().optional(), createdAt: z.number().int(), submittedAt: z.number().int().nullable(),
+  /**
+   * Votes on held payouts only: the payout the vote releases or rejects and, for approve, its terms as the agent proved
+   * them against the provider's request hash (`checkPaymentApproval`), never as the app gave them. Null for a reject.
+   */
+  payment: z.looseObject({ correlationId: z.string(), verdict: z.enum(["approve", "reject"]),
+    terms: z.looseObject({ recipient: z.string(), asset: z.string(), amount: z.string(), chain: z.literal("near").optional() }).nullable() }).optional() });
 export type ConfirmRecord = z.infer<typeof Confirm>;
+/** Whether the platform holds a link's bytes (NEP-366); a vote's text (NEP-413) went to the app too. */
+const holdsBytes = (record: ConfirmRecord) => record.intent.standard === "nep366";
 
 /**
  * The text the owner signs to open a link. It carries its own warning, so the wallet shows it wherever the owner is
@@ -62,8 +74,9 @@ export class AppConfirms {
   hold(input: Omit<ConfirmRecord, "version" | "id" | "nonce" | "createdAt" | "submittedAt">, now = Date.now()) {
     privateDirectory(this.dir);
     const token = randomBytes(16).toString("base64url");
-    const record = Confirm.parse({ ...input, version: 1, id: hash(token), nonce: randomBytes(32).toString("base64"), createdAt: now, submittedAt: null });
-    writeAtomic(this.file(hash(record.correlationId), "hold"), `${record.id}\n`, 0o600);
+    const record = Confirm.parse({ ...input, version: 1, id: hash(token), createdAt: now, submittedAt: null,
+      ...(input.intent.standard === "nep366" && { nonce: randomBytes(32).toString("base64") }) });
+    if (holdsBytes(record)) writeAtomic(this.file(hash(record.correlationId), "hold"), `${record.id}\n`, 0o600);
     writeAtomic(this.file(record.id), JSON.stringify(record) + "\n", 0o600);
     return { token, record };
   }
@@ -106,7 +119,7 @@ const opening = z.object({ signature: z.string() });
 /** Whether a body is the owner key's NEP-413 signature over the link's opening text (the key the action names). */
 function opensLink(record: ConfirmRecord, body: unknown) {
   const parsed = opening.safeParse(body);
-  if (!parsed.success) return false;
+  if (!parsed.success || record.nonce === undefined) return false;
   try {
     return verifyEd25519(record.signer.public_key, nep413Hash(confirmOpenMessage(record), Buffer.from(record.nonce, "base64"), record.host),
       signatureBytes(parsed.data.signature));
@@ -144,8 +157,9 @@ export async function confirmRoutes(req: IncomingMessage, res: ServerResponse, p
   if (req.method === "GET" && !call[2]) {
     json(res, 200, { deployment: record.deployment, organization: record.organization, agent: record.agent, owner: record.owner,
       type: record.type, action: record.action, policy: record.policy, summary: record.summary, expiresAt: record.expiresAt,
-      signer: { account_id: record.signer.account_id, public_key: record.signer.public_key },
-      opening: { message: confirmOpenMessage(record), recipient: record.host, nonce: record.nonce },
+      payment: record.payment ?? null, signer: { account_id: record.signer.account_id, public_key: record.signer.public_key },
+      // What the app already holds is no secret: the page signs it without the opening step.
+      ...(holdsBytes(record) ? { opening: { message: confirmOpenMessage(record), recipient: record.host, nonce: record.nonce } } : { intent: record.intent }),
       state: record.submittedAt !== null ? "submitted" : expired ? "expired" : "open" });
     return true;
   }
@@ -154,6 +168,7 @@ export async function confirmRoutes(req: IncomingMessage, res: ServerResponse, p
   if (expired) { json(res, 410, { error: "This action expired unsigned. Ask the app to prepare it again." }); return true; }
   const body = await readJson(req);
   if (call[2]) {
+    if (!holdsBytes(record)) { json(res, 404, { error: "This link has nothing to open: the page shows the text to sign." }); return true; }
     if (!opensLink(record, body)) { json(res, 403, { error: "Sign this link's text with the owner's key to see what to sign." }); return true; }
     json(res, 200, { intent: record.intent }); return true;
   }

@@ -168,8 +168,10 @@ for (const sharedHosts of [false, true]) test(`${sharedHosts ? "shared hosts" : 
   }
   await stop();
   if (sharedHosts) {
-    // Offline-created identities: no provider creation or owner action is submitted by this test.
-    for (const [instance, id] of [[daoName, "a".repeat(64)], [walletPayout!, "b".repeat(64)]]) {
+    // Offline-created identities: no provider creation or owner action is submitted by this test. Each child takes the
+    // executor lease, a lock in the OS temp directory named by agent id (src/executor-lease.ts), so these ids are used by
+    // no other test: the fixture AGENT_ID ("a" x 64) would collide with any test file running an agent server alongside.
+    for (const [instance, id] of [[daoName, "7".repeat(64)], [walletPayout!, "8".repeat(64)]]) {
       const file = join(dir, ".hosted", `${instance}.env`);
       writeFileSync(file, readFileSync(file, "utf8") + `AGENT_ID=${id}\n`);
     }

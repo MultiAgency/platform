@@ -5,7 +5,7 @@ export { exactPayment, fromUnits } from "../features/payables/payment-copy";
 export type Overview = Awaited<ReturnType<typeof client.overview>>;
 export type Holding = Overview["book"][number];
 
-/** Whether the policy lets the agent swap. The target allocation, rebalancing and the steward apply only then. */
+/** Whether the policy lets the agent swap. The target allocation and rebalancing apply only then. */
 export const swaps = (data: Overview) => Boolean(data.policy.policy?.actions.includes("swap"));
 
 /** Configured area is stable across policy changes. Legacy servers retain their policy-based fallback. */

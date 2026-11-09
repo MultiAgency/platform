@@ -48,5 +48,5 @@ export type OwnerInputs = {
   "proposals/approve": In<typeof proposalSigned>; "proposals/reject": In<typeof proposalSigned>;
   "proposals/withdraw": In<typeof proposalRef>; "proposals/execute": In<typeof proposalRef>;
   // Streams
-  rebalance: undefined; executePlan: In<typeof executePlanInput>; sweep: { execute: boolean }; "steward/propose": { instruction?: string };
+  rebalance: undefined; executePlan: In<typeof executePlanInput>; sweep: { execute: boolean };
 };

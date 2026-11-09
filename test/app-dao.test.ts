@@ -525,6 +525,9 @@ test("a DAO that votes treasury-execute into its consent lets the app run plans;
   const changed = proposalDescription({ ...base, label: `treasury:${suffix}`, strategy: { ...DEFAULT_STRATEGY, maxCostBps: 999 } });
   assert.match(changed, /the saved strategy changed after this grant was prepared/, "terms only for the strategy the label binds");
   assert.match(proposalDescription({ ...base, label: `treasury:${suffix}` }), /its terms couldn't be read when this was filed/);
+  // Members vote on when the grant ends, apart from when the signing window closes.
+  assert.match(proposalDescription({ ...base, label: `treasury:${suffix}`, grantExpiresAt: "2026-12-01T00:00:00.000Z" }),
+    /Grant expires: 2026-12-01T00:00:00.000Z \(the provider refuses the agent's sends under it after then\)/);
   assert.doesNotMatch(proposalDescription({ ...base, label: "invoices" }), /Authorizes:/, "only a Treasury grant says it");
   assert.doesNotMatch(proposalDescription({ ...base, type: "agent_freeze", label: `treasury:${suffix}` }), /Authorizes:/);
 
@@ -1118,7 +1121,7 @@ test("under a DAO's consent, read reaches account and reconcileBooks; treasury a
     assert.equal((await call(port, rpc(procedure), "POST", staging, {})).status, 200, procedure);
     assert.equal(forwarded.at(-1)!.path, `/rpc/${procedure}`);
   }
-  for (const procedure of ["setup", "recover", "treasury/fund", "steward/propose", "treasury/link"])
+  for (const procedure of ["setup", "recover", "treasury/fund", "treasury/link"])
     assert.equal((await call(port, rpc(procedure), "POST", staging, {})).status, 403, `${procedure}: owner-session only, or refused for a DAO`);
 });
 
@@ -1131,7 +1134,7 @@ test("under a DAO's treasury consent, an app may run a tick, but never changes t
   for (const procedure of ["treasury/link", "treasury/unlink"])
     assert.equal((await call(port, rpc(procedure), "POST", staging, { json: { accountId: "other.near" } })).status, 403,
       `${procedure}: a DAO-owned agent's link is the DAO, fixed at setup`);
-  for (const procedure of ["setup", "recover", "treasury/fund", "steward/propose"])
+  for (const procedure of ["setup", "recover", "treasury/fund"])
     assert.equal((await call(port, rpc(procedure), "POST", staging, {})).status, 403, `${procedure}: owner-session only`);
   assert.equal(forwarded.length, before, "nothing refused was forwarded");
 });
@@ -1144,4 +1147,30 @@ test("the SDK's fundingTransaction is the platform's own: with deposit, an app b
   assert.deepEqual(usdc.actions.map(a => a.params.methodName), ["storage_deposit", "ft_transfer"], "registers the fresh address, then pays");
   assert.deepEqual(usdc.actions[1]!.params.args, { receiver_id: "deposit-1.near", amount: "1000000" });
   assert.deepEqual(sdk("NEAR", "deposit-1.near", "5").actions.map(a => a.params.methodName), ["storage_deposit", "near_deposit", "ft_transfer"], "NEAR is wrapped first");
+});
+
+test("a completed DAO consent or setup answers the same after its consent is revoked and archived", async t => {
+  const { port, state, staging, file, vote } = await harness(t);
+  const { request: pending } = (await file()).body;
+  vote(pending.hash);
+  const signed = (await call(port, `/apps/v1/dao-consents/${pending.hash}`, "GET", staging)).body;
+  assert.equal(signed.state, "signed");
+
+  const setupText = setupMessage({ host: HOST, deployment: "staging", organization: "org_1", owner: DAO, area: "treasury", expiresAt: later(3) });
+  const { request: setup } = (await call(port, "/apps/v1/dao-setups", "POST", staging, { message: setupText })).body;
+  vote(setup.hash);
+  state.providerId = null;
+  const reserved = (await call(port, `/apps/v1/dao-setups/${setup.hash}`, "GET", staging)).body;
+  assert.equal(reserved.state, "reserved");
+
+  const consents = new AppConsents(".app-access");
+  for (const id of [signed.consent.id, reserved.consent.id]) consents.revoke(id, null);
+  assert.deepEqual(consents.archive(Date.now() + 31 * 86_400_000).sort(), [signed.consent.id, reserved.consent.id].sort());
+
+  const consentAgain = await call(port, `/apps/v1/dao-consents/${pending.hash}`, "GET", staging);
+  assert.equal(consentAgain.status, 200, JSON.stringify(consentAgain.body));
+  assert.deepEqual([consentAgain.body.state, consentAgain.body.consent.id, consentAgain.body.consent.revoked], ["signed", signed.consent.id, true]);
+  const setupAgain = await call(port, `/apps/v1/dao-setups/${setup.hash}`, "GET", staging);
+  assert.equal(setupAgain.status, 200, JSON.stringify(setupAgain.body));
+  assert.deepEqual([setupAgain.body.state, setupAgain.body.agent, setupAgain.body.consent.revoked], ["reserved", "own-dao", true]);
 });

@@ -3,10 +3,11 @@ name: payee-workflows
 description: >
   Use when a payee (contributor) app or the payee's own external agent works with a MultiAgency payee entry through
   @multiagency/sdk/payee: submitting a compensation report, recovering a lost reply by the report's id, following the
-  report to its recorded payment, and starting, listing or revoking an agent connection that lets an agent outside a
-  browser report for the payee. Not for owner actions (use owner-workflows).
+  report to its recorded payment, starting, listing or revoking an agent connection that lets an agent outside a
+  browser report for the payee, and checking the payee's own terms in the policy that pays them, read from the platform
+  host under the owner's payee disclosure. Not for owner actions (use owner-workflows).
 metadata:
-  purpose: 'Payee reports and their payment status with payeeClient, from a browser session or an agent connection, with recovery by kept identities.'
+  purpose: 'Payee reports and their payment status with payeeClient, from a browser session or an agent connection, with recovery by kept identities; the payee''s own policy terms from the platform host.'
   type: core
   library: '@multiagency/sdk'
   library_version: '0.5.5'
@@ -15,8 +16,10 @@ requires:
 sources:
   - 'MultiAgency/platform:src/contract/client.ts'
   - 'MultiAgency/platform:src/contract/agent-connection.ts'
+  - 'MultiAgency/platform:src/contract/payee-policy.ts'
   - 'MultiAgency/platform:src/compensation-contract.ts'
   - 'MultiAgency/platform:docs/agent-access.md'
+  - 'MultiAgency/platform:docs/app-access.md'
 ---
 
 # Payee workflows with payeeClient
@@ -185,6 +188,65 @@ export async function revokeAll(browser: ReturnType<typeof payeeClient>) {
 An agent connection permits `compensation.read` and `compensation.submit` only. With the token, every other route is
 `forbidden`, and an expired, revoked or wrong-entry token is `session`. Connections are managed from the browser
 session only: a request carrying a token cannot start, list or revoke one.
+
+## Check the policy that pays you (from the payee's own tool)
+
+A payee reads their own terms in the agent's policy straight from the platform host, with no app relaying them: their
+own destination entries, the per-transaction caps of the assets the agent may spend, `owner_approval`, `frozen`, whether
+the policy is in force, and its revision. Never other payees, balances, budgets or other limits.
+
+It needs two NEP-413 signatures, recipient the platform host. The owner's **payee disclosure**
+(`payeeDisclosureMessage({ host, owner, agent, agentId, payee, expiresAt })`, at most 366 days) says this agent may show
+this payee their terms; the app that agreed the terms with the owner usually has the owner sign it and hands the signed
+text to the payee, who keeps it.
+
+The owner may add `discloseDigest: true`, and the answer then also carries `policy.digest`, the mandate digest of the
+provider's current policy (absent otherwise). Leave it out unless the owner chooses it, and show the owner the
+trade-off before they sign: the digest commits to the whole policy and anyone can recompute it from a policy's JSON, so
+a payee who can guess every other field of a simple policy can confirm the guess, and learn its caps, budgets and other
+payees. The opt-in is in the signed text, so an app can't add it afterwards. The platform stores nothing. Each time, the payee signs a **read**
+(`payeePolicyReadMessage`, at most an hour) with a full-access key of the paid account. Send both from the payee's own
+tool or agent: a browser request from another site's page is refused.
+
+```ts
+import { parsePayeeDisclosureMessage, payeeClient, payeePolicyReadMessage, type PayeePolicyRequest } from "@multiagency/sdk/payee";
+
+/** The paid account's wallet: a NEP-413 signature over `message` for `recipient`. The SDK supplies none. */
+export type SignMessage = (message: string, recipient: string) => Promise<{ nonce: string; publicKey: string; signature: string }>;
+/** What the payee agreed, as they recorded it when they agreed (in their contract, say). */
+export type Agreed = { asset: string; perPayment: string; ownerApproval: boolean; revision?: number };
+
+/** Reads the payee's terms from the platform host (e.g. "https://api.dev.multiagency.ai") and compares them with what was agreed. */
+export async function verifyTerms(platform: string, disclosure: PayeePolicyRequest["disclosure"], sign: SignMessage, agreed: Agreed) {
+  const disclosed = parsePayeeDisclosureMessage(disclosure.message);
+  if (!disclosed) return { ok: false as const, kind: "invalid" as const, error: "Not a payee disclosure." };
+  const host = new URL(platform).host;
+  const message = payeePolicyReadMessage({ host, payee: disclosed.payee, agent: disclosed.agent, expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() });
+  const proof = await payeeClient({ base: platform }).policyProof({ disclosure, read: { message, ...(await sign(message, host)) } });
+  if (!proof.ok) return proof; // `unavailable`: read again; `refused`/`forbidden`: the error says which check failed
+  const { policy } = proof.value, terms = policy.terms;
+  return { ok: true as const, value: { revision: policy.revision, observedAt: policy.observedAt,
+    inForce: policy.notInForce === null,
+    agreedPayee: Boolean(terms?.agreed && terms.destinations.some(d => d.action === "transfer" && d.enabled)),
+    perPayment: terms?.perTransaction[agreed.asset] === agreed.perPayment,
+    ownerApproval: terms?.ownerApproval === agreed.ownerApproval,
+    unchanged: agreed.revision === undefined ? null : policy.revision === agreed.revision } };
+}
+```
+
+Result: every field `true` when the policy still pays the payee as agreed. `unchanged` compares the policy's
+revision with the one the payee recorded at their first read after agreeing: the provider moves it on every policy
+edit, so `false` says the owner changed the policy since, not necessarily the payee's terms. Compare revisions by
+default; only under a disclosure with `discloseDigest: true` can a payee record `policy.digest` and compare it instead.
+
+What it establishes: the platform host's account of the provider's policy, read by the agent at `observedAt`, with no
+app in the path. It is not independently checkable: the provider stores the policy encrypted, and its hash can't be
+recomputed from the payee's part. The answer isn't signed, so it isn't proof to show a third party.
+Refusals: `forbidden` (403: a signature that doesn't match, or a key that isn't a full-access key of its account on
+chain now), and `refused` with status 400 (a text that isn't canonical; another host, payee or agent; expired or too
+long), 404 (no such agent of that owner), 409 (the agent was replaced since the owner signed: ask for a new disclosure)
+or 429 (60 reads an hour per address). A disclosure ends at its expiry or when the owner's signing key is removed; removing the payee from
+the policy doesn't end it, and the answer then shows no entry.
 
 ## Common mistakes
 

@@ -50,12 +50,14 @@ function caller({ actor, consent, host, consents }: CallContext) {
 type Caller = ReturnType<typeof caller>;
 
 /**
- * The caller's own proposal. One whose consent is no longer among the app's live consents (revoked, expired or its key
- * removed) is withdrawn, unless it was already claimed or closed: then its state is the answer, never a withdrawal.
+ * The caller's own proposal. One past its validity is closed as expired first (`settleExpiry`). One whose consent is no
+ * longer among the app's live consents (revoked, expired or its key removed) is withdrawn, unless it was already claimed
+ * or closed: then its state is the answer, never a withdrawal.
  */
 function mine({ actor, consents }: Caller, id: string) {
   const loaded = loadProposal(id);
   if (!loaded || loaded.record.actor !== actor) throw new ORPCError("NOT_FOUND", { message: "No such proposal from this app.", data: { kind: "refused", code: "not_found" } });
+  settleExpiry(id, loaded.record, new Date(Date.now()));
   if (!consents.includes(loaded.record.consent)
     && close(id, { state: "withdrawn", reason: "the consent it was proposed under ended", at: new Date().toISOString() }))
     throw refused("withdrawn", "This proposal was made under a consent that ended. Nothing was sent; propose again.");
@@ -167,6 +169,13 @@ function signs(signed: z.infer<typeof proposalSignature>, host: string, text: st
   try { return verifyEd25519(signed.publicKey, nep413Hash(signed.message, nonce, host), signatureBytes(signed.signature)); } catch { return false; }
 }
 
+/** Stores the expiry a read only derives, so a proposal past its validity ends as expired whatever is asked of it next. */
+function settleExpiry(id: string, record: ProposalRecord, now: Date) {
+  const { state } = proposalState(record, now.getTime());
+  if (state === "expired") close(id, { state: "expired", reason: "its validity ended", at: now.toISOString() });
+  return state;
+}
+
 /** Records the owner's approval of the exact terms. Sends nothing: the app then asks for execution. */
 export async function approveProposal(context: CallContext, input: unknown, now = new Date()) {
   const who = caller(context), { host } = who;
@@ -178,8 +187,8 @@ export async function approveProposal(context: CallContext, input: unknown, now 
     if (existing.signature === signed.signature) return view(loaded);
     throw refused("already_approved", "The owner already approved this proposal.");
   }
-  const { state } = proposalState(record, now.getTime());
-  if (state === "expired") { close(id, { state: "expired", reason: "its validity ended", at: now.toISOString() }); throw refused("expired", "This proposal expired. Nothing was sent."); }
+  const state = settleExpiry(id, record, now);
+  if (state === "expired") throw refused("expired", "This proposal expired. Nothing was sent.");
   if (state !== "proposed") throw refused("not_open", `This proposal is ${state}; it can't be approved.`);
   if (!signs(signed, host, textOf(record, sha256, "approve")))
     throw refused("signature_invalid", "The signature isn't the owner's over this proposal's approval text for this host.");
@@ -188,7 +197,9 @@ export async function approveProposal(context: CallContext, input: unknown, now 
   if (changed) throw invalidate(id, changed);
   const unenforced = notInForce(policy);
   if (unenforced) throw refused("policy_not_in_force", `The policy is not in force: ${unenforced}. The approval wasn't recorded.`);
-  saveApproval(id, { ...signed, host, at: now.toISOString() });
+  // Two approvals racing past the check above: the first written stands, the other is answered as already approved.
+  if (!saveApproval(id, { ...signed, host, at: now.toISOString() }) && readApproval(id)?.signature !== signed.signature)
+    throw refused("already_approved", "The owner already approved this proposal.");
   // A rejection or withdrawal that landed meanwhile stands: this approval releases nothing.
   if (readFinal(id)) throw refused("not_open", "This proposal was closed while it was being approved.");
   return view(loadProposal(id)!);
@@ -201,6 +212,7 @@ export function rejectProposal(context: CallContext, input: unknown, now = new D
   const loaded = mine(who, id);
   if (!signs(signed, host, textOf(loaded.record, loaded.sha256, "reject")))
     throw refused("signature_invalid", "The signature isn't the owner's over this proposal's rejection text for this host.");
+  settleExpiry(id, loaded.record, now);
   if (!close(id, { state: "rejected", reason: "the owner rejected it", at: now.toISOString(), signed: { ...signed, host } }))
     throw refused("not_open", `This proposal is ${proposalState(loaded.record).state}; it can't be rejected.`);
   return view(loaded);
@@ -210,6 +222,7 @@ export function rejectProposal(context: CallContext, input: unknown, now = new D
 export function withdrawProposal(context: CallContext, input: unknown, now = new Date()) {
   const { id } = proposalRef.parse(input);
   const loaded = mine(caller(context), id);
+  settleExpiry(id, loaded.record, now);
   if (!close(id, { state: "withdrawn", reason: "the app withdrew it", at: now.toISOString() }))
     throw refused("not_open", `This proposal is ${proposalState(loaded.record).state}; it can't be withdrawn.`);
   return view(loaded);
@@ -225,9 +238,8 @@ export async function executeProposal(context: CallContext, input: unknown, now 
   const { id } = proposalRef.parse(input);
   const loaded = mine(caller(context), id);
   const { record, sha256 } = loaded;
-  const { state } = proposalState(record, now().getTime());
+  const state = settleExpiry(id, record, now());
   if (state === "proposed") throw refused("not_approved", "The owner hasn't approved this proposal. Nothing was sent.");
-  if (state === "expired") { close(id, { state: "expired", reason: "its validity ended", at: now().toISOString() }); return view(loaded); }
   if (state !== "approved") return view(loaded);
   const approval = readApproval(id)!;
 

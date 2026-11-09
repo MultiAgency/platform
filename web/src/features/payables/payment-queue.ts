@@ -1,4 +1,5 @@
 import type { PaymentRecord } from "./payment-records.js";
+import { isMoving, isSettled } from "./payment-status.js";
 
 /** Already-read observations only. These fields never authorize or recover a payment. */
 export type QueueOperation = {
@@ -30,7 +31,6 @@ export type PaymentQueueSources<Invoice extends QueueInvoice = QueueInvoice> = {
   ownerActions?: readonly QueueOwnerAction[];
 };
 
-const terminal = new Set(["SUCCESS", "FAILED", "REFUNDED"]);
 const outcome = (operation: QueueOperation) => operation.refused !== undefined
   ? `refused:${operation.refused}`
   : operation.submissionState === "PREPARED" ? "PREPARED" : operation.status ?? "UNKNOWN";
@@ -82,9 +82,9 @@ export function buildPaymentQueue<Invoice extends QueueInvoice = QueueInvoice>(s
     else if (id && sources.pendingIds?.has(id)) entry.reason = "Owner approval record needs review";
     else if (outcomes.size > 1) entry.reason = "Retained payment observations disagree";
     else if (outcomes.has("PENDING_APPROVAL")) entry.reason = "Held at last check";
-    else if (outcomes.has("PROCESSING")) entry.reason = "Payment processing";
+    else if ([...outcomes].some(isMoving)) entry.reason = "Payment processing";
     else if (!operations.length || operations.some(operation => operation.refused === undefined &&
-      (operation.submissionState === "PREPARED" || !terminal.has(operation.status ?? ""))))
+      (operation.submissionState === "PREPARED" || !isSettled(operation.status))))
       entry.reason = "Payment outcome unknown";
     else entry.needsReview = false;
   }

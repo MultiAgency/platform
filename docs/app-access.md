@@ -25,6 +25,7 @@ the chain reports removed; exits non-zero if any lookup went unanswered).
 | --- | --- |
 | `GET /apps/v1/agents/<agent>` | `{ agent, owner, agentId, created, host, deployment, signer }`: what the owner's consent must name (`signer` is `wallet` or `dao`; `agentId` null and `created` false before the agent exists) |
 | `POST /apps/v1/setup` with a signed setup text | `201 { agent, consent }`: reserves and starts this owner's hosted agent for the area, and a setup consent (below) |
+| `POST /apps/v1/consent-nonces` | `{ nonce, issuedAt }`: a NEP-413 nonce for the owner to sign the next consent or setup text with (see the wallet stop below) |
 | `POST /apps/v1/consents` with `{ message, nonce, publicKey, signature }` | `201 { consent }`; responses omit the message, nonce and signature, which the record keeps (mode 0600) |
 | `GET /apps/v1/consents[?organization=]` | This deployment's consents on this host |
 | `DELETE /apps/v1/consents/<id>` | `{ revoked: true }`; this deployment's on this host only; permanent (below) |
@@ -56,7 +57,9 @@ owner wallet don't share payees, budget or balance: each policy is signed and pr
 reads its identity, and only that deployment for that Organization stores consents for it and calls it, whatever consent
 is signed, since a consent names the agent by a generated name its owner can't tell apart. The scope names the
 deployment, not the host: give each app deployment a distinct name on every host. One deployment holds at most 16
-Organization agents per host (`PER_DEPLOYMENT`), so it can't take the host's capacity. Self-service setups
+Organization agents per host (`PER_DEPLOYMENT`), so it can't take the host's capacity. A hosted agent is never
+released, so that is 16 over the deployment's whole lifetime on the host, including agents whose Organization has
+stopped using them; the 17th setup is refused (#46). Self-service setups
 (`/gw/agents`) stay per owner and area. An ownership or key check that goes unanswered (the agent's server, a chain
 read) is 503 on every app route: nothing is stored or forwarded, and the app reads again or resends the same body;
 refusals (400, 403, 404, 409) are answers.
@@ -74,7 +77,12 @@ or `key-not-full-access`), so re-adding the key revives nothing; an unanswered l
 revokes nothing. Read scope: `read` permits `instance`, `account` (0.5.1: the agent's wallet account and the grants this
 executor holds, matched by token; it adopts nothing), `reconcileBooks` (0.5.1: each balance against its independent
 record), `overview`, `policyHistory`, `activity`, `unresolved`, `held`, `ledger`, `ledgerCsv`, `owner/actions`,
-`owner/pending`, `owner/status`, `paymentHistory` and `paymentStatus`. Owner scope: `owner` permits `owner/prepare`, `owner/submit`, `owner/status`,
+`owner/pending`, `owner/status`, `paymentHistory`, `paymentStatus` and (0.5.5) `payouts/status`, which answers only
+the app's own payout requests: the agent finds a request by the actor `app:<deployment>:<organization>` and its
+`requestId`, so another deployment or Organization reads `not_found`. Its answer (state, provider status, operation
+id, refusal or failure code) is what `activity` and `paymentStatus` already show under `read`, plus `neverExecuted`,
+the provider's own flag on that operation (below). An app keeps
+following its requests with `read` after its `payout` consent ends (platform#53; `test/app-access.test.ts`). Owner scope: `owner` permits `owner/prepare`, `owner/submit`, `owner/status`,
 `owner/pending` and `owner/actions`, and nothing else (no reads beyond those). Payout scope: `payout` permits
 `payouts/request`, `payouts/status`, `held` and `deposit` (a one-time address crediting USDC to the agent's
 confidential balance, so the app can fund it; it moves nothing out): payout requests (CONTEXT.md, "Payout request"), each sent at most once
@@ -90,6 +98,8 @@ policy is the platform's treasury or payout policy; the owner key must be the on
 `agent_freeze`, `agent_unfreeze`, `grant_issue`, `grant_revoke`, `policy_update` of any field, and `approval_vote`. The
 gateway reads each prepared reply before releasing it:
 - NEP-413 goes to the app unchanged: it is a text the owner's wallet can show (which wallets show it is not checked).
+  A vote on a held payout is the exception: its text names no terms, so it carries a confirm link too, and the
+  operator can withhold its text (below).
 - NEP-366 (creation, freeze, unfreeze and on-chain policy edits, per the provider's docs) is held on the platform. The
   app gets `confirm: { url, expiresAt }` in its place, with no delegate bytes, and the gateway logs `confirm`. The URL
   is the platform host's confirm page, `/confirm/<token>` (128-bit token; the record in `.app-access/confirm/` is named
@@ -120,8 +130,36 @@ gateway reads each prepared reply before releasing it:
   payouts than the one it showed, which is itself a transfer to an agreed payee within the caps; the power it would
   have if the owner had turned `owner_approval` off. The vote's signed text names no payee or amount: it is OutLayer's
   `approve:{approval_id}:{wallet_pubkey}:{request_hash}` (recorded 2026-10-11 on a payout agent,
-  `.agents/skills/near-agent-api`). So the owner sees the terms only where the app shows `payment.terms`, and can't
-  catch that swap in the wallet.
+  `.agents/skills/near-agent-api`), so the wallet can't show the terms.
+- **The vote's confirm page** (#48; offline- and browser-tested with a stand-in wallet, not deployed): the prepared vote
+  also answers `confirm: { url, expiresAt }`, a link to the same confirm page, which shows the payout's terms (payee,
+  amount with its raw units and asset id, a confidential transfer or a public withdrawal to NEAR) as the agent proved
+  them: the gateway takes them from the agent's `payment`, never from the app's request, and makes no link unless they
+  name the payout and verdict the app asked about (an approve with terms, a reject with none; otherwise the app gets
+  the vote as before, without a link). The app also gets the vote's text and signer, unchanged: the link is an offer,
+  holds nothing, has no opening step, and the page signs that text directly (one wallet prompt), since its bytes are no
+  secret from the app. The app may still submit itself, and of two submissions the agent sends the first and answers the
+  second from its record. The page's submission is the agent's own `owner/submit` under the app's actor, so the money
+  lock, the re-check of the provider evidence right before signing, and poll-only after an attempt are unchanged; the
+  app follows the outcome with `owner/status`. Who reads the terms: anyone holding the link (128-bit token), the app
+  included, which already holds them in `payment`; the page reads nothing else. What remains: the page is optional. A
+  dishonest app can simply not send the owner to it and show other terms in its own page, and neither the owner nor
+  the operator can require it. Rolling back: a gateway before this change can't read a vote's confirm record, so the
+  vote links answer an error until they expire (minutes); the vote's text and `owner/submit` through the app are
+  unaffected.
+- Grants: `grant_issue` may name `expiresAt` (ISO timestamp, 0.5.5) to end the grant at a date the owner chooses instead
+  of the platform's 30 days: at least an hour and at most 365 days ahead (the provider's maximum, per the Agent API
+  skills and SDK 0.8.0 README), refused outside that range, never clamped; under a work order only
+  the order's deadline (`grantExpiry`, `src/grants.ts`; `MIN_GRANT_MS`, `MAX_GRANT_MS` in `src/contract/inputs.ts`). The
+  prepared answer names the label and expiry the agent asked the provider to sign (`grant: { label, expiresAt }`; the
+  top-level `expiresAt` is the signing window), and a DAO's grant proposal names it too. The signed grant message
+  carries the expiry (`expires_at_ms`; a payout grant's wallet prompt showed it on mainnet, [mainnet
+  log](mainnet-log.md#app-access-on-platform-staging-2026-10-28-utc)), and the agent stops using a grant past its expiry (`isLive`, `src/grants.ts`; `authorize`
+  refuses `grant_missing`). That the provider then refuses the grant's sends is per the provider's docs (Agent API skills
+  `references/grants.md`: "Expired grants stop working by themselves"; `agent_grant_required` for an expired token),
+  not observed on mainnet. Offline-tested (`test/grants.test.ts`, `test/work-order-binding.test.ts`,
+  `test/app-dao.test.ts`). A new grant doesn't end the agent's earlier ones: revoke those (`grant_revoke`) to end their
+  authority sooner.
 - Refused before forwarding, under a wallet's consent: `signer: "dao"`, `agent_create` with payees, other owner actions
   (such as `agent_delete`), and anything that doesn't parse as the agent server would read it (oRPC's `RPCSerializer`,
   then `ownerPrepareInput`).
@@ -210,17 +248,83 @@ wallet owns.
   address.
 - **Checks:** the exact text, this host and the signature; then that the key is a full-access key of the owner now,
   before saying whether any agent of theirs is here; then each agent's owner as its server reports it.
-- **Effect:** the stop's cutoff is the moment it first applies. Every app consent the owner gave for those agents by
-  then is revoked, whatever provider ID it names, and each created agent's autopilot is turned off. Sending the same
+- **Effect:** the stop's cutoff is the moment it first applies. Every app consent stored for those agents by then is
+  revoked, whatever provider ID it names, and each created agent's autopilot is turned off. Sending the same
   stop again only retries an autopilot not yet confirmed off, even after the text's expiry; an agent found replaced or
   owned by someone else by then is reported and not asked.
 - **Limits:** as for a DAO's stop, it only removes authority. The provider grant stands, so an app the owner consents to
   afterwards may turn autopilot on again, and a tick or forwarded call already running finishes through the guarded
-  send path.
+  send path. A consent the stop revoked can't be sent again (its ID is its signature's hash).
+- **Texts signed before the stop:** after a stop covering an agent (naming it, or every agent), a consent or setup for
+  it is stored only if the platform issued its NEP-413 nonce after the stop's cutoff (`POST /apps/v1/consent-nonces`);
+  otherwise it is refused `owner_stopped` (409) and nothing is stored (under a stop for every agent, a setup is refused
+  before anything is reserved). The nonce holds its issue time, random bytes and
+  an HMAC over both, keyed from the gateway's secret and bound to the host and deployment, so its time can't be changed
+  or another deployment's used; nothing is stored for it. The owner's signature covers the nonce, as the platform already
+  picks a DAO consent's nonce. Without a stop, a nonce the app picked is accepted as before. The check runs with no wait
+  before storing, so a stop applying meanwhile either finds the consent stored (and revokes it) or is found. Changing
+  `SESSION_SECRET` makes earlier nonces count as the app's own.
 - **How it's known:** offline-tested (`test/wallet-stop.test.ts`), on a headless gateway process for the route and the
   chain key check (`test/platform-host.test.ts`), and in a browser with a stand-in wallet (`test/browser/wallet-stop.cjs`:
   the shown text is canonical and is what the wallet signs and the page sends; a retry resends it; a page left open
   renews it; a message-only wallet is offered). Signing with a real wallet is untested. Not deployed.
+
+**A payee's own terms, with no app** (`src/gateway/payee-policy.ts`, platform#51): a payee reads the part of the
+agent's policy that concerns them straight from the platform host, so an app (Covenant's contractor Verify page, say)
+no longer has to relay `overview` through its own credential.
+- **Authorization:** the wallet owner signs a payee disclosure (NEP-413, recipient the host):
+  `{"type":"multiagency.payee-disclosure","version":1,"host","owner","agent","agentId","payee","expiresAt"}`, at most 366
+  days (`payeeDisclosureMessage`, `src/contract/payee-policy.ts`), optionally ending `,"discloseDigest":true` when the
+  owner also discloses the mandate digest (below). Absent is the only form of not opting in (`false` isn't canonical),
+  so a disclosure without it is exactly the text it was before the opt-in existed. An app prepares it like a consent, from
+  `GET /apps/v1/agents/<agent>`, has the owner's wallet sign it where the payee's terms are agreed, and hands the signed
+  text to the payee. The platform stores nothing. For each read the payee signs
+  `{"type":"multiagency.payee-policy-read","version":1,"host","payee","agent","expiresAt"}` (at most an hour) with a key
+  of the paid account and sends both to `POST /confirm/v1/payee-policy` (`{ disclosure, read }`, each
+  `{ message, nonce, publicKey, signature }`), from their own tool (`payeeClient({ base: "https://<host>" }).policyProof`):
+  a browser request from another site's page is refused, as on every route that isn't a GET.
+- **Checks, in order, before the agent is asked anything:** both texts canonical, naming this host, the same payee and
+  agent, within their lifetimes; both signatures; each key a full-access key of its account on chain now (an unanswered
+  lookup is 503 and reads nothing); the agent configured on this host with that owner, and the agent's server reporting
+  it owned by that wallet with the provider ID the disclosure names (else 404, or 409 for a replaced or uncreated
+  agent). At most 60 reads an hour per address. Each answered read appends `payee-policy` (owner, agent, payee, revision)
+  to the access log.
+- **Disclosed:** read by the agent from the provider's current policy (`getPolicy`, uncached) at `observedAt`: the
+  payee's own destination entries (a transfer to their account, or a withdrawal to it on chain `near`, each with whether
+  the policy's actions include it), whether they are an agreed payee, the destinations mode, the per-transaction caps
+  of the assets the policy lets the agent spend, `owner_approval`, `frozen`, the revision, its status, when it applied
+  and whether the provider is synced, and why it isn't in force (`notInForce`, the rule `authorize` refuses with). The
+  mandate digest of that policy (`policy.digest`) only when the disclosure opts in; otherwise the field is absent, and
+  the gateway drops it whatever the agent answers. Never other destinations, budgets, hourly, daily or monthly limits, usage, balances, the provider's
+  `policy_hash` or the policy transaction. The gateway parses the agent's answer with the published schema
+  (`payeeTerms`), which drops any other field.
+- **What it establishes:** the platform host's account, over TLS, of what the provider reported to the agent: the app
+  is out of the path, the platform is not. Nothing in it is independently checkable. Per the provider, the policy is
+  stored encrypted (`outlayer.near` `store_wallet_policy`) and the on-chain `agent_policy_hash` isn't a function of it;
+  the API's `policy_hash` (sha256 of the policy with sorted keys, reproduced for 15 revisions on 2026-10-13) is readable
+  only with the platform's partner key and, like the mandate digest, needs the whole policy to recompute
+  ([enforcement status](enforcement.md#status)). The revision lets a payee compare with the one they recorded after agreeing
+  terms: the provider moves it on every policy edit (on mainnet each observed edit applied as the next revision,
+  [mainnet log](mainnet-log.md)), so a different revision means the owner changed something, not
+  necessarily their terms. The mandate digest is the owner's choice, made where they sign the disclosure. It commits to
+  the whole policy and anyone can recompute it from a policy's JSON, so a payee who can guess every other field (an
+  agent paying only them under a known template, say) can compute the digest of each guess and compare: a match confirms
+  the guess, and with it the caps, budgets and other payees it contains. A payee who can't guess the whole policy learns
+  nothing from it beyond what the revision shows: that the policy changed. Opting in suits an owner whose policy isn't
+  confidential from that payee or a payee who must cite the exact policy; an app shows the owner this before they sign,
+  and the opt-in is in the signed text, so an app can't add it (a changed text fails the signature). The answer isn't signed, so it isn't proof a payee can show a third party, and it says nothing about
+  whether the provider enforces those terms (unverified, as for every policy).
+- **Limits:** wallet owners
+  only: a DAO signs only by vote, and no DAO request files a disclosure. With nothing stored there is no revocation
+  record: a disclosure ends at its expiry, when the agent is replaced, or while the chain reports the owner's signing
+  key removed or no longer full-access (re-adding the key revives it). A wallet stop ends app consents, not
+  disclosures, and removing the payee from the policy doesn't end one: the answer then shows no entry.
+- **How it's known:** offline-tested (`test/payee-policy.test.ts`: each check, the disclosed fields, that extra fields
+  the agent returns are dropped, the digest only under a signed opt-in (an added opt-in fails the signature, an old
+  disclosure text still verifies), the gateway-only agent read no owner, app or machine permission reaches, and the SDK
+  client; on 2026-11-09 each check was removed by hand and the suite failed every time, a manual check, not part of the
+  suite), and on a headless gateway process for the route (`test/platform-host.test.ts`). Not stack-tested; signing
+  with a real wallet untested; not deployed.
 
 **Funding through an app:** found on that run, a DAO's consent couldn't reach `deposit`, which was in the `payout`
 scope only. From 0.5.1 the `treasury` scope reaches it too: offline-tested, and mainnet-observed on platform staging
@@ -237,6 +341,19 @@ makes every app route answer an error:
 proposals filed by those earlier builds link `/confirm/dao/stop/<agent>`, which now answers 404: open
 `/confirm/dao/stop/<dao>/<agent>`, which shows the same open stop.
 
+**One held payout per recipient, asset and amount (`duplicate_held_payout`).** A payout request is refused before
+sending while any payment of the same agent with the same recipient, asset and amount is held for the owner's approval
+(`authorize`, `src/authorize.ts`, over the agent's own operation records, `src/agent.ts`). It compares those three
+terms only, across the whole agent: a different `requestId`, another app or deployment, or a held payment the owner
+asked for doesn't make it another payout. The refusal is recorded, so that `requestId` reads `refused`; once the held
+payment is no longer waiting (approved or rejected), the same terms go through under a new `requestId`. The rule keeps
+one payout from being held, and then approved and paid, twice: it is one of the checks the provider can't make (the
+provider's replay deduplication is unverified; README, "Not done yet"), and the only offline-tested part of the
+[facilitator](facilitator.md)'s "can't pay twice" target. It stays as is (#50). An app keeps at most one open request
+per recipient, asset and amount until the owner votes on it, and asks for a repeat payout after the first is approved
+or rejected; it never varies an amount or recipient to get past the rule. Offline-tested (`test/authorize.test.ts`,
+`test/authorization.test.ts`) and stack-tested (`test/e2e/app-access.spec.mjs`).
+
 **Following an operation to its end, without `recover`.** Every agent reconciles its own operations: every 10 seconds
 it reads each unresolved operation's status once and records it (`startReconciliation`, `src/recover.ts`). It never
 resends, and nothing an app calls is needed for that. An app follows that work through reads:
@@ -245,8 +362,22 @@ resends, and nothing an app calls is needed for that. An app follows that work t
 - `activity` and `ledger` show settled operations.
 - After a lost reply, an app reads the record that names the action, not a fresh send:
   - `proposals/get` for a proposal's execution
-  - `payouts/status` by `requestId` for a payout
+  - `payouts/status` by `requestId` for a payout (`payout` or `read` scope)
   - `owner/status` by `correlationId` for an owner action
+
+  A payout request that reads `failed` (provider FAILED or REFUNDED) carries, from 0.5.5, `failureCode` (the provider's
+  `failure_code`, from its status of that operation read when answering; null when that read fails or names none) and
+  `neverExecuted`. `neverExecuted` is true only when the provider's status agrees with the journal's FAILED and carries
+  `details.never_executed: true` with no `tx_hash`, `destination_tx_hash`, `refund_tx_hash`, `intent_hash`,
+  `amount_out`, `refunded_amount` or `settled_late`. Per the provider's docs an owner's rejection of a held payout ends
+  it so (skills `bedda21`, `references/owner-intents.md`: "`reject` ends it … (`FAILED`, `details.never_executed`)"),
+  and its SDK names `never_executed` as the mark of an operation whose USD charge is released (`20ca15c`). It is the
+  provider's statement, relayed: offline-tested (`test/payout-requests.test.ts`), not mainnet-observed. A rejection on
+  staging read `FAILED` with code `rejected` (2026-10-30, [mainnet log](mainnet-log.md)); whether `never_executed` came
+  with it wasn't recorded. False proves nothing either way: a delivery failure, REFUNDED, a missing flag or an unread
+  status all read false, and a person checks before a new `requestId`. An expired approval reads true only if the
+  provider marks it so; how it reports one is unobserved. Reading a `failed` request makes one provider status read;
+  a `succeeded` one makes none.
 
   It never resends while that record reads `unknown`, `executing` or `processing`. The `recover` procedure isn't
   on app access and isn't needed: it runs the same pass the agent already runs every 10 seconds (platform#14). Poll only while a record is unresolved, and budget the deployment's polls as a whole:

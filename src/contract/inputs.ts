@@ -25,6 +25,14 @@ const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
  */
 export const GRANT_LABELS = ["treasury", "payout", "invoices"] as const;
 export type GrantLabel = (typeof GRANT_LABELS)[number];
+/**
+ * How long a grant lasts: 30 days (`DEFAULT_GRANT_MS`) unless `grant_issue` names an `expiresAt`, which must be at least
+ * an hour and at most 365 days ahead, the provider's own maximum (Agent API skills, `references/grants.md`; SDK 0.8.0
+ * README). Outside that range it is refused, never clamped: the owner signs the expiry asked for.
+ */
+export const DEFAULT_GRANT_MS = 30 * 86_400_000;
+export const MAX_GRANT_MS = 365 * 86_400_000;
+export const MIN_GRANT_MS = 3_600_000;
 
 /** An owner action to prepare for signature (owner-intents.ts `prepare`). */
 export const ownerAction = z.discriminatedUnion("type", [
@@ -39,6 +47,9 @@ export const ownerAction = z.discriminatedUnion("type", [
     label: z.enum(GRANT_LABELS).optional(),
     suffix: z.string().min(1).max(64).optional(),
     expectedStrategyDigest: digest.optional(),
+    /** When the grant ends (the owner signs it; the provider refuses the agent's sends under it after then): between
+     * `MIN_GRANT_MS` and `MAX_GRANT_MS` (365 days) ahead. Absent, `DEFAULT_GRANT_MS` (30 days); under a work order, the order's deadline. */
+    expiresAt: z.iso.datetime().optional(),
   }),
   z.object({ type: z.literal("grant_revoke"), grantId: z.string().min(1) }),
   z.object({ type: z.literal("agent_freeze") }),

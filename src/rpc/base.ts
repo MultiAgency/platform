@@ -10,6 +10,13 @@ import { WorkOrderRefusal } from "../work-order-protocol.js";
 import { AuthorizationHeld, provenRefusal } from "../ops.js";
 import { READS } from "../contract/permissions.js";
 
+/**
+ * Procedures whose provider calls can't take effect: reads, and `owner/prepare`, whose only provider write is
+ * `generate-intent`. A generated intent does nothing until the owner signs it and `owner/submit` sends the signature,
+ * and nothing is recorded here before it is generated (`prepareLocked`, src/owner-intents.ts).
+ */
+const EFFECTLESS = new Set<string>([...READS, "owner/prepare"]);
+
 /** What the gateway says about a call (`x-gateway-*` headers, which it strips from every request it forwards). */
 export type CallContext = { actor?: string; consent?: string; host?: string; consents?: string[] };
 /**
@@ -33,10 +40,10 @@ function toClientError(error: unknown, procedure: string) {
   // checks, which the journal records as `local_authorization_held`): proven not to have taken effect.
   if (error instanceof AuthorizationHeld)
     return new ORPCError("BAD_REQUEST", { message: error.message, data: { kind: "refused", code: "local_authorization_held" } });
-  // A provider failure is a typed refusal only where it cannot hide an effect: on a read, or when the provider's
-  // answer proves nothing executed. Anything else after a mutation may follow a submission and stays untyped
-  // (the client reports `unknown` with the request's identity and never resends).
-  if (error instanceof AgentApiError && (READS.has(procedure) || provenRefusal(error)))
+  // A provider failure is a typed refusal only where it cannot hide an effect: on a read, while preparing an owner
+  // action, or when the provider's answer proves nothing executed. Anything else after a mutation may follow a
+  // submission and stays untyped (the client reports `unknown` with the request's identity and never resends).
+  if (error instanceof AgentApiError && (EFFECTLESS.has(procedure) || provenRefusal(error)))
     return new ORPCError("BAD_REQUEST", { message: "The provider could not complete this request. Check the recorded outcome before retrying.", data: { kind: "provider", code: error.code, availableAt: null, ...refusalDetails(error) } });
   logUnclassified(error, procedure);
   return new ORPCError("INTERNAL_SERVER_ERROR", { message: "The request could not be completed. Check existing records before retrying an action." });

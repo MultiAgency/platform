@@ -1,25 +1,34 @@
 import type { Intent } from "@near-intents-agent-api/sdk";
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { ASSETS } from "../../src/contract/assets.js";
 import { EVERY_AGENT, walletStopMessage } from "../../src/gateway/wallet-stop-text.js";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { fromUnits } from "./features/payables/payment-copy";
 import { connect, connectStopWallet, signIntent, signStopMessage, useStopWallet, useWallet } from "./features/owner/wallet";
 import { Badge, Button, Card, ErrorBox, Loading } from "./shared/ui";
 import "./styles.css";
 
 /**
- * The platform's confirm page: an owner action an app prepared that the owner's wallet can't show readably (NEP-366).
- * The platform holds it and shows its own record of it here. The owner first signs this link's readable text, which
- * releases the bytes to this page only, then signs those bytes with the same wallet. Standalone: no platform session,
- * nothing but this one action.
+ * The platform's confirm page: an owner action an app prepared whose terms the owner's wallet can't show: a NEP-366
+ * action, or a vote on a held payout, whose text names no payee or amount. The platform shows its own record of it here.
+ * For a NEP-366 action, whose bytes the app wasn't given, the owner first signs this link's readable text, which releases
+ * them to this page only; then the owner signs them with the same wallet. A vote's text the app holds too, so the page
+ * signs it directly. Standalone: no platform session, nothing but this one action.
  */
 type Policy = Record<string, unknown>;
+type Payment = { correlationId: string; verdict: "approve" | "reject"; terms: { recipient: string; asset: string; amount: string; chain?: "near" } | null };
 type View = {
   deployment: string; organization: string; agent: string; owner: string; type: string; action: Record<string, unknown>;
-  policy: { current: Policy | null; requested: Policy } | null; summary: string | null; expiresAt: string;
-  signer: { account_id: string; public_key: string }; opening: { message: string; recipient: string; nonce: string };
+  policy: { current: Policy | null; requested: Policy } | null; summary: string | null; expiresAt: string; payment: Payment | null;
+  signer: { account_id: string; public_key: string };
   state: "open" | "submitted" | "expired";
-};
+} & (
+  /** NEP-366: the text that releases the bytes held on the platform. */
+  | { opening: { message: string; recipient: string; nonce: string }; intent?: never }
+  /** A vote on a held payout: the app holds its text too, so the page signs it directly. */
+  | { intent: Intent; opening?: never }
+);
 
 const TITLES: Record<string, string> = {
   agent_create: "Create the agent", agent_freeze: "Freeze the agent", agent_unfreeze: "Unfreeze the agent",
@@ -33,6 +42,25 @@ const errorOf = async (response: Response) => {
 };
 
 const show = (value: unknown) => <pre className="whitespace-pre-wrap break-all text-sm">{JSON.stringify(value, null, 2)}</pre>;
+const DECIMALS: Record<string, [number, string]> = { [ASSETS.USDC]: [6, "USDC"], [ASSETS.wNEAR]: [24, "wNEAR"] };
+
+/**
+ * A vote's payout as the agent proved it against the provider's request hash: what an approve releases, exactly,
+ * with the raw amount and asset beside any readable form.
+ */
+function PaymentTerms({ payment }: { payment: Payment }) {
+  const { terms } = payment;
+  if (!terms) return <p>Reject held payout <code>{payment.correlationId}</code>: this vote releases nothing.</p>;
+  const known = DECIMALS[terms.asset];
+  const row = (label: string, value: ReactNode) => <div><dt className="text-sm text-muted-foreground">{label}</dt><dd className="break-all">{value}</dd></div>;
+  return <dl className="grid gap-3">
+    {row("Pays", <strong>{terms.recipient}</strong>)}
+    {row("Amount", <><strong>{known ? `${fromUnits(terms.amount, known[0])} ${known[1]}` : `${terms.amount} raw units`}</strong>
+      <span className="block text-sm text-muted-foreground">{terms.amount} raw units of {terms.asset}</span></>)}
+    {row("How", terms.chain === "near" ? "A public withdrawal to the NEAR account, which may arrive less a route fee" : "A confidential transfer")}
+    {row("Held payout", <code>{payment.correlationId}</code>)}
+  </dl>;
+}
 
 /**
  * The terms from the agent's own record: a policy edit as every field that changes, including ones derived from what
@@ -40,6 +68,7 @@ const show = (value: unknown) => <pre className="whitespace-pre-wrap break-all t
  */
 function Terms({ view }: { view: View }) {
   const { policy } = view;
+  if (view.payment) return <PaymentTerms payment={view.payment} />;
   if (policy?.current) {
     const changed = Object.keys({ ...policy.current, ...policy.requested })
       .filter(key => JSON.stringify(policy.current![key]) !== JSON.stringify(policy.requested[key]));
@@ -61,6 +90,15 @@ function Terms({ view }: { view: View }) {
   </dl>;
 }
 
+/** The link's readable text, signed first to prove this is the owner's wallet; only then does the platform hand over the bytes. */
+async function open(text: { message: string; recipient: string; nonce: string }) {
+  const opened = await signIntent({ standard: "nep413", payload: text } as Intent);
+  const opening = await fetch(`${api}/open`, { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ signature: opened.signature }) });
+  if (!opening.ok) throw new Error(await errorOf(opening));
+  return (await opening.json() as { intent: Intent }).intent;
+}
+
 function ConfirmPage() {
   const wallet = useWallet();
   const [view, setView] = useState<View | null>(null);
@@ -76,13 +114,7 @@ function ConfirmPage() {
     setError(undefined);
     setStage("signing");
     try {
-      // First the link's readable text, proving this is the owner's wallet; only then does the platform hand over the bytes.
-      const opened = await signIntent({ standard: "nep413", payload: view.opening } as Intent);
-      const opening = await fetch(`${api}/open`, { method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ signature: opened.signature }) });
-      if (!opening.ok) throw new Error(await errorOf(opening));
-      const { intent } = await opening.json() as { intent: Intent };
-      const signedData = await signIntent(intent);
+      const signedData = await signIntent(view.intent ?? await open(view.opening));
       const response = await fetch(api, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ signedData }) });
       if (!response.ok) throw new Error(await errorOf(response));
       setStage("submitted");
@@ -94,6 +126,7 @@ function ConfirmPage() {
 
   if (!view) return error ? <ErrorBox error={error} /> : <Loading label="Loading the action…" />;
   const owner = wallet.status === "connected" && wallet.accountId === view.owner;
+  const prompts = view.intent ? "Your wallet asks once, for the action itself." : "Your wallet asks twice: first to sign a short text naming this page and action, then the action itself. Never sign that text anywhere else.";
   return <Card>
     <h1 className="text-xl font-semibold">{TITLES[view.type] ?? view.type}</h1>
     <p>
@@ -104,8 +137,8 @@ function ConfirmPage() {
     <Terms view={view} />
     <p className="text-sm text-muted-foreground">
       Check that this page is on <strong>{location.host}</strong>. Your wallet can't show these terms, so this page is the
-      platform's record of them. Your wallet asks twice: first to sign a short text naming this page and action, then the
-      action itself. Never sign that text anywhere else. Signable until {new Date(view.expiresAt).toLocaleString()}.
+      platform's record of them{view.payment ? ", checked against the payment provider's own record of the held payout" : ""}. {prompts}{" "}
+      Signable until {new Date(view.expiresAt).toLocaleString()}.
     </p>
     {error && <ErrorBox error={error} />}
     {stage === "submitted" || view.state === "submitted" ? <Badge tone="success">Submitted. The app follows the outcome; you can close this page.</Badge>

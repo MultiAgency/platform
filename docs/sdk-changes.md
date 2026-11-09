@@ -14,6 +14,12 @@ platform-only fixes are listed separately.
 
 ## 0.5.5 (unreleased)
 
+- **A provider refusal while preparing an owner action is `provider`, not `unknown`** (reclassification, platform#54):
+  `owner/prepare`'s only provider write is `generate-intent`, which executes nothing until the owner signs and
+  `owner/submit` sends it, and nothing is recorded before it. So any provider failure there now reaches the app or owner
+  client as `kind: "provider"` with the provider's code (for example the local stack's `unsupported_by_simulator`),
+  where it was `unknown` unless its code was one proven to have executed nothing. `owner/submit` is unchanged.
+  Offline-tested (`test/owner-contract.test.ts`); the gateway forwards the agent's typed answer unchanged.
 - **`treasury/setConfidential` is removed** (platform#41): `treasury/get` reads whether a linked DAO is confidential from
   chain, so nothing sets it. A DAO is confidential when `intents.near.public_keys_of` holds its key on Trezu's path, the
   DAO's own name (`v1.signer.derived_public_key({ path: <dao>, predecessor: <dao>, domain_id: 1 })`), which Trezu's
@@ -24,11 +30,104 @@ platform-only fixes are listed separately.
   by the user's decision, although the rule above bumps the minor version. Offline-tested (each answer and each failed
   read) and stack-tested: the stack's `daoConfidentialSetup` control registers the simulated DAO's key. Mainnet
   observation (2026-11-08) matched both keys for agentic.sputnik-dao.near.
+- **`steward/propose` is removed**: the experimental LLM steward left the platform, which keeps no model of its own in
+  the money path; an app's own agent proposes with `externalPlan` or `proposals/create`. The procedure leaves
+  `OwnerInputs`, `ownerOutputs`, `ownerStreams`, `treasury-plans-v1` and the proposer permissions, and a host on this
+  version refuses it. A stored plan the steward proposed keeps `source: "steward"`, which `Plan` still accepts; nothing
+  saves a new one. This removal ships in a patch version, by the user's decision (2026-11-09), although the rule above
+  bumps the minor version.
+- **A payout to a payee the policy doesn't agree to is refused before sending** (behaviour): `payouts/request`, and
+  any transfer under a payout or invoices grant without an invoice (such as the owner session's `pay`), answers
+  `state: "refused"`, `code: "payee_not_agreed"` for a recipient that isn't an agreed confidential payee of an `only`
+  policy, as a withdrawal already was. Before, the request reached the provider, whose refusal
+  (`policy_destination_denied`, not a proven refusal) left it `unknown` and blocked the agent's later payouts until
+  resolved ([crash test](crash-test.md)). Offline- and stack-tested.
+- **Consent nonces** (addition, and a refusal after a wallet stop; patch by the user's decision):
+  `appClient(...).consents.nonce()` asks the platform for a NEP-413 nonce (`POST /apps/v1/consent-nonces`,
+  `appConsentNonce`) for the owner to sign a consent or setup text with, in place of one the app picks. The text itself
+  is unchanged. After the owner's wallet stop covers an agent, a consent or setup for it is refused with the new code
+  `owner_stopped` unless the platform issued its nonce after the stop, since otherwise it may have been signed before.
+  Until a stop, an app's own nonces work as before. **Breaking for exhaustive switches** on `AppGatewayCode`.
+  Offline-tested (`test/app-access.test.ts`).
+- **`phase` on owner actions** (addition): `owner/status`, `owner/pending` and `owner/actions` each carry `phase` (`open`,
+  `expired`, `submitted`, `settled`; `ownerActionPhase`), one name for where the action's record stands. Their own words
+  disagreed: `owner/status`'s `submitted` is `owner/actions`'s `settled`, and its `submitting` is `submitted` there. Those
+  words are unchanged; an app reads `phase` instead. Optional, absent from older servers and from `owner/status` for an
+  action the server has no record of. Offline-tested (`test/owner-intent-lifecycle.test.ts`).
 - **`payment.terms.chain`** (addition): an `approval_vote`'s proven terms in `owner/prepare` carry `chain: "near"` when
   the held payment is a withdrawal to a NEAR account, and nothing for a transfer. Optional, so older apps and servers are
   unaffected.
+- **`payouts/status` under `read`** (addition, platform#53): `APP_READS` includes `payouts/status`, so an app that
+  keeps a `read` consent can follow its payout requests after its `payout` consent ends. It answers only the app's own
+  requests (keyed by `app:<deployment>:<organization>` and `requestId`); `payout` still covers it. The owner signs the
+  same consent text; what `read` covers is listed in docs/app-access.md. Offline-tested (`test/app-access.test.ts`).
+- **`failureCode` and `neverExecuted` on `payouts/request` and `payouts/status`** (addition, platform#49): a request
+  that reads `failed` carries the provider's `failure_code` and `neverExecuted`, true only when the provider's status of
+  that operation reads FAILED with `details.never_executed` and no transaction, intent, delivered amount or refund (per
+  the provider's docs, an owner's rejection of a held payout). False proves nothing; REFUNDED never reads true. Answering
+  a `failed` request reads the provider's status once; an unread status answers null and false. Other states carry
+  null and false. Optional in `payoutRequestOutput`, so older apps and platforms are unaffected. Offline-tested
+  (`test/payout-requests.test.ts`); not mainnet-observed.
+- **`grant_issue` takes an optional `expiresAt`** (addition, platform#47): an ISO timestamp at least an hour
+  (`MIN_GRANT_MS`) and at most 365 days (`MAX_GRANT_MS`, the provider's maximum) ahead, so a grant can end with a
+  contract longer than the default 30 days (`DEFAULT_GRANT_MS`). Outside that range
+  `owner/prepare` is refused before anything reaches the provider; it is never clamped, so the owner signs the expiry the
+  app asked for. Without it a grant lasts 30 days, as before (`DEFAULT_GRANT_MS`); under a work order only the order's deadline is accepted.
+  `owner/prepare` answers `grant: { label, expiresAt }` for a grant (the top-level `expiresAt` stays the signing
+  window), and a DAO's grant proposal names the grant's expiry. Wallet, app and DAO-vote preparations all take it; the
+  `pnpm issue-grant` CLI doesn't. The agent stops using a grant past its expiry (`authorize`, `grant_missing`); that the
+  provider refuses its sends then is per the provider's docs (Agent API skills `references/grants.md`), not observed on
+  mainnet. Optional on input and output, so older apps and servers are unaffected; a server before this version drops
+  the field and issues a 30-day grant, so an app that relies on the expiry checks `grant.expiresAt` in the answer before
+  the owner signs. Offline-tested (`test/grants.test.ts`, `test/work-order-binding.test.ts`, `test/app-dao.test.ts`).
+- **`@multiagency/sdk/testing`** (addition, platform#52): `payoutDouble`, an in-process stand-in for one app's payout
+  agent behind `/apps/v1`, for an app server's own tests (Node). The app passes its `fetch` to its own `appClient`; it
+  answers `payouts/request`, `payouts/status`, `held` and `overview` over the same oRPC wire, with the gateway's
+  `session`, `no_consent` and `scope` denials. It runs the platform's own `authorize`, mandate digest, payout policy
+  template and input schemas, bundled (with `@orpc/server`; it imports only zod and `@orpc/contract`); the order of a
+  request's checks and the journal's answers are restated, and `test/payout-double.test.ts` runs every scenario against
+  the double and the agent's real procedures and requires the same answers. Controls set the policy and its provider
+  state, the grant and balances, vote on and settle (`SUCCESS`, `FAILED`, `REFUNDED`) a held request, lose the next
+  answer, and declare recipients absent, unregistered or unchecked. Budgets, hourly or monthly limits, approval expiry,
+  outages, owner actions and other procedures aren't modelled (501, listed by `unmodelled()`). One platform answer
+  the double makes plain, which apps' own fakes have differed on: a request without a live `payout` or `invoices` grant
+  is refused `grant_purpose_denied` (never `grant_missing`). No other entry loads it.
+- **A confirm link for votes on held payouts** (platform#48, addition): through an app, `owner/prepare` for an
+  `approval_vote` also answers `confirm: { url, expiresAt }`, a page on the platform's host that shows the payout's terms
+  as the platform proved them and lets the owner sign there with their own wallet. The answer still carries the
+  `intent` and `signer`, so an app that ignores `confirm` works as before; send the owner to the link, and follow the
+  outcome with `owner/status`. Offline- and browser-tested.
+- **A payee's own terms, from the platform host** (addition, platform#51): `payeeClient({ base: "https://<host>" })
+  .policyProof({ disclosure, read })` posts to `/confirm/v1/payee-policy` and answers `payeePolicyProof`: the payee's own
+  destination entries, the per-transaction caps of the assets the agent spends, `owner_approval`, `frozen`, whether the
+  policy is in force, and its revision, read from the provider's current policy; never other payees, budgets or other
+  limits. `disclosure` is the wallet owner's NEP-413 signature over `payeeDisclosureMessage` (host,
+  owner, agent, provider ID, payee; at most 366 days; optional `discloseDigest: true`), which an app has the owner sign and hands to the payee; `read`
+  is the payee's over `payeePolicyReadMessage` (at most an hour). New exports, in both entries: those two builders with
+  their parsers, `payeePolicyRequest`, `payeeTerms`, `payeePolicyProof`, `PAYEE_POLICY_PATH`. The answer carries
+  `policy.digest`, the mandate digest of the provider's current policy, only when the owner's signed disclosure sets
+  `discloseDigest: true`; otherwise the field is absent. The default leaves it out because the digest commits to the
+  whole policy: a payee who can guess the rest of a simple policy could confirm the guess and learn its caps and budget.
+  It is the owner's choice: the opt-in is in the signed text, so an app can't add it, and a disclosure without it is the
+  same text as before. It is a read: a lost answer
+  is `unavailable`. The answer is the platform's account of the provider's policy, not independently checkable
+  ([app access](app-access.md)). Offline-tested; needs a platform on this version.
 
 Platform changes in this release, outside the package:
+- **The local stack's simulator issues a `payout` grant and refuses what it doesn't model** (platform#54): an agent the
+  owner created (an app's hosted payout agent, a work order's) takes a `payout` grant as well as `invoices`, so
+  `owner/prepare` of `{ type: "grant_issue", label: "payout" }` through an app is prepared instead of answering
+  `unknown`. A grant the simulator doesn't model (another label, or a second grant for the configured agent) is refused
+  in the provider's error shape, 400 `unsupported_by_simulator`, which reaches the app as a `provider` refusal, not a
+  500. Offline-tested (`test/e2e-simulator.test.ts`) and stack-tested (`app-access.spec.mjs` now issues the app's payout
+  agent a `payout` grant).
+- **New stack controls** (platform#52): `signPayee` (a `--payee` or `--builder` account's NEP-413 signature over an
+  app's own text, never the platform's sign-in text), `dropWithdrawResponse` (as `dropTransferResponse`, for
+  withdrawals), `unregister` (a recipient not registered on a token, so a USDC withdrawal to it is refused
+  `recipient_not_registered`), `settle` with `outcome` `FAILED` or `REFUNDED`, `expireApproval` (the platform then
+  refuses a vote on it; what the provider does next isn't modelled) and `refuseNextPayout` (the provider refuses the
+  next transfer or withdrawal under a named code, budgets among them, recording nothing; the simulator still counts no
+  budget). Offline-tested (`test/e2e-simulator.test.ts`).
 - **A DAO's vote on a proposal that is no longer open answers `proposal_not_open`** (409), not `agent_refused`. The
   agent refuses a verdict on a proposal that was invalidated, expired, withdrawn, rejected or already claimed, and always
   will, so reading the vote again can't change it; an app closes the request. Refused while the proposal is open, it's
@@ -57,6 +156,33 @@ Platform changes in this release, outside the package:
   execution only, since reading it asks the provider. The strategy's digest covers the whole strategy, the autopilot's
   cadence and ceiling included, so changing those closes open proposals too. Offline-tested
   (`test/treasury-proposals.test.ts`).
+- **A proposal past its validity ends as `expired` whatever is asked of it:** any call naming a proposal past its
+  `expiresAt` stores it as expired first: `proposals/reject` and `proposals/withdraw` then refuse `not_open`, and one
+  whose consent also ended reads expired, where they stored it as rejected or withdrawn. Two approvals racing with different signatures: the one recorded is
+  answered `approved`, the other is refused `already_approved`, where both were answered `approved`. Offline-tested
+  (`test/treasury-proposals.test.ts`).
+- **An owner action's signing window closes at one moment in every view:** at `expiresAt` itself, `owner/actions`,
+  `owner/pending` and `owner/status` say expired, as submission already refused it; they said it was still open for that
+  moment. `owner/status` keeps answering `expired` once the record is dropped: for a wallet intent while the server runs,
+  for a DAO intent after a restart too (from its archive), where it answered `unknown`. Offline-tested (`test/owner-intent-lifecycle.test.ts`, `test/owner-intents.test.ts`).
+- **A work order whose agent creation was never signed can create it again:** a creation whose signing window closed
+  before it was submitted, or that settled `EXPIRED` because the provider still awaited the signature, no longer blocks
+  preparing another. Any other retained creation still does, `FAILED` included: what that leaves on chain isn't
+  established.
+  Offline-tested (`test/work-order-binding.test.ts`).
+- **Operation and invoice payment statuses are read one way** (`src/operation-status.ts`): an invoice payment refuses a
+  provider outcome before its submission claim, as the journal does, and a payout request reports status `UNKNOWN` as
+  `unknown`. The run-log export reads every journal line the journal accepts (legacy request-with-status lines,
+  status-less correlations, authorization metadata; withdrawals without their method, with a `method_not_exported` gap)
+  instead of reporting malformed lines, and stops at its 20,000 records with a `journal_record_limit` gap.
+  Offline-tested (`test/invoice-durability.test.ts`, `test/journal-history.test.ts`).
+- **A completed DAO consent or setup answers the same after archiving:** `GET /apps/v1/dao-consents/<id>` and
+  `/apps/v1/dao-setups/<id>` read the consent from `consents-ended/` once it is archived, so a revoked one still answers
+  `signed` or `reserved` with `revoked: true`, where after 30 days it answered as if never completed (a setup that did
+  reserve its agent could answer 410 "Nothing was done"). No new state. Offline-tested (`test/app-dao.test.ts`).
+- **Dashboard:** a payment on its way (`QUEUED`, `SENT`) shows as processing; a DAO proposal that ended unapproved
+  (`Rejected`, `Removed`, `Expired`) stops the vote step, while `Failed`, which can be finalized again, stays current;
+  owner-action votes stop polling once submitted, expired or failed. Offline- and browser-tested.
 
 ## 0.5.4 (2026-11-08)
 
@@ -236,7 +362,7 @@ so a patch.
   - `setup`: use `account`, with the identity and `instance`.
   - `recover`: the platform reconciles unresolved operations itself every 10 seconds (#14). Apps read `unresolved`.
   - `treasury/fund`: use `deposit` (under `treasury`, above) and `fundingTransaction`.
-  - `steward/propose`: an app's own agent proposes with `proposals/create`.
+  - `steward/propose`: an app's own agent proposes with `proposals/create` (removed from the platform in 0.5.5).
 - **Policy outputs type `native`, not `sign`** (schema): the Agent API replaced the policy's `sign` block with `native`
   (provider SDK 0.5.3). Policy outputs now declare `native` with its `near`, `evm` and `solana` blocks, each required
   when `native` is present, as the provider documents. A policy still carrying `sign`, or a chain block added later,

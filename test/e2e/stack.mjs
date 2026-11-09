@@ -70,7 +70,7 @@ if (!args.includes('--no-browser')) {
     wallets[role] = { account, signedIn, page: page.url(), ...wallet };
   }
 }
-const commands = stackControls(stack, { owner });
+const commands = stackControls(stack, { owner, payees: [...payees, ...builder ? [builder] : []] });
 // The app's service credential, readable only by this user: the token is never written to state.json.
 const credentialFile = join(directory, 'app-credential');
 if (app) writeFileSync(credentialFile, await appCredential(stack, app), { mode: 0o600 });

@@ -19,7 +19,7 @@ import { executePlan, savePlan, observe, type PlanEvent } from "../src/plans.js"
 import { strategyGrantProblems } from "../src/planning/strategy-grant.js";
 import { ASSETS, treasuryPolicy } from "../src/policy.js";
 import { approveProposal, createProposal, executeProposal, getProposal, listProposals, rejectProposal, withdrawProposal } from "../src/proposals/service.js";
-import { claim, close } from "../src/proposals/store.js";
+import { claim, close, readFinal } from "../src/proposals/store.js";
 import { PublicError } from "../src/public-error.js";
 import { moveOnce } from "../src/synced.js";
 import { resumeSendingForTests, stopSending } from "../src/lock.js";
@@ -261,6 +261,21 @@ test("rejected, withdrawn, expired or under another consent, a proposal never ex
   const later = () => new Date(Date.parse(expiring.expiresAt) + 1);
   assert.equal((await executeProposal(app, { id: expiring.id }, later)).state, "expired");
   assert.deepEqual(sends, []);
+});
+
+test("past its validity, a proposal ends as expired whatever is asked of it next", async () => {
+  const unsigned = await propose("x1"), unwanted = await propose("x2");
+  const after = (p: ProposalView) => new Date(Date.parse(p.expiresAt) + 1);
+  const rejection = await sign(proposalText(unsigned, "reject"));
+  assert.throws(() => rejectProposal(app, { id: unsigned.id, signed: rejection }, after(unsigned)), refusedWith("not_open"));
+  assert.throws(() => withdrawProposal(app, { id: unwanted.id }, after(unwanted)), refusedWith("not_open"));
+  for (const p of [unsigned, unwanted]) assert.equal(readFinal(p.id)?.state, "expired");
+
+  // Past its validity and under a consent that has since ended: it expired first, so that is how it ends.
+  const both = await propose("x3");
+  mock.method(Date, "now", () => Date.parse(both.expiresAt) + 1);
+  assert.equal(getProposal(ended, { id: both.id }).state, "expired");
+  assert.equal(readFinal(both.id)?.state, "expired");
 });
 
 test("claiming and closing race for one record: a claimed proposal can't be closed, a closed one can't be claimed", async () => {
@@ -572,4 +587,12 @@ test("a stop during an approved proposal's last checks claims nothing, so it sta
     assert.equal(getProposal(app, { id: proposal.id }).state, "approved");
     assert.deepEqual(sends, []);
   } finally { resumeSendingForTests(); }
+});
+
+test("two approvals racing with different signatures: one is recorded and answered, the other is refused", async () => {
+  const proposal = await propose();
+  const [first, second] = [await sign(proposalText(proposal, "approve")), await sign(proposalText(proposal, "approve"))];
+  const results = await Promise.allSettled([approveProposal(app, { id: proposal.id, signed: first }), approveProposal(app, { id: proposal.id, signed: second })]);
+  assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
+  assert.ok(results.some(r => r.status === "rejected" && refusedWith("already_approved")(r.reason)));
 });

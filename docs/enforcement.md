@@ -5,8 +5,10 @@ gaps, and what a stronger claim would need. Dated runs are in the [mainnet log](
 (GUARANTEE.md), kept privately outside this repository.
 
 **Claim:** "The prototype performs autonomous rebalancing with application checks and provider-enforced
-limits. Output-asset enforcement is local, strict cumulative per-asset limits depend on provider
-serialization that is not fully established, and USD-budget atomicity has not been independently verified."
+limits. Output-asset enforcement is local. This executor sends one operation at a time and follows each to a settled
+status before the next, so its own concurrent requests can't race the provider's counters (offline-tested). Strict
+cumulative per-asset limits and USD-budget atomicity against every other sender rest on the provider and are not
+independently verified." See [spending limits under concurrency](#spending-limits-under-concurrency).
 
 ## The envelope
 The owner-signed policy configures the provider controls below. The API documents signing the complete
@@ -213,8 +215,8 @@ are covered in the Treasury app's `test/browser/strategy.cjs`; they are not depl
 | Constraint | Status |
 |---|---|
 | Output asset | **Documented provider limitation relative to our stricter requirement.** A direct-API mainnet swap into an asset outside `assets` succeeded (2026-10-10, [log](mainnet-log.md#a-swap-into-an-unlisted-asset-2026-10-10)). The provider now explicitly documents `assets` as tokens the agent may spend; swaps may buy unlisted tokens ([skills@8e03b0e, policy reference](https://github.com/NEAR-Intents-Agent-API/skills/blob/8e03b0ea8e8f24f66923346f82c7afa56c40c6d1/near-intents-agent-api/references/policy.md)). This agrees with the input-only check in the pinned policy engine (wallet_policy.rs:467–476, :1011–1014). Our executor retains the stricter output check (`outputAssetRefusal`, src/policy.ts); provider output-asset enforcement is not claimed. |
-| Cumulative per-asset caps | **Serialized per wallet, per upstream tests; strict enforcement unproven. A monthly-cap refusal is observed:** on an isolated agent, after a settled small USDC swap, the identical request was refused with `policy_denied` and nothing dispatched; only the monthly cap, set below the two swaps together, was exceeded (2026-10-13T03:27Z; [mainnet log](mainnet-log.md#isolated-test-agent-shield-and-monthly-cap-2026-10-13t0327z)). Sequential, not concurrent. Upstream end-to-end tests show that of two simultaneous spends against one limit exactly one passes, that usage is written while the wallet is held, that every caller shares one usage row, and that a crash leaves an operation uncharged until a later read repairs it and charges it once (outlayer@b8c58c0 tests/wallet_concurrent_spend_e2e.sh, velocity_two_doors_e2e.sh, stuck_request_repair_e2e.sh). The API specification documents that a swap holds the wallet for its duration. Unknown: whether new admissions are blocked until a crashed operation is repaired, how the lock coordinates across service instances, and which version is deployed. The coordinator is private. |
-| USD budget | **Held in one concurrent trial; mechanism unverified.** Five simultaneous identical small swaps sent directly with one grant, with room for two: one executed, one got `wallet_busy`, three got `spend_budget_exceeded`, and the budget did not overshoot (isolated agent, 2026-10-13T03:32Z; [mainnet log](mainnet-log.md#isolated-test-agent-usd-budget-under-concurrency-2026-10-13t0332z)). Admission was more conservative than the reported remaining budget. One trial, one grant, one host: not proof of atomicity across grants or instances, or after a crash. |
+| Cumulative per-asset caps | **Serialized per wallet, per upstream tests; strict enforcement unproven. A monthly-cap refusal is observed:** on an isolated agent, after a settled small USDC swap, the identical request was refused with `policy_denied` and nothing dispatched; only the monthly cap, set below the two swaps together, was exceeded (2026-10-13T03:27Z; [mainnet log](mainnet-log.md#isolated-test-agent-shield-and-monthly-cap-2026-10-13t0327z)). Sequential, not concurrent. Upstream end-to-end tests show that of two simultaneous spends against one limit exactly one passes, that usage is written while the wallet is held, that every caller shares one usage row, and that a crash leaves an operation uncharged until a later read repairs it and charges it once (outlayer@b8c58c0 tests/wallet_concurrent_spend_e2e.sh, velocity_two_doors_e2e.sh, stuck_request_repair_e2e.sh). The API specification documents that a swap holds the wallet for its duration. Unknown: whether new admissions are blocked until a crashed operation is repaired, how the lock coordinates across service instances, and which version is deployed. The coordinator is private. **This executor's own concurrent sends: offline-tested** (`test/spending-limits-race.test.ts`, [below](#spending-limits-under-concurrency)). Provider questions Q1, Q3, Q4. |
+| USD budget | **Held in one concurrent trial; mechanism unverified.** Five simultaneous identical small swaps sent directly with one grant, with room for two: one executed, one got `wallet_busy`, three got `spend_budget_exceeded`, and the budget did not overshoot (isolated agent, 2026-10-13T03:32Z; [mainnet log](mainnet-log.md#isolated-test-agent-usd-budget-under-concurrency-2026-10-13t0332z)). Admission was more conservative than the reported remaining budget. One trial, one grant, one host: not proof of atomicity across grants or instances, or after a crash. The provider documents charging "atomically at dispatch" (skills@5d76111 `references/policy.md`:80); the API server is private. **This executor's own concurrent sends: offline-tested** (`test/spending-limits-race.test.ts`, [below](#spending-limits-under-concurrency)). Provider questions Q2, Q3, Q4. |
 | Signed policy binding | **Not independently verifiable.** The API's `policy_hash` is reproducible: sha256 of the returned policy with sorted keys (recomputed on 2026-10-13 for all 15 returned revisions: treasury 1–11, payout 1, isolated agent 1–3). The on-chain `agent_policy_hash` is not a function of the policy (two treasury revisions share one `policy_hash` but carry different `agent_policy_hash` values on chain), and the public `store_wallet_policy` takes no such argument. The enforced policy is stored encrypted to a custody keystore key and signed by the custody wallet key, not the owner, so it proves neither that the owner signed those terms nor that no owner authorization exists elsewhere. A NEP-413 `update_policy` message, captured unsigned on the demo host, carries the complete plaintext policy, revision, agent, owner and domain, so an owner can read what they sign for API-enforced edits; whether the provider-enforced part matches it is the open question. A NEP-366 `policy_update` (an asset change), also captured unsigned, signs only a delegate to `store_wallet_policy` carrying `encrypted_data`: the readable policy appears only in the unsigned preview, so for those edits the owner signs ciphertext. What the message's `target_id` identifies is unknown. Captures are in the private release record. |
 | Execution artifact | **Coordinator trust assumption, in pinned source.** For swaps and confidential transfers (including payouts), the keystore checks only that the signed message is addressed to `intents.near` or `intents.far`, then signs it unparsed (keystore-worker/src/api.rs:5729–5786). Our approval check binds the intended payment locally (payee, amount, asset to the provider's request hash), and the owner's approval binds whether the operation runs; that the final signed artifact carries those terms depends on an honest coordinator. Deployed behaviour unknown. |
 | Operation audit proof | **Unavailable on the sampled deployment.** At 2026-10-13T04:10Z, all three sampled successful operations returned HTTP 501 `transparency_log_disabled` from the demo API. The run is in the [mainnet log](mainnet-log.md#policy-signatures-and-operation-proofs-2026-10-13t0410z); operation ids and captures are in the private release record. Even an available event inclusion proof would not by itself establish signed spending bytes, complete history or atomic enforcement. |
@@ -266,9 +268,9 @@ operation unresolved until those codes are observed. `quote_unavailable`, which 
 2026-10-27), a dry swap quote is no longer refused by the account's rules: it answers 200 with `warnings` carrying the
 code the live swap would get. `quoteLeg` (`src/treasury.ts`) returns those codes, and a leg with any code not on the
 engine's allow-list (empty today) is left out of a strategy rebalance, refuses an external plan before it is saved,
-isn't proposed by the steward, and rejects a saved plan at its pre-send re-quote before
+and rejects a saved plan at its pre-send re-quote before
 anything is claimed; an autopilot tick reports the codes and asks the owner once (offline-tested,
-`test/rebalance.test.ts`, `test/external-plan.test.ts`, `test/steward-tools.test.ts`, `test/autopilot.test.ts`; not yet
+`test/rebalance.test.ts`, `test/external-plan.test.ts`, `test/autopilot.test.ts`; not yet
 observed on mainnet). A clean dry run doesn't guarantee the live answer. A plan's legs are all re-quoted against the
 state before its first leg, so a budget or limit that only a later leg crosses once earlier legs have spent
 (`spend_budget_exceeded`, `policy_limit_exceeded`) isn't warned; that leg, or any swap the provider refuses after the
@@ -333,6 +335,14 @@ names `details.never_executed` or `details.never_submitted` for releasing a fail
 charge once. These provider statements sharpen the existing gap: an operation ending and a replacement
 payment being safe are different conclusions. They do not independently prove deployed accounting.
 
+A payout request's answer relays that distinction rather than deciding it (0.5.5, offline-tested,
+`test/payout-requests.test.ts`; not mainnet-observed): a `failed` request carries `neverExecuted`, true only when the
+provider's status of that operation, read when answering, agrees with the journal's FAILED and carries
+`details.never_executed: true` with no transaction, intent, delivered amount or refund in its details. That is the
+provider's statement, which its docs give for an owner's rejection of a held payout; the platform verifies no balance
+and sends no replacement. Everything else (a delivery failure, REFUNDED, a missing flag, an unread status) reads false,
+which proves nothing. The journal still records status only; `neverExecuted` and `failureCode` are not recorded.
+
 **Original invoice replay (offline-tested).** The application has no automatic replacement path for
 an existing invoice: filing the same payee/submission identity returns its recorded result, revisions
 retain the original payment, and submission requires the original attempt still to be `PREPARED`.
@@ -347,6 +357,23 @@ is local bookkeeping; it neither restores the provider's budget nor proves funds
 payment or invoice with a new submission identity is distinct work and still requires review of the
 earlier payment. Matching recipient and amount alone cannot distinguish a replacement from another
 legitimate obligation. No new money-path rule or provider guarantee follows from these tests.
+
+**A payout to an unagreed account is refused before sending (offline- and stack-tested, 2026-11-09).** The provider
+refuses an unlisted payee with `policy_destination_denied` (mainnet, 2026-10-11, [mainnet log](mainnet-log.md)), which
+isn't a proven refusal: sent, the operation stayed unresolved and every later payout of that agent was refused
+`unresolved` until resolved. An app's agent that reads untrusted text can be led to make that request: in the
+[crash test](crash-test.md), an invoice naming a lookalike payee or an "owner" email naming a "safe" account blocked a
+gullible scripted agent's payout agent in 6 of 6 runs (the simulator refused with a generic error, not the provider's
+code; neither is proven). `src/authorize.ts` now refuses a payout's transfer to a payee the policy doesn't agree to
+(`payee_not_agreed`) before sending, as it did a withdrawal's and an approval's (user decision, 2026-11-09;
+`test/authorize.test.ts`); the same runs then blocked no agent. Invoices still leave the payee to the provider.
+
+**A second payout after the first settled (stack-tested, 2026-11-09).** `duplicate_held_payout` refuses a second payout
+with the same payee, asset and amount only while the first is held. Once it has settled, a new `requestId` for the same
+invoice is a new payout, held for the owner's vote; the vote's text names no payee or amount (see app access). In the
+crash test, each "pay again" lie (failed, pending, an `unknown` urging a new `requestId`, a reissued invoice) gave a
+gullible scripted agent a second 2 USDC payout when the owner approved every held payout. The owner's vote is the only
+check left; nothing here measures owners.
 
 ## Local presentation limits
 
@@ -384,9 +411,11 @@ not verified on the hosted deployment. The underlying provider dependencies abov
 
 Agreement terms are voter guidance, not an invoice-to-agreement binding. An owner offer is marked
 filed when any later invoice from that payee exists (`src/agreements.ts`); multiple offers can match
-the same invoice. Payment review shows the payee's latest non-declined recorded terms, which need not
-be the terms of that invoice. The browser regression covers selecting the latest terms, including
-excluding declined agreements and other payees. It does not establish agreement-specific enforcement.
+the same invoice. Payment review shows the terms of the payee's newest non-declined agreement with terms
+(`termsInForce`, as the server's `termsFor`), which need not be the terms of that invoice; a payee's agreements all
+read `agreed` once the policy lists the payee. The offline test (`web/src/features/payables/payment-stages.test.ts`)
+covers selecting the newest terms, excluding declined agreements and other payees. It does not establish
+agreement-specific enforcement.
 
 Autopilot summaries distinguish swaps skipped for cost from a book with no rebalance legs meeting
 the minimum size (`test/autopilot.test.ts`). This correction is offline-tested, not mainnet-observed.
@@ -413,6 +442,73 @@ The tests use real processes and storage with offline provider stand-ins (`test/
 `test/owner-intents-race.test.ts`). Locks are single-host leases; they do not fence a stalled process
 across hosts or prove remote exactly-once execution. See the
 [upgrade procedure](operations.md#journal-v2-and-owner-intent-locking-upgrade).
+
+## Spending limits under concurrency
+
+Platform issue #6. What bounds cumulative spending (per-asset hourly, daily and monthly caps, and the USD budget) when
+requests overlap, split by who enforces it.
+
+**This executor (offline-tested).** `test/spending-limits-race.test.ts` starts six sender processes on one host, sharing
+the journal and the money lock, and releases them together against a simulated provider in SQLite whose admission is
+deliberately not atomic: it reads usage, yields, then admits against that stale read, and charges usage only when the
+operation settles (the best-effort behaviour OutLayer documents, below). Six $10 swaps under a $25 daily budget: two
+are admitted and four refused `spend_budget_exceeded`. Five 20 USDC payouts under a 50 USDC daily cap: two admitted,
+three refused `policy_denied`; a sixth of 30 USDC, over the 25 USDC per-payment cap, is refused here
+(`per_transaction_exceeded`) and never reaches the provider. The journal ends with nothing unresolved. Checked by
+mutation on 2026-11-09, then restored: with the money lock removed the senders fail (each sees another's claimed send
+as unresolved); with the lock and the unresolved-operation check both removed, the simulated provider admits $60
+under the $25 budget and 100 USDC under the 50 USDC cap; with the per-payment check removed the payout case fails.
+What does it is `dispatch` (src/agent.ts): one send at a time under the money lock, each followed to a settled status
+before the lock is released, and an unknown outcome blocking every later send. No local budget or per-asset counter
+is involved: the platform still reads no per-asset usage (the provider exposes none) and adds no rule for it.
+
+This bounds only what this executor sends. Another host, a copied grant token, or the grant used directly is
+serialized only by the provider (see "Two facts" below). A held payout (`owner_approval`) doesn't block later sends
+while it waits for the vote, so this executor can file several held payouts one after another, each admitted before
+any settles; whether pending work counts against a cap is the provider's (Q4). A provider cap refusal under a code
+this platform doesn't yet treat as proven (`policy_limit_exceeded`, `policy_transaction_limit_exceeded`) leaves the
+send unresolved and blocks the executor: safe, not smooth ([recovery limitation](#recovery-limitation)).
+
+**Per provider source and docs (pinned commits; deployed version not established).**
+- The policy engine's cumulative check is a pure comparison, `spent + amount > limit`, against usage the caller
+  supplies; the keystore calls it without usage, so only the coordinator enforces cumulative caps
+  (shared-tee-helpers@f75a74e `src/wallet_policy.rs`:10–18, :1082–1104). Per-transaction caps, input assets and
+  freeze are stateless and re-checked by the keystore on every signature (:1070–1080).
+- outlayer@b8c58c0 `CUSTODY.md`:219–226 calls cumulative clauses best-effort under concurrency ("a burst can overshoot
+  a cumulative cap") and :386–388 records usage only post-settle, nothing reserved at acceptance. Its
+  `tests/wallet_concurrent_spend_e2e.sh` (same commit, upstream testnet test, not run by us) pins a per-wallet lock with
+  a 2-second wait: of two simultaneous spends that jointly exceed a limit, exactly one passes, the other `wallet_busy`
+  or `policy_denied`.
+- At outlayer@40e9565 (2026-11-09) `CUSTODY.md` is gone, and the docs say both: "the coordinator serializes
+  money-moving operations per wallet: the velocity limits need a consistent read-evaluate-record window"
+  (`docs/outlayer-custody-advantages.md`:134–138) and "cumulative limits are best-effort under concurrency … a burst of
+  simultaneous requests can overshoot one" (`docs/NON_CUSTODIAL.md`:338–341).
+- The Agent API documents its own layer above OutLayer: the USD budget "charged atomically at dispatch using 1Click USD
+  prices", shared by every grant; per-asset window limits counted "per agent, shared by every grant, at dispatch",
+  pending and uncertain actions counting until settled; and a `FAILED` row "only for a request that loses a concurrent
+  race, or a timelocked one released over budget" (skills@5d76111 `references/policy.md`:80–86, :99–106;
+  `references/concepts.md`:53–55). The same file calls per-asset windows "rolling" (:73) while the USD budget runs in
+  fixed periods (:86–92). The API server is private: these are documented, not source.
+
+**Unverified.** Whether the deployed provider holds any of this across grants, service instances and crashes; the
+single concurrent mainnet trial (E5) is one grant on one host.
+
+**Provider questions** (drafted here, not posted):
+- **Q1 (per-asset caps, E2–E4).** On the Agent API's route to OutLayer, is the per-asset hourly/daily/monthly check
+  serialized with the usage write for one agent across every grant and every API and coordinator instance? OutLayer's
+  docs at 40e9565 say both "serializes … per wallet" and "best-effort under concurrency": which holds for agents on the
+  Agent API, and is the API's own count at dispatch (skills@5d76111 `policy.md`:99–106) the authoritative one?
+- **Q2 (USD budget, E5, E13).** Is "charged atomically at dispatch" a single transaction across grants and API instances?
+  Which price is charged (the quote's, or the price at dispatch), how is it rounded, and is the charge trued up to the
+  executed `amount_in` or kept on `REFUNDED` and `FAILED`?
+- **Q3 (window edges, E12).** Are per-asset hourly/daily/monthly limits rolling (`policy.md`:73) or UTC calendar periods
+  (upstream tests `velocity_accounting_e2e.sh`:40–41 at b8c58c0), and which timestamp places an operation in a window?
+- **Q4 (pending and held work, E8, B6).** Does a `PENDING_APPROVAL` or `QUEUED` operation count against the USD budget and
+  per-asset caps from admission, and is it judged again at release against usage and a policy tightened meanwhile?
+  `policy.md`:102 says pending actions count until settled; OutLayer's `CUSTODY.md`:386 at b8c58c0 says nothing is
+  reserved at acceptance.
+- **Q5 (crash, E11).** After a coordinator crash leaves an operation uncharged (`stuck_request_repair_e2e.sh` at b8c58c0),
+  are new admissions for that wallet held until the repair charges it?
 
 ## Two facts that limit any local guarantee
 - **One live grant is not one sender.** Any number of processes can share a token. Counting grants fences
@@ -451,8 +547,6 @@ across hosts or prove remote exactly-once execution. See the
    kept locally, outside the repository (research/enforcement/M1-CREDENTIALS.md). Check which rules
    the Agent API and OutLayer enforce on every route available to the agent, including direct use of
    its grant. Application checks cover only the executor's code path.
-   - The steward today only proposes plans, and execution goes through `executePlan`, so it has no
-     direct send.
 
 ### Resolve with implementation and deployment evidence
 
@@ -530,18 +624,37 @@ change between preview and execution refused (A3), both in the local regression 
 path, so it doesn't constrain anyone holding the credentials); gateway denial (G1, `test/gateway-denial.test.ts`); the member
 allowlist matching every procedure (G2, `test/member-access.test.ts`). Observed on the isolated agent: the
 monthly cap, sequentially, and a shield under a non-empty destination list (E10; unshield not yet run);
-the USD budget under one concurrent trial (E5, once). Still open: verifying an owner signature against
-the enforced policy (S1, S2); the credential and route inventory (M1); a direct-credential swap into an
-unlisted asset refused upstream (E1; requires a provider capability beyond the documented spend-only
-asset list, with the 2026-10-10 success preserved as historical evidence); per-asset caps under
-concurrency, across grants and instances (E2–E4); retries around timeout and restart (E6); release on
-proven non-execution only (E7); tightening the policy while work is queued or held (E8); revoking or
-freezing at each dispatch boundary (E9); crash points (E11); window edges (E12); price and rounding edges
-(E13); artifact binding (E14); rolled-back accounting (E15); operation-proof verification (P1); the
-offline accounting cases of an executable model (B1–B7: two fitting admissions that jointly exceed a
-cap, window boundaries, unknown outcomes keeping their reservation, same-key retries, a crash before
-the claim, a policy reduction); and the output-asset refusal for steward legs (A2: plan legs and the
-autopilot purpose are covered in `test/plans.test.ts` and `test/authorize.test.ts`).
+the USD budget under one concurrent trial (E5, once).
+
+Spending-limit cases (platform issue #6, 2026-11-09; details in
+[spending limits under concurrency](#spending-limits-under-concurrency)):
+- **E1, closed as a provider limitation:** the provider documents that swaps may buy unlisted tokens
+  (skills@5d76111 `references/policy.md`:72), and the pinned engine checks only the input asset, so no upstream
+  refusal is expected. The output-asset limit is this platform's alone (A1); the 2026-10-10 success stays as
+  historical evidence.
+- **E2–E4, per-asset caps under concurrency:** this executor's own overlapping sends offline-tested; across grants,
+  hosts and instances, provider question Q1.
+- **E5, USD budget:** this executor's own overlapping sends offline-tested; observed once on mainnet; atomicity
+  across grants and instances, provider question Q2.
+- **E8, tightening the policy while work is queued or held:** provider question Q4.
+- **E11, crash points:** this side's are offline-tested (`test/journal.test.ts`, `test/lock.test.ts`); the provider's,
+  Q5.
+- **E12, window edges:** provider question Q3.
+- **E13, price and rounding edges:** provider question Q2.
+- **B1–B7, the offline accounting cases of an executable model:** no local budget engine is built (see "Resolve with
+  implementation and deployment evidence"), so each is either a property of this side's boundary, offline-tested, or
+  the provider's. Two fitting admissions that jointly exceed a cap: offline-tested at this executor's boundary
+  (`test/spending-limits-race.test.ts`), elsewhere Q1 and Q2. Unknown outcomes: stronger than a reservation here, as
+  they block every later send (`test/money-safety.test.ts`, `test/lock.test.ts`). Same-key retries: never made here
+  (`test/journal.test.ts`); the provider's replay is the open idempotency dependency under
+  [recovery limitation](#recovery-limitation). A crash before the claim: `test/journal.test.ts`. Window boundaries:
+  Q3. A policy reduction: Q4.
+
+Still open outside issue #6: verifying an owner signature against the enforced policy (S1, S2); the credential and
+route inventory (M1); retries around timeout and restart (E6); release on proven non-execution only (E7); revoking or
+freezing at each dispatch boundary (E9); artifact binding (E14); rolled-back accounting (E15); operation-proof
+verification (P1); and the output-asset refusal for plan legs (A2: plan legs and the autopilot purpose are covered
+in `test/plans.test.ts` and `test/authorize.test.ts`).
 
 Funded tests run only with the owner's authorization, on an isolated agent with tiny limits and a stated
 loss ceiling, never on a production agent; stop on any unexpected admission, unidentified operation or
@@ -810,7 +923,7 @@ and confidential balance that the agent's swaps may not take it under. It is bou
 grant's label carries the strategy's digest, and a DAO's grant proposal lists the floor among the strategy's terms.
 `authorize` checks it on each planned swap, before its prerequisite shield and again before the swap, under the money
 lock, so it covers the autopilot (scheduled and "Run now"), `executePlan` (the owner's session, `treasury-execute`
-apps and machine credentials, the steward's plans) and proposals. A swap is refused with `cash_floor_exceeded` only
+apps and machine credentials, and plans the removed steward stored) and proposals. A swap is refused with `cash_floor_exceeded` only
 when it lowers cash and leaves it under the floor. A swap out of a named asset counts its full input, and one into a
 named asset counts only its `minAmountOut`, both at the dispatch's fresh prices, as the per-run ceiling is valued. A
 swap that adds cash is never refused, even while cash stays under the floor: the policy's caps make recovery a series
@@ -873,9 +986,14 @@ proposal approved and executed once.
 
 Limits:
 - The approval is the platform's check, as for a wallet owner's proposals.
-- Only a DAO whose vote passes within the provider intent's window completes creation, the grant, freeze or unfreeze:
-  600 s for wallet requests (creation, freeze, unfreeze) and about 290 s for consent messages (the grant), per the provider's docs (owner-signing, signing-standards, read 2026-11-05). No request field lengthens it (sdk-typescript 0.7.3 `generateIntent`). A slower DAO can still approve
-  each swap as a Treasury proposal, which has no provider window, but can't turn on autopilot (#20).
+- Only a DAO whose vote passes within the provider intent's window completes creation, the grant, its revocation, a
+  policy edit, freeze or unfreeze: 600 s for wallet requests (creation, freeze, unfreeze, on-chain policy edits) and
+  about 290 s for consent messages (the grant, a revocation, off-chain policy edits), per the provider's docs
+  (owner-signing, signing-standards, read 2026-11-05). No request field lengthens it (sdk-typescript 0.7.3
+  `generateIntent`). The delegate action a DAO signs for a wallet request stays valid on chain for 6,000 blocks
+  (`src/dao-owner.ts`), so the provider's expiry is the tighter limit. A slower DAO can still approve each swap as a
+  Treasury proposal, which has no provider window, but can't turn on autopilot or freeze its agent by vote (#20); its
+  own stop (below) neither freezes the agent nor revokes the grant.
 - The platform authorizes the app, not a member. The app gates its own members with the SDK's `accessOf` and `mayCall`.
 - **The DAO's own stop** (`/confirm/dao/stop/<dao>/<agent>`, no app involved) ends everything given before it first
   applies, once the DAO's vote over the exact text is found and the page is opened: every app consent for the agent ID
@@ -893,7 +1011,10 @@ Limits:
 - **A wallet owner's own stop** (`/confirm/wallet/stop`, [app access](app-access.md)) does the same for agents a
   wallet owns, signed by the owner's full-access key with no app, and has the DAO stop's limits above. Freezing still
   needs an app to prepare `agent_freeze`, so a wallet owner without an app has no "no new sends" stop on the platform.
-  Offline- and browser-tested; not deployed.
+  It ends the consents stored by its cutoff, and after it a consent or setup for those agents is stored only if the
+  platform issued its NEP-413 nonce after the cutoff ([app access](app-access.md)), so one the owner signed before the
+  stop and an app sends later is refused. Apps that pick their own nonces keep working until the owner's first stop;
+  then they must ask for one. Offline- and browser-tested; not deployed.
   - A slow DAO's stop waits its voting period, and nothing changes until someone opens the page after the vote:
     autopilot and the consents it will end stay live until then.
 - A DAO's Treasury grant proposal says what it authorizes without a vote each time (autopilot, and plans of apps the DAO
@@ -926,6 +1047,22 @@ Limits:
   ([mainnet log](mainnet-log.md#a-dao-funds-its-agent-and-approves-a-swap-through-an-app-on-platform-staging-2026-11-05-utc)): funding, and an app's proposal approved by DAO vote and executed under the DAO's grant. Not
   observed: freeze, unfreeze. Not in production.
 
+### A wallet owner's vote on a held payout through an app (offline- and browser-tested)
+
+The vote's signed text, OutLayer's `approve:{approval_id}:{wallet_pubkey}:{request_hash}`, names no payee or amount,
+so the owner's wallet can't show what an approve releases. The agent proves the terms against the provider's request
+hash before preparing and again under the money lock before submitting (`checkPaymentApproval`), but until #48 the
+owner read them only where the app showed `payment.terms`. Now the prepared vote carries a link to the platform's
+confirm page, which shows those proven terms, taken from the agent's answer and never from the app's request, and
+submits through the agent's own `owner/submit` ([app access](app-access.md)). The page is optional: the app also gets
+the vote's text, unchanged, and may keep the owner off the page. It helps an owner the app sends there; it doesn't bind
+a dishonest app, which can show other terms in its own page and have the owner sign the vote there. Neither the owner
+nor the operator can require the page.
+
+Tested in `test/app-access.test.ts` (the link, terms bound to the payout and verdict asked about, no opening step, one
+submission per link) and `test/browser/approval-confirm.cjs` (with a stand-in wallet, the page shows the terms and the
+wallet signs exactly the vote's text, once). Not stack-tested, not deployed, and signing with a real wallet is untested.
+
 ## Shared machine access candidate
 
 The local shared access implementation is documented in [Agent access](agent-access.md). It delegates
@@ -957,3 +1094,22 @@ Module Federation runtime integration in this change. Compensation adds private 
 an initialization marker under `.invoices/`; restore both with the existing state, never an empty
 allowance. New isolated payouts require exactly the approved observed funding before first submission;
 accepted or unresolved invoices retain their original identity. See docs/invoices-extraction.md.
+
+## A payee's view of their own terms (offline-tested)
+
+From platform#51, a payee reads their own terms in the agent's policy from the platform host under the owner's signed
+payee disclosure, with no app relaying them ([app access](app-access.md)). It is read-only: it moves nothing, adds no
+rule to `authorize.ts` and touches no send path; the agent's `payeeTerms` read is reachable only by the gateway. What
+it does not establish:
+- **Independent verification.** The answer is the platform's account of the provider's policy view, read by the agent
+  with the platform's partner key. The policy is stored encrypted, the on-chain `agent_policy_hash` isn't a function of
+  it, and both the API's `policy_hash` and the mandate digest need the whole policy to recompute (see "Signed policy
+  binding" above). The answer is unsigned.
+- **Enforcement.** That the provider enforces the terms shown is as unverified as for any policy (status above).
+- **Privacy of the rest.** The answer leaves out the provider's `policy_hash`, and the mandate digest unless the owner
+  opts in within the signed disclosure (`"discloseDigest":true`). Either commits to the whole policy, so a payee who can
+  guess every other field (an agent paying only them under a known template) could confirm the guess, including caps,
+  budgets and other payees. With the opt-in that leak is the owner's accepted choice; without it the revision shows that
+  the policy changed, not what.
+- **DAO owners and revocation.** Wallet owners only; nothing is stored, so a disclosure ends only at its expiry, when
+  the agent is replaced, or while the owner's signing key is absent or not full-access on chain.

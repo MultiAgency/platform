@@ -36,7 +36,7 @@ record panels and simulated approval/rejection choices. The client validates eve
 their mode/stage/role and drops late responses after a scene change or unmount.
 
 `src/payables-guide-model.ts` requests one `generateUserInterface` function response through the
-existing NEAR AI Cloud verified transport. It does not invoke the steward or its planning tools.
+existing NEAR AI Cloud verified transport. It invokes no planning tools.
 The response must pass the existing `provider_tee` verification and then the scene schema before
 rendering. Generation and verification together have a 60-second application deadline. The
 completion request has a shorter timeout and no SDK retries; SDK verification may finish after

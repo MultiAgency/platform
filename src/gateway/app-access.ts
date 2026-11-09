@@ -87,7 +87,7 @@ export function readRecord<T>(file: string, schema: z.ZodType<T>): T | null {
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
   return schema.parse(JSON.parse(text));
 }
-const jsonFiles = (dir: string) => {
+export const jsonFiles = (dir: string) => {
   try { return readdirSync(dir).filter(file => file.endsWith(".json")); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
 };
@@ -263,7 +263,15 @@ export class AppConsents {
   private read(id: string) {
     if (!/^[a-f0-9]{64}$/.test(id)) return null;
     const record = readRecord(join(this.dir, `${id}.json`), Consent);
-    return record && (this.isRevoked(id) && !record.revoked ? { ...record, revoked: true } : record);
+    return record && this.withTombstone(record);
+  }
+  /** A consent stored here, live or archived: once stored, what it was is always answered the same. */
+  find(id: string) {
+    if (!/^[a-f0-9]{64}$/.test(id)) return null;
+    const live = this.read(id);
+    if (live) return live;
+    const archived = readRecord(join(this.ended, `${id}.json`), Consent);
+    return archived && this.withTombstone(archived);
   }
   isRevoked(id: string) { return /^[a-f0-9]{64}$/.test(id) && existsSync(join(this.tombstones, id)); }
   /** Throws what `store` would refuse with, so a caller can check before acting on the consent. */

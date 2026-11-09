@@ -27,8 +27,8 @@ const fields = (over: Partial<Parameters<typeof consentMessage>[0]> = {}) => ({ 
   owner: "owner.near", agent: "payout", agentId: "provider-id", scopes: ["read" as const], expiresAt: later(90), ...over });
 
 /** Signs a consent the way a wallet does (near-kit's NEP-413 signer). */
-async function signed(message: string, account = "owner.near", recipient = HOST) {
-  const key = generateKey(), nonce = randomBytes(32);
+async function signed(message: string, account = "owner.near", recipient = HOST, nonce: Buffer = randomBytes(32)) {
+  const key = generateKey();
   const near = new Near({ network: "mainnet", privateKey: key.secretKey as PrivateKey, defaultSignerId: account });
   const signature = await near.signMessage({ message, recipient, nonce });
   return { message, nonce: nonce.toString("base64"), publicKey: signature.publicKey, signature: signature.signature };
@@ -179,7 +179,7 @@ async function routeHarness(t: import("node:test").TestContext) {
   const server = createServer(async (req, res) => { try {
     if (await confirmRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, confirms, APP_ROOT, [agent], dir, () => state.stopping)) return;
     if (!await appRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, [agent], () => state.stopping,
-      { keyState: (account, key) => state.keys(account, key), ...(state.setup && { setup: state.setup }) })) { res.writeHead(404); res.end("{}"); }
+      { keyState: (account, key) => state.keys(account, key), nonceSecret: "c".repeat(32), ...(state.setup && { setup: state.setup }) })) { res.writeHead(404); res.end("{}"); }
   } catch (e) { sendFailure(res, e); } });
   const port = await listen(server);
   t.after(async () => { await close(server); await close(upstream); process.chdir(cwd); rmSync(dir, { recursive: true, force: true }); });
@@ -410,6 +410,71 @@ test("a confirm link shows the agent's record; the bytes go only to the owner's 
   assert.deepEqual(log.filter(l => l.event === "confirmed").map(l => l.correlationId), ["c-edit"]);
 });
 
+/** A prepared vote on held payout `held` as the agent answers it: the provider's `approve:` text and the terms the agent proved. */
+const VOTE_PAYLOAD = { message: `approve:a-1:ed25519:wallet:${"ab".repeat(32)}`, recipient: "outlayer.near", nonce: randomBytes(32).toString("base64") };
+const voteReply = (correlationId: string, payment: { correlationId: string; verdict: string; terms: object | null }) => JSON.stringify({ json: { correlationId,
+  preview: { summary: "Approve" }, expiresAt: later(0.005), digest: null, payment,
+  signer: { type: "near", account_id: "owner.near", public_key: DELEGATE_KEY.publicKey.toString() }, intent: { standard: "nep413", payload: VOTE_PAYLOAD } } });
+/** The owner's wallet signing the vote's text, as the page's `signIntent` returns it. */
+async function signVote(key = DELEGATE_KEY, payload = VOTE_PAYLOAD) {
+  const near = new Near({ network: "mainnet", privateKey: key.secretKey as PrivateKey, defaultSignerId: "owner.near" });
+  const signed = await near.signMessage({ ...payload, nonce: Buffer.from(payload.nonce, "base64") });
+  return { standard: "nep413", payload, public_key: signed.publicKey, signature: signed.signature };
+}
+
+test("a vote on a held payout gets a confirm link showing the terms the agent proved, beside the text the app keeps (#48)", async t => {
+  const { port, state, forwarded, staging, rpc, consent } = await routeHarness(t);
+  assert.equal((await consent({ scopes: ["owner"] })).status, 201);
+  const terms = { recipient: "payee.near", asset: "nep141:usdc.near", amount: "2500000" };
+  const vote = (correlationId = "held-1", verdict = "approve") => call(port, rpc("org_1", "owner/prepare"), "POST", staging,
+    { json: { action: { type: "approval_vote", approvalId: "6f1c2a4e-0b7d-4c1e-9a3f-2d5e8b7c1a90", verdict, correlationId }, signer: "wallet" } });
+  const viewOf = async (answer: { body: any }) => {
+    const api = new URL(answer.body.json.confirm.url).pathname.replace("/confirm/", "/confirm/v1/");
+    return { api, view: await call(port, api) };
+  };
+
+  // The app gets the text to sign, as before, and a link to the platform's page beside it.
+  state.reply.body = voteReply("c-vote", { correlationId: "held-1", verdict: "approve", terms });
+  const offered = await vote();
+  assert.equal(offered.status, 200, JSON.stringify(offered.body));
+  assert.deepEqual(offered.body.json.intent, { standard: "nep413", payload: VOTE_PAYLOAD }, "the readable text still reaches the app");
+  assert.match(offered.body.json.confirm.url, new RegExp(`^https://${HOST}/confirm/[A-Za-z0-9_-]{22}$`));
+  const { api, view } = await viewOf(offered);
+  assert.deepEqual([view.status, view.body.type, view.body.payment, view.body.intent, view.body.opening, view.body.state],
+    [200, "approval_vote", { correlationId: "held-1", verdict: "approve", terms }, { standard: "nep413", payload: VOTE_PAYLOAD }, undefined, "open"],
+    "the page shows the agent's proven terms, and the text the app already holds, with no opening step");
+  assert.equal((await call(port, `${api}/open`, "POST", undefined, await openingSignature({ message: "", recipient: HOST, nonce: VOTE_PAYLOAD.nonce }))).status, 404,
+    "a vote's link has nothing to open");
+  const submit = async (signedData: object) => call(port, api, "POST", undefined, { signedData });
+  const before = forwarded.length;
+  assert.equal((await submit(await signVote(generateKey()))).status, 400, "another key's signature is refused on the page");
+  assert.equal((await submit(await signVote(DELEGATE_KEY, { ...VOTE_PAYLOAD, message: "approve:a-2:x:y" }))).status, 400, "so is a signature over another text");
+  assert.equal(forwarded.length, before, "nothing reached the agent");
+  state.reply.body = JSON.stringify({ json: { status: "PENDING" } });
+  assert.equal((await submit(await signVote())).status, 200);
+  const sent = forwarded.slice(before);
+  assert.deepEqual(sent.map(f => [f.path, JSON.parse(f.body).json.correlationId, f.headers["x-gateway-actor"]]), [["/rpc/owner/submit", "c-vote", "app:staging:org_1"]],
+    "the page's submission is the agent's own owner/submit, under the app's actor");
+  assert.equal((await submit(await signVote())).status, 409, "a link submits once");
+  assert.equal((await call(port, rpc("org_1", "owner/submit"), "POST", staging, { json: { correlationId: "c-vote", signedData: await signVote() } })).status, 200,
+    "an offered link holds nothing: the app may submit too, and the agent answers a repeat from its record");
+
+  // Terms the agent didn't prove for the payout and verdict the app asked about make no page.
+  for (const [payment, asked] of [[{ correlationId: "held-2", verdict: "approve", terms }, ["held-1", "approve"]],
+    [{ correlationId: "held-1", verdict: "approve", terms }, ["held-1", "reject"]], [{ correlationId: "held-1", verdict: "approve", terms: null }, ["held-1", "approve"]]] as const) {
+    state.reply.body = voteReply("c-odd", payment);
+    const odd = await vote(...asked);
+    assert.deepEqual([odd.status, odd.body.json.confirm, odd.body.json.intent?.standard], [200, undefined, "nep413"], JSON.stringify(payment));
+  }
+  state.reply.body = voteReply("c-reject", { correlationId: "held-1", verdict: "reject", terms: null });
+  const rejecting = await vote("held-1", "reject");
+  assert.deepEqual((await viewOf(rejecting)).view.body.payment, { correlationId: "held-1", verdict: "reject", terms: null }, "a reject releases nothing, and says so");
+
+  const log = accessLogText().trim().split("\n").map(line => JSON.parse(line));
+  assert.deepEqual(log.filter(l => ["confirm", "confirmed", "withheld"].includes(l.event)).map(l => [l.event, l.correlationId]),
+    [["confirm", "c-vote"], ["confirmed", "c-vote"], ["confirm", "c-reject"]]);
+});
+
 /** The harness mocks global fetch for chain and provider reads, so the client reaches the gateway over node:http. */
 const httpFetch = ((input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
   const url = new URL(input instanceof Request ? input.url : input);
@@ -493,6 +558,20 @@ test("a payout consent reaches payout requests, their status, held payouts and a
   const before = forwarded.length;
   for (const procedure of ["pay", "overview", "owner/prepare", "compensation/send", "sweep"])
     assert.equal((await call(port, rpc("org_2", procedure), "POST", staging, {})).status, 403, `${procedure}: payout scope reaches nothing else`);
+  assert.equal(forwarded.length, before);
+});
+
+test("a read consent follows the app's own payout requests by requestId, but never asks for one", async t => {
+  const { port, forwarded, staging, production, rpc, consent } = await routeHarness(t);
+  const ask = { json: { requestId: "r-1", asset: "nep141:usdc", delivery: "intents", recipient: "payee.near", amount: "1", expectedPolicy: { revision: 1, digest: `sha256:${"0".repeat(64)}` } } };
+  assert.equal((await consent({ scopes: ["owner", "read"] })).status, 201);
+  assert.equal((await call(port, rpc("org_1", "payouts/status"), "POST", staging, { json: { requestId: "r-1" } })).status, 200);
+  assert.equal(forwarded.at(-1)!.path, "/rpc/payouts/status");
+  assert.equal(forwarded.at(-1)!.headers["x-gateway-actor"], "app:staging:org_1", "answered for this deployment and Organization only, as under payout");
+  const before = forwarded.length;
+  assert.equal((await call(port, rpc("org_1", "payouts/request"), "POST", staging, ask)).status, 403, "read doesn't request payouts");
+  assert.equal((await call(port, rpc("org_1", "deposit"), "POST", staging, {})).status, 403, "nor take a deposit address");
+  assert.equal((await call(port, rpc("org_1", "payouts/status"), "POST", production, { json: { requestId: "r-1" } })).status, 403, "another deployment's credential reaches nothing");
   assert.equal(forwarded.length, before);
 });
 
@@ -892,7 +971,7 @@ test("a setup stores no consent when access ends or a stop begins while its agen
   assert.equal(new AppConsents(".app-access").list({}).length, 0, "nothing stored");
 });
 
-test("under a wallet's consent, read reaches account and reconcileBooks, treasury reaches the link and a tick, and no scope reaches setup, recover, fund or the steward", async t => {
+test("under a wallet's consent, read reaches account and reconcileBooks, treasury reaches the link and a tick, and no scope reaches setup, recover or fund", async t => {
   const { port, forwarded, staging, rpc, consent } = await routeHarness(t);
   assert.equal((await consent({ scopes: ["owner"] })).status, 201);
   const before = forwarded.length;
@@ -902,7 +981,7 @@ test("under a wallet's consent, read reaches account and reconcileBooks, treasur
   assert.equal((await consent({ organization: "org_2", scopes: ["read", "owner", "payout", "treasury", "treasury-execute"] })).status, 201);
   for (const procedure of ["account", "reconcileBooks"])
     assert.equal((await call(port, rpc("org_2", procedure), "POST", staging, {})).status, 200, procedure);
-  for (const procedure of ["setup", "recover", "treasury/fund", "steward/propose"])
+  for (const procedure of ["setup", "recover", "treasury/fund"])
     assert.equal((await call(port, rpc("org_2", procedure), "POST", staging, {})).status, 403, `${procedure}: owner-session only, whatever the scopes`);
   for (const procedure of ["treasury/link", "treasury/unlink", "autopilot/tick"])
     assert.equal((await call(port, rpc("org_2", procedure), "POST", staging, { json: { accountId: "treasury.near" } })).status, 200,
@@ -938,4 +1017,58 @@ test("the gateway's coded refusal before forwarding an agent call is refused wit
   assert.deepEqual(proxy.ok === false && [proxy.kind, "httpStatus" in proxy && proxy.httpStatus], ["unknown", 400], "a page with no code proves nothing");
   const older = await answering(400, JSON.stringify({ error: "An older gateway's refusal" })).call("proposals/approve", signed);
   assert.equal(older.ok === false && older.kind, "unknown", "an older gateway names no code, so nothing changes for it");
+});
+
+/** The owner's wallet stop as `wallet-stop.ts` records it once applied: its cutoff `at`, and the agents it named. */
+function recordWalletStop(at: number, targets: string[], agent = "*") {
+  const id = randomBytes(32).toString("hex");
+  mkdirSync(join(APP_ROOT, "wallet-stops"), { recursive: true });
+  writeFileSync(join(APP_ROOT, "wallet-stops", `${id}.json`), JSON.stringify({ version: 1, id, host: HOST, owner: "owner.near", agent,
+    message: "m", nonce: "n", publicKey: "k", signature: "s", expiresAt: at + 600_000, at,
+    targets: targets.map(name => ({ agent: name, agentId: "provider-id" })), ended: [], settled: {} }));
+}
+const pause = () => new Promise(resolve => setTimeout(resolve, 5));
+
+test("after the owner's wallet stop, a consent is stored only if the platform issued its nonce after the stop", async t => {
+  const { port, staging, production } = await routeHarness(t);
+  const issue = async (token = staging) => {
+    const answer = await call(port, "/apps/v1/consent-nonces", "POST", token, {});
+    assert.equal(answer.status, 200, JSON.stringify(answer.body));
+    assert.ok(Math.abs(answer.body.issuedAt - Date.now()) < 5_000);
+    assert.equal(Buffer.from(answer.body.nonce, "base64").length, 32);
+    return Buffer.from(answer.body.nonce, "base64");
+  };
+  const submit = async (nonce?: Buffer, scopes: ("read" | "treasury")[] = ["read", "treasury"]) =>
+    call(port, "/apps/v1/consents", "POST", staging, await signed(consentMessage(fields({ scopes })), "owner.near", HOST, nonce));
+  assert.equal((await call(port, "/apps/v1/consent-nonces", "POST", undefined, {})).status, 401);
+  assert.equal((await submit(undefined, ["read"])).status, 201, "with no stop, an app's own nonce is accepted as before");
+  const early = await issue(), elsewhere = await issue(production);
+  await pause(); recordWalletStop(Date.now(), ["payout"]); await pause();
+  assert.deepEqual(denial(await submit()), [409, "owner_stopped", undefined], "its own nonce: it may have been signed before the stop");
+  assert.deepEqual(denial(await submit(early)), [409, "owner_stopped", undefined], "issued before the stop");
+  assert.deepEqual(denial(await submit(elsewhere)), [409, "owner_stopped", undefined], "issued to another deployment");
+  const forged = Buffer.from(early); forged.writeBigUInt64BE(BigInt(Date.now() + 60_000), 0);
+  assert.deepEqual(denial(await submit(forged)), [409, "owner_stopped", undefined], "a changed issue time doesn't verify");
+  const fresh = await submit(await issue());
+  assert.equal(fresh.status, 201, JSON.stringify(fresh.body));
+
+  // Another owner's unreadable stop record is never this owner's concern.
+  writeFileSync(join(APP_ROOT, "wallet-stops", `${"f".repeat(64)}.json`), JSON.stringify({ version: 2, host: HOST, owner: "someone-else.near" }));
+  assert.equal((await submit(await issue())).status, 201);
+});
+
+test("after the owner's wallet stop for every agent, a setup is stored only with a nonce the platform issued after it", async t => {
+  const { port, state, staging } = await routeHarness(t);
+  state.providerId = null;
+  let reserved = 0;
+  state.setup = async input => { reserved++; return { name: "own-new", owner: input.owner, port: 0, area: input.area, executor: true }; };
+  const issue = async () => Buffer.from((await call(port, "/apps/v1/consent-nonces", "POST", staging, {})).body.nonce, "base64");
+  const setup = async (nonce?: Buffer) => call(port, "/apps/v1/setup", "POST", staging, await signed(setupMessage(setupFields()), "owner.near", HOST, nonce));
+  const early = await issue();
+  await pause(); recordWalletStop(Date.now(), ["payout"]); await pause();
+  assert.deepEqual(denial(await setup(early)), [409, "owner_stopped", undefined]);
+  assert.deepEqual(denial(await setup()), [409, "owner_stopped", undefined]);
+  assert.equal(reserved, 0, "a stop for every agent refuses before anything is reserved");
+  const fresh = await setup(await issue());
+  assert.equal(fresh.status, 201, JSON.stringify(fresh.body));
 });

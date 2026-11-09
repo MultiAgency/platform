@@ -29,17 +29,21 @@ copy (see Not done yet).
 
 **Experimental**, outside the core loops: no compatibility promise, and offline-tested unless their page says otherwise.
 The [dashboard prototype](docs/prototype.md) (the `dao` and `invoices` source, whose hosted services were retired and whose packages are no longer
-built, 2026-11-08) with its invoices, agreements, work orders, guided walkthroughs and Telegram notifications; the
-LLM-steered treasury at `/steward`; [agent connections](docs/agent-access.md); and the run-log adapter.
+built, 2026-11-08) with its invoices, agreements, work orders, guided walkthroughs and Telegram notifications;
+[agent connections](docs/agent-access.md); and the run-log adapter. The LLM steward was removed in SDK 0.5.5: the
+platform keeps no model of its own in the money path.
 
 ## How it works
 
 - The **owner** signs a **policy**: allowed actions, assets, caps, budget, and where funds may go.
 - The owner issues a **grant** that lets this server act for the **agent** inside that policy.
 - The agent swaps, shields and pays through the Agent API and OutLayer, with application checks and
-  provider-enforced limits. Output-asset enforcement is local; strict cumulative per-asset enforcement
-  and USD-budget atomicity remain unproven. See the [enforcement assessment](docs/enforcement.md) for
-  the evidence and remaining gaps.
+  provider-enforced limits. Output-asset enforcement is local. The executor sends one operation at a time
+  and waits for each to settle, so its own simultaneous requests can't overrun a cap or the USD budget
+  (offline-tested against a simulated provider); against other senders, strict cumulative per-asset
+  enforcement and USD-budget atomicity rest on the provider and remain unproven. See the
+  [enforcement assessment](docs/enforcement.md#spending-limits-under-concurrency) for the evidence and
+  remaining gaps.
 - Every policy has a **mandate digest**: sha256 of its canonical JSON (`src/mandate.ts`), which anyone
   holding the policy can recompute. Every plan and every money action records the digest it ran under.
 - The **books** compare public balances against the chain's
@@ -128,7 +132,7 @@ Each line is a gap; the linked page says how the rest is known. The
 - `MultiAgency/payables` and `MultiAgency/treasury-prototype` (not archived) still carry their own copies of the
   gateway and money path, so a fix here doesn't reach them; Payables' frontend still imports from its copy. The
   Treasury app (`MultiAgency/treasury`) is to replace the prototype and this platform's Treasury pages.
-- The owner session (`/a/<agent>/`, the `dao` package's owner app, `ownerClient`, `/gw/agents` and `steward/propose`)
+- The owner session (`/a/<agent>/`, the `dao` package's owner app, `ownerClient` and `/gw/agents`)
   has had no production host since 2026-11-08; owner UIs move to app access (platform#14). It stays until the apps
   replace it: Treasury's app-server pages (MultiAgency/treasury#138) and a Payables owner UI on `/apps/v1`, which doesn't
   exist yet: as of 2026-11-08, `MultiAgency/payables` (last commit 2026-10-19) uses only the owner session, and no
@@ -136,6 +140,10 @@ Each line is a gap; the linked page says how the rest is known. The
   owner of a Payables agent has no hosted owner UI, only the stop page with no app. Contributor intake (the payee pages
   and Invoices) has no hosted path either: the headless host doesn't serve it, and app access leaves agreements,
   invoices and work orders out by design, so a Payables app keeps those records itself.
+- A payee can read their own terms in the policy from the platform host under the owner's payee disclosure
+  (platform#51, offline-tested, not deployed), but the answer is the platform's word, not independently checkable or
+  signed, and DAO owners can't disclose
+  ([app access](docs/app-access.md), [enforcement](docs/enforcement.md#a-payees-view-of-their-own-terms-offline-tested)).
 - A new prototype must reuse a fixed host `demo` value and agent area; owner-app `contract.json` is checked at runtime
   only on hosts served by the shared release server (offline-tested, not deployed). See the
   [integration path](docs/integration-path.md#gaps).
@@ -146,10 +154,13 @@ Each line is a gap; the linked page says how the rest is known. The
   ([platform production](docs/platform-production.md)). Mainnet-observed on staging: confidential USDC payouts (2026-10-28) and
   withdrawals of wNEAR or USDC to agreed NEAR accounts (2026-10-30), and DAO-owned agents (below) ([mainnet log](docs/mainnet-log.md)).
   Approving a held withdrawal is offline- and stack-tested, not mainnet-observed, and its signature doesn't bind
-  `destination_asset` ([enforcement](docs/enforcement.md)); at most 32 hosted agents per host. A dishonest app can still get a blind NEP-366 signature
+  `destination_asset` ([enforcement](docs/enforcement.md)); at most 32 hosted agents per host, and at most 16 Organization agents per app deployment on a host, over its whole lifetime: a hosted agent is never released (#46). A dishonest app can still get a blind NEP-366 signature
   by having the owner sign the confirm link's text on its own page; a held payout's vote text names no payee or amount,
   so the app's display is the only place the owner sees them; an owner who signs the platform's sign-in text on an
   app's page gives it a full session; a service credential is a bearer. See [app access](docs/app-access.md).
+- A second payout of an invoice already paid, under another `requestId`, is held for the owner's vote, the only check
+  left. Found by the [crash test](docs/crash-test.md) of an outside agent (stack-tested with scripted agents; no model run
+  recorded yet); see [enforcement](docs/enforcement.md#recovery-limitation).
 - Treasury proposals (`treasury`, `treasury-execute`) are offline- and stack-tested for wallet owners; for a DAO owner,
   one proposal approved by vote and executed is mainnet-observed on staging (2026-11-05). The production platform
   configuration (`deploy/platform.json`) doesn't set up Treasury agents yet; staging's does. A proposal's approval is the platform's check, not the provider's: whoever holds
@@ -198,6 +209,11 @@ Each line is a gap; the linked page says how the rest is known. The
   still use floating point. Provider caps and the USD budget are unaffected.
 
 **Policy and provider**
+- Cumulative per-asset caps and the USD budget can't be overrun by this executor's own simultaneous sends (offline-tested); for
+  other senders (another host, the grant used directly) they rest on the provider, whose docs call its cumulative
+  limits best-effort under concurrency in one place and serialized per wallet in another. One concurrent mainnet trial
+  held the budget. A held payout doesn't block later sends, so several can be filed before any settles. Provider
+  questions Q1–Q5 in the [enforcement assessment](docs/enforcement.md#spending-limits-under-concurrency).
 - The policy's asset list limits what the agent spends, not what it buys: the wallet lets a swap into an unlisted
   asset through. This server refuses one before sending; the wallet should.
 - The owner can't verify the enforced policy: it is stored encrypted to the custody keystore, and the public

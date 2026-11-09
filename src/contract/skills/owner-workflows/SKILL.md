@@ -75,9 +75,15 @@ Result: `owner/submit` answers the provider status (`{ status: "SUCCESS" }` once
 `{ stage: "submitted", status }` once the outcome is recorded, `{ stage: "submitting" }` while it is still being
 reconciled (read again later), and `{ stage: "unknown" }` for a correlation id this agent does not hold.
 
+A grant lasts 30 days unless `grant_issue` names an `expiresAt` (ISO timestamp, at least an hour and at most 365 days
+ahead, the provider's maximum; `MIN_GRANT_MS`, `MAX_GRANT_MS`). Outside that range `prepare` is refused, never clamped. The answer's
+`grant: { label, expiresAt }` is what the owner signs (the top-level `expiresAt` is only the signing window): show it
+before the wallet opens. Per the provider's docs an expired grant authorizes no new sends; not observed on mainnet. A
+new grant leaves earlier ones live until they expire: `grant_revoke` ends one sooner.
+
 ## Follow a plan execution stream
 
-`executePlan`, `rebalance`, `sweep` and `steward/propose` are streams. Events are validated one by one; the stream's
+`executePlan`, `rebalance` and `sweep` are streams. Events are validated one by one; the stream's
 final value is `undefined` on success or a failure.
 
 ```ts

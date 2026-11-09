@@ -2,7 +2,7 @@ import { PublicError } from "./public-error.js";
 import lockfile from "proper-lockfile";
 import { z } from "zod";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { type Intent, type OwnerWallet, type Policy, type SubmitIntentRequest } from "@near-intents-agent-api/sdk";
 import { api, readStatus } from "./api.js";
@@ -33,7 +33,7 @@ import { checkHostedCreation } from "./hosted-binding.js";
 
 export type OwnerAction =
   | { type: "agent_create"; owner?: OwnerWallet; role?: AgentRole; payees?: string[] }
-  | { type: "grant_issue"; label?: GrantLabel; suffix?: string; expectedStrategyDigest?: string }
+  | { type: "grant_issue"; label?: GrantLabel; suffix?: string; expectedStrategyDigest?: string; expiresAt?: string }
   /** Stops one grant at once; operations it already committed still finish. */
   | { type: "grant_revoke"; grantId: string }
   | { type: "agent_freeze" }
@@ -49,6 +49,13 @@ type Prepared = { stage?: "prepared" | "submitted" | "settled"; result?: { statu
   wallet?: { intent: Intent; signer: OwnerWallet };
   /** The owner's signature as submitted, kept to send again if the API never received it. */
   signedData?: Record<string, unknown> };
+
+/** An unsubmitted intent's signing window has closed: the API refuses it from this moment, so every view says so too. */
+const windowClosed = (expiresAt: string, now = Date.now()) => now >= Date.parse(expiresAt);
+/** Where a stored intent stands, read one way. Each view below only names these phases in its own contract's words. */
+const phaseOf = (saved: Pick<Prepared, "stage" | "expiresAt">, now = Date.now()) =>
+  saved.stage === "settled" ? "settled" as const : saved.stage === "submitted" ? "submitted" as const
+    : windowClosed(saved.expiresAt, now) ? "expired" as const : "open" as const;
 
 /**
  * Durable prepared, submitted and settled intents. They are kept in a file per
@@ -121,7 +128,7 @@ export function delegateWaiting(owner: string, now = Date.now()): z.infer<typeof
     const waiting = entries.find((p) => {
       if (!p.dao?.delegate || p.dao.owner.account_id !== owner) return false;
       const stage = p.stage ?? "prepared";
-      if (stage === "prepared") return Date.parse(p.expiresAt) > now;
+      if (stage === "prepared") return !windowClosed(p.expiresAt, now);
       // Approval completion is separate from settlement of the payout it released.
       if (p.ownerSucceeded === true) return false;
       if (stage === "submitted") return true; // expiry or a newer nonce read is not an outcome
@@ -200,11 +207,11 @@ function savePending() {
 function expire() {
   let dropped = false;
   for (const [correlationId, { dao, expiresAt, stage, type, paymentApproval }] of pending) {
-    if (stage === "submitted" || stage === "settled") continue;
-    if (Date.now() <= new Date(expiresAt).getTime()) continue;
+    if (phaseOf({ stage, expiresAt }) !== "expired") continue;
     pending.delete(correlationId);
+    // Answered `expired` while this process runs; a DAO's is also archived, so it stays known after a restart.
+    outcomes.set(correlationId, { stage: "expired" });
     if (dao) {
-      outcomes.set(correlationId, { stage: "expired" });
       // Kept so a proposal filed for it can still be recognised once its signing window has closed.
       mkdirSync(dirname(EXPIRED_FILE), { recursive: true });
       appendSynced(EXPIRED_FILE, { correlationId, type, expiresAt, hash: dao.hash, intent: dao.intent, delegate: dao.delegate ?? null, payment: paymentOf(paymentApproval) });
@@ -240,7 +247,7 @@ async function build(
     case "grant_issue": {
       // The new grant's token is saved where it is prepared: only the agent's executor may hold it.
       if (!executes()) throw new PublicError("This copy only reads and approves: issue the grant from the agent's executor, which must hold its token");
-      const { token, request } = await grantRequest({ label: action.label, suffix: action.suffix, expectedStrategyDigest: action.expectedStrategyDigest, requireStrategyReview: true });
+      const { token, request } = await grantRequest({ label: action.label, suffix: action.suffix, expectedStrategyDigest: action.expectedStrategyDigest, expiresAt: action.expiresAt, requireStrategyReview: true });
       return { request, grantToken: token };
     }
     case "grant_revoke":
@@ -287,8 +294,10 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
   const digest = request.type === "policy_update" ? mandateDigest(request.policy) : null;
   // The policy this signature asks for, as this server built the request, and the one in force it replaces.
   const policies = "policy" in request ? { current: current ?? null, requested: request.policy } : undefined;
+  // A grant as this server asked for it: the owner reviews its label and when it ends, apart from the signing window.
+  const grant = request.type === "grant_issue" ? { label: request.label, expiresAt: request.expires_at } : undefined;
   const base = { correlationId: generated.correlation_id, preview: generated.preview, expiresAt: generated.expires_at, digest,
-    ...(policies && { policy: policies }), ...(paymentApproval && { payment: { ...paymentOf(paymentApproval)!, terms: vote!.terms } }) };
+    ...(policies && { policy: policies }), ...(grant && { grant }), ...(paymentApproval && { payment: { ...paymentOf(paymentApproval)!, terms: vote!.terms } }) };
 
   if (!owner) {
     const wallet = { intent: generated.intent, signer: generated.signer };
@@ -320,14 +329,14 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
   // The intent is already held: a failed read only drops the one-click filings, leaving filing in Trezu.
   const [policy, nextId] = await Promise.all([daoPolicy(daoId).catch(() => null), nextProposalId(daoId).catch(() => null)]);
   // A grant's proposal names the strategy it binds; a strategy that can't be read now leaves only its digest suffix.
-  const label = request.type === "grant_issue" ? String((request as { label?: unknown }).label ?? "") : undefined;
+  const label = grant?.label;
   let strategy: Strategy | undefined;
   if (label?.startsWith("treasury:")) try { strategy = loadStrategy(); } catch { strategy = undefined; }
   // A revocation's proposal names the grant it ends, read from the provider; an unreadable list names only its id.
   const revokes = request.type === "grant_revoke" ? { id: request.grant_id,
     label: (await api.listGrants(agentId()).catch(() => null))?.find(g => g.grant_id === request.grant_id)?.label ?? null } : undefined;
   const description = proposalDescription({ type: generated.type, summary: generated.preview.summary, expiresAt: generated.expires_at, hash: dao.hash, label, strategy,
-    revokes, policy: policies });
+    grantExpiresAt: grant?.expiresAt, revokes, policy: policies });
   return {
     ...base,
     dao: {
@@ -349,7 +358,7 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
  * so and names that strategy's terms, when `strategy` is the one the suffix binds.
  */
 export function proposalDescription(intent: { type: string; summary: string; expiresAt: string; hash: string; label?: string; strategy?: Strategy;
-  revokes?: { id: string; label: string | null }; policy?: { current: Policy | null; requested: Policy } }) {
+  grantExpiresAt?: string; revokes?: { id: string; label: string | null }; policy?: { current: Policy | null; requested: Policy } }) {
   // A DAO's proposals are public: a policy edit's summary can name payees, so it's never used.
   const action = intent.type === "policy_update" ? "Change the agent's policy" : intent.summary;
   const suffix = intent.type === "grant_issue" && intent.label?.startsWith("treasury:") ? intent.label.slice("treasury:".length) : undefined;
@@ -362,6 +371,7 @@ export function proposalDescription(intent: { type: string; summary: string; exp
       "* Authorizes: the agent's autopilot, and plans of apps the DAO consented to with treasury-execute, to swap without " +
         "a vote each time, within the strategy below and the DAO's signed policy. The DAO's approved Treasury proposals also execute under it",
       `* Strategy ${suffix}: ${terms}`] : []),
+    ...(intent.grantExpiresAt ? [`* Grant expires: ${intent.grantExpiresAt} (the provider refuses the agent's sends under it after then)`] : []),
     ...(intent.revokes ? [intent.revokes.label === null
       ? `* Revokes: grant ${intent.revokes.id}, not found among the agent's grants when this was filed; check it on the agent before voting`
       : `* Revokes: grant ${intent.revokes.id} (${intent.revokes.label})`,
@@ -408,7 +418,7 @@ async function reconcileOne(correlationId: string, prepared: Prepared) {
   if (prepared.stage === "settled") return prepared.result!;
   let owner = prepared.ownerSucceeded && prepared.releases ? undefined : await readStatus(correlationId);
   if (owner?.status === "PENDING_SIGNATURE") {
-    if (Date.now() >= Date.parse(prepared.expiresAt)) {
+    if (windowClosed(prepared.expiresAt)) {
       prepared.stage = "settled";
       prepared.result = { status: "EXPIRED", failureCode: "signing_window_closed" };
       savePending();
@@ -481,7 +491,7 @@ async function submitLocked(correlationId: string, signedData: Record<string, un
   if (!prepared) throw new PublicError("Unknown intent");
   if (prepared.stage === "settled") return prepared.result!;
   if (prepared.stage === "submitted") return reconcileOne(correlationId, prepared);
-  if (Date.now() >= Date.parse(prepared.expiresAt)) throw new PublicError("Intent expired");
+  if (windowClosed(prepared.expiresAt)) throw new PublicError("Intent expired");
   if (from === "dao") {
     if (!prepared.dao) throw new Error("This intent wasn't prepared for a DAO's signature");
   } else {
@@ -521,29 +531,40 @@ async function reconcileLocked() {
 /** Where a DAO-signed intent stands: waiting for the vote, or how it ended. */
 export function status(correlationId: string) {
   const saved = readPending().get(correlationId);
-  if (saved?.stage === "settled") return { stage: "submitted" as const, ...saved.result };
-  if (saved?.stage === "submitted") return { stage: "submitting" as const };
+  // After a restart an expired DAO intent is known only from its archive.
+  const phase = saved ? phaseOf(saved)
+    : outcomes.get(correlationId)?.stage === "expired" || archivedIds().has(correlationId) ? "expired" as const : undefined;
+  return { ...stageOf(correlationId, saved, phase), ...(phase && { phase }) };
+}
+
+/** `owner/status`'s own words for a phase, kept for clients before 0.5.5; the in-memory `outcomes` say more while this process follows a vote. */
+function stageOf(correlationId: string, saved: Prepared | undefined, phase: ReturnType<typeof phaseOf> | undefined) {
+  if (phase === "settled") return { stage: "submitted" as const, ...saved!.result };
+  if (phase === "submitted") return { stage: "submitting" as const };
   const outcome = outcomes.get(correlationId);
   if (outcome) return outcome;
+  if (phase === "expired") return { stage: "expired" as const };
   if (saved?.dao) return { stage: "voting" as const, expiresAt: saved.expiresAt };
   return { stage: "unknown" as const };
 }
 
 /** Private display projection of durable owner actions; never includes signing material. */
 export function ownerActions(now = Date.now()) {
-  return [...readPending()].reverse().map(([correlationId, saved]) => ({
-    correlationId,
-    type: saved.type,
-    expiresAt: saved.expiresAt,
-    signer: saved.dao ? "dao" as const : "wallet" as const,
-    stage: saved.stage === "settled" ? "settled" as const
-      : saved.stage === "submitted" ? "submitted" as const
-      : Date.parse(saved.expiresAt) < now ? "expired" as const : "prepared" as const,
-    ownerSucceeded: saved.ownerSucceeded === true,
-    status: saved.result?.status ?? null,
-    failureCode: saved.result?.failureCode ?? null,
-    payment: paymentOf(saved.paymentApproval),
-  }));
+  return [...readPending()].reverse().map(([correlationId, saved]) => {
+    const phase = phaseOf(saved, now);
+    return {
+      correlationId,
+      type: saved.type,
+      expiresAt: saved.expiresAt,
+      signer: saved.dao ? "dao" as const : "wallet" as const,
+      stage: phase === "open" ? "prepared" as const : phase,
+      phase,
+      ownerSucceeded: saved.ownerSucceeded === true,
+      status: saved.result?.status ?? null,
+      failureCode: saved.result?.failureCode ?? null,
+      payment: paymentOf(saved.paymentApproval),
+    };
+  });
 }
 
 /**
@@ -555,20 +576,36 @@ export function ownerActions(now = Date.now()) {
 export function daoRequests(now = Date.now()) {
   const kept = [...readPending()].flatMap(([correlationId, { type, expiresAt, dao, stage, paymentApproval }]) => {
     if (!dao) return [];
-    const state = stage === "submitted" || stage === "settled" ? "done" : now <= new Date(expiresAt).getTime() ? "waiting" : "expired";
-    return [{ correlationId, type, expiresAt, hash: dao.hash, intent: dao.intent, delegate: dao.delegate ?? null, state, payment: paymentOf(paymentApproval) }];
+    const phase = phaseOf({ stage, expiresAt }, now);
+    const state = phase === "open" ? "waiting" : phase === "expired" ? "expired" : "done";
+    return [{ correlationId, type, expiresAt, hash: dao.hash, intent: dao.intent, delegate: dao.delegate ?? null, state, payment: paymentOf(paymentApproval), phase }];
   });
-  type Archived = Omit<(typeof kept)[number], "state">;
-  // Lines archived before payments were recorded carry none; a torn last line is skipped.
-  const expired = existsSync(EXPIRED_FILE)
-    ? readFileSync(EXPIRED_FILE, "utf8").split("\n").filter(Boolean).slice(-100).flatMap((line) => {
-        try {
-          const archived = JSON.parse(line) as Archived;
-          return [{ ...archived, payment: archived.payment ?? null, state: "expired" as const }];
-        } catch { return []; }
-      })
-    : [];
+  const expired = archivedExpired(lines => lines.slice(-100)).map(archived => ({ ...archived, state: "expired" as const, phase: "expired" as const }));
   return [...kept, ...expired];
+}
+
+/** The archive's correlation IDs, read again only when the file changed: `owner/status` asks on every poll. */
+let archived: { stamp: string; ids: Set<string> } | undefined;
+function archivedIds() {
+  if (!existsSync(EXPIRED_FILE)) return new Set<string>();
+  const { size, mtimeMs } = statSync(EXPIRED_FILE), stamp = `${size}:${mtimeMs}`;
+  if (archived?.stamp !== stamp) archived = { stamp, ids: new Set(archivedExpired(lines => lines).map(entry => entry.correlationId)) };
+  return archived.ids;
+}
+
+/**
+ * DAO intents dropped when their window closed, oldest first, from the archive lines `select` keeps: only those are
+ * parsed, since the archive only grows. Lines archived before payments were recorded carry none; a torn last line is skipped.
+ */
+function archivedExpired(select: (lines: string[]) => string[]) {
+  if (!existsSync(EXPIRED_FILE)) return [];
+  return select(readFileSync(EXPIRED_FILE, "utf8").split("\n").filter(Boolean)).flatMap((line) => {
+    try {
+      const archived = JSON.parse(line) as { correlationId: string; type: string; expiresAt: string; hash: string; intent: DaoSigning["intent"];
+        delegate: string | null; payment?: ReturnType<typeof paymentOf> };
+      return [{ ...archived, payment: archived.payment ?? null }];
+    } catch { return []; }
+  });
 }
 
 let watching: NodeJS.Timeout | undefined;

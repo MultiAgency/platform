@@ -12,7 +12,7 @@ import { stackControls } from './stack-controls.mjs';
 // the procedure can return them.
 const LISTED = ['activity', 'autopilot/enable', 'autopilot/evidence', 'autopilot/get', 'autopilot/log', 'autopilot/stop', 'autopilot/tick', 'deposit', 'executePlan',
   'held', 'inbox/list', 'instance', 'ledgerCsv', 'overview', 'owner/actions', 'owner/pending', 'owner/prepare', 'owner/status', 'owner/submit', 'policyHistory',
-  'rebalance', 'reconcileBooks', 'recover', 'setup', 'steward/propose', 'strategy/get', 'strategy/save', 'sweep', 'treasury/fund', 'treasury/get', 'treasury/link',
+  'rebalance', 'reconcileBooks', 'recover', 'setup', 'strategy/get', 'strategy/save', 'sweep', 'treasury/fund', 'treasury/get', 'treasury/link',
   'treasury/unlink', 'unresolved', 'externalPlan'];
 
 test('Treasury: every listed procedure through ownerClient equals its raw answer, with each reachable error kind', async ({ browser }, info) => {
@@ -62,13 +62,12 @@ test('Treasury: every listed procedure through ownerClient equals its raw answer
     await check('sweep', { execute: false }, 'ok');
     await check('sweep', { execute: true }, 'ok');
     await check('recover', undefined, 'ok');
-    await check('steward/propose', {}, undefined); // attested inference is not available offline: error path only
 
     // refused: invalid input never reaches a handler.
     for (const [procedure, input] of [['executePlan', { planId: 'not-a-plan' }], ['sweep', { execute: 'yes' }], ['externalPlan', { swaps: [] }], ['strategy/save', { strategy: {}, expectedDigest: 'x' }],
       ['autopilot/enable', { expectedDigest: 'x' }], ['autopilot/evidence', { since: 'yesterday' }], ['autopilot/log', { tickId: '' }], ['owner/prepare', { action: { type: 'nope' }, signer: 'wallet' }],
       ['owner/submit', { correlationId: '', signedData: {} }], ['owner/status', { correlationId: 5 }], ['treasury/link', { accountId: 'x' }],
-      ['treasury/fund', { asset: 'DOGE', amount: '1' }], ['steward/propose', { instruction: 'x'.repeat(3000) }]])
+      ['treasury/fund', { asset: 'DOGE', amount: '1' }]])
       await check(procedure, input, 'refused');
 
     // Refused by the procedure's own guard: well-formed inputs the handler rejects before sending.
@@ -103,7 +102,6 @@ test('Treasury: every listed procedure through ownerClient equals its raw answer
     const outagePlan = (await client.call('externalPlan', { swaps: [{ from: USDC, to: 'nep141:wrap.near', amount: '1000000' }] })).value;
     await outage(stack.portfolio, LISTED, {
       inputs: { 'strategy/save': { strategy: { ...fresh.strategy, minLegUsd: 4 }, expectedDigest: fresh.digest }, executePlan: { planId: outagePlan.id } },
-      excluded: { 'steward/propose': 'attested inference is not available offline' },
     });
 
     report(info.outputPath('coverage.json'));
