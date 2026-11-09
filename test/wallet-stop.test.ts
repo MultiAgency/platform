@@ -75,7 +75,8 @@ async function fakeAgent(t: import("node:test").TestContext, name: string) {
       const path = req.url!.replace(/^\/rpc\//, "");
       const input = text ? JSON.parse(text).json : undefined;
       calls.push({ path, actor: req.headers["x-gateway-actor"] as string | undefined, input });
-      const reply = replies[path]?.(input) ?? { status: 404, json: { defined: false, code: "NOT_FOUND", status: 404, message: "Not found" } };
+      // Only the procedures this table defines: never a name inherited from Object.prototype.
+      const reply = Object.hasOwn(replies, path) ? replies[path]!(input) : { status: 404, json: { defined: false, code: "NOT_FOUND", status: 404, message: "Not found" } };
       res.writeHead(reply.status, { "content-type": "application/json" }).end(JSON.stringify({ json: reply.json }));
     });
   });
