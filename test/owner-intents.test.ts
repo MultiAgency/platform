@@ -52,13 +52,18 @@ test("a restarted server still follows a DAO vote in progress, and drops intents
 
   const result = spawnSync(TSX, [FIXTURE, "voting", "closed", "unsigned"], { cwd: dir, env: { ...process.env, ENV_FILE: "" }, encoding: "utf8", timeout: 15_000 });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout), ["voting", "expired", "unknown"]);
+  // A wallet intent dropped at load is known expired in that process; after a later restart only a DAO's archive says so.
+  assert.deepEqual(JSON.parse(result.stdout), ["voting", "expired", "expired"]);
   // Only the live intent is kept, its grant token and signing data intact, in a file only the owner reads.
   const kept = JSON.parse(readFileSync(file, "utf8"));
   assert.deepEqual(Object.keys(kept), ["voting"]);
   assert.deepEqual(kept.voting.dao, JSON.parse(JSON.stringify(dao)));
   assert.equal(kept.voting.grantToken, "ngt_test");
   assert.equal(statSync(file).mode & 0o777, 0o600);
+  // A second restart still answers the expired DAO intent from its archive, as `daoRequests` does.
+  const again = spawnSync(TSX, [FIXTURE, "closed"], { cwd: dir, env: { ...process.env, ENV_FILE: "" }, encoding: "utf8", timeout: 15_000 });
+  assert.equal(again.status, 0, again.stderr);
+  assert.deepEqual(JSON.parse(again.stdout), ["expired"]);
 });
 
 test("a restarted server keeps a grant token only while its grant is still waiting to be issued", async () => {

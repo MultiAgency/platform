@@ -52,7 +52,8 @@ export type Facts = {
   treasury: TreasuryFacts;
   /** Each earlier submitted swap's recorded value; unknown values remain explicit. */
   autopilot: TreasuryFacts & { submittedSwapValues: readonly (number | null | undefined)[] | null };
-  payout: Common & Funds & { heldPayouts: Transfer[] };
+  /** `allowDuplicateHeld`: the payout request opted out of the duplicate check (its caller's requestIds make each payout unique). */
+  payout: Common & Funds & { heldPayouts: Transfer[]; allowDuplicateHeld?: boolean };
   invoice: Common & Funds;
   approval: Common;
 };
@@ -135,13 +136,16 @@ export function authorize(action: Action, c: Case): Refusal | null {
     // The provider checked payee and cap when the payment was requested, under the policy then; the
     // owner signs now, so what the policy no longer allows is refused here.
     if (purpose === "approval") {
-      const { recipient, asset } = action.request;
+      const { asset } = action.request;
       if (!policy.actions.includes(action.method))
         return refuse("action_not_allowed", `The current policy does not permit ${action.method === "withdraw" ? "withdrawals" : "transfers"}`);
       if (policy.assets !== "any" && !policy.assets.includes(asset)) return refuse("asset_not_allowed", "The current policy does not permit this payment asset");
-      // A withdrawal's payee was checked against the policy's withdrawal destinations above.
-      if (action.method === "transfer" && !agreedPayees(policy).has(recipient)) return refuse("payee_not_agreed", `${recipient} is not an agreed payee`);
     }
+    // A withdrawal's payee was checked against the policy's withdrawal destinations above. A payout's transfer payee is
+    // checked here too: the provider refuses an unlisted one under a code not proven here (`policy_destination_denied`),
+    // which would leave the operation unknown and block the agent's sends. Invoices leave it to the provider.
+    if ((purpose === "payout" || purpose === "approval") && action.method === "transfer" && !agreedPayees(policy).has(action.request.recipient))
+      return refuse("payee_not_agreed", `${action.request.recipient} is not an agreed payee`);
     // The provider refuses an amount over the per-transaction cap under a code not proven here
     // (`policy_transaction_limit_exceeded`), which would leave the operation unknown and block the agent's sends:
     // refused before anything is sent instead.
@@ -156,7 +160,9 @@ export function authorize(action: Action, c: Case): Refusal | null {
     // before anyone is asked to approve it.
     if ((c.purpose === "payout" || c.purpose === "invoice") && BigInt(action.request.amount) > BigInt(c.facts.available))
       return refuse("insufficient_balance", `Only ${c.facts.available} of ${action.request.asset} isn't already held for approval, less than ${action.request.amount}: fund the wallet first`);
-    if (c.purpose === "payout") {
+    // One held payout per recipient, asset and amount spares the owner a second approval of the same thing. A request
+    // may opt out: each held payout still needs the owner's vote, so the check guards approvals, not funds.
+    if (c.purpose === "payout" && !c.facts.allowDuplicateHeld) {
       const { recipient, asset: token, amount: units } = action.request;
       if (c.facts.heldPayouts.some((h) => h.recipient === recipient && h.asset === token && h.amount === units))
         return refuse("duplicate_held_payout", "A payout with the same recipient, asset and amount is already waiting for approval");

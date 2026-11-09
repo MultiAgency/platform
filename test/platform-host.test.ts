@@ -120,6 +120,9 @@ test("a headless host serves only app access and the confirm page, and sets up o
   const stopSigned = await new Near({ network: "mainnet", privateKey: ownerKey.secretKey as PrivateKey, defaultSignerId: "carol.near" }).signMessage({ message: stopMessage, recipient: HOST, nonce: stopNonce });
   const none = await call("/confirm/v1/wallet-stop", { body: { message: stopMessage, nonce: stopNonce.toString("base64"), publicKey: stopSigned.publicKey, signature: stopSigned.signature } });
   assert.deepEqual([none.status, JSON.parse(none.body).error], [404, "No agent of carol.near on this host. Nothing changed."], "her key is checked on chain first");
+  // A payee's read of their own terms answers here too, with no app; it needs the owner's and the payee's signatures.
+  const unsignedRead = await call("/confirm/v1/payee-policy", { body: {} });
+  assert.deepEqual([unsignedRead.status, JSON.parse(unsignedRead.body).error], [400, "Send the owner's signed disclosure and the payee's signed read: each message, nonce, publicKey and signature."]);
   // Only the confirm entry's own assets are served, as the web build's manifest lists them; the owner app's are not.
   const built = (() => { try { return JSON.parse(readFileSync(join(root, "web/dist/build-manifest.json"), "utf8")).entries as Record<string, { initial?: { js?: string[] } }>; } catch { return null; } })();
   for (const path of ["/static/js/missing.js", ...(built?.index?.initial?.js ?? []).filter(file => !built?.confirm?.initial?.js?.includes(file))]) await absent(path);

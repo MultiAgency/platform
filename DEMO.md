@@ -193,6 +193,9 @@ signed: don't retune the strategy or limits for a demo.
 
 ### Agentic Treasury Management: the AI proposes, the autopilot corrects
 
+The steward in steps 1 and 5 was removed in SDK 0.5.5, so this run is a record, not a script for today's source: steps
+2 to 4 still work from any saved plan (an external plan or a rebalance).
+
 1. **Steward** (an experiment, not in the menu: open `/a/treasury/steward`): ask it to propose a small swap of USDC into wNEAR. The
    model's plan appears in a few seconds.
 2. **Execute plan.** Every step goes through the same checks and policy as any other send. The swap settles in
@@ -294,7 +297,6 @@ people who want to sign in and look for themselves.
    - **Overview**: attention items, the latest recorded run and a link to its full history, then the book
      against its target and the budget figure: whichever USD budget window (day, week or
      month) has least left, since that one refuses first, labelled by its period ("Daily budget left").
-   - **Steward** (experimental, at `/a/treasury/steward`, not in the menu): a model proposes a plan inside the policy; nothing moves until it is executed.
    - **Balances & funding**: reported public and confidential balances and separate held payout
      records, followed by **Receive funds**, expandable **Shield public funds** and **Send funds**. Returns to the linked account sit
      with outgoing payments. **Available to spend** remains **Not established**: these independent

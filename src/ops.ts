@@ -5,6 +5,9 @@ import { AgentApiError } from "@near-intents-agent-api/sdk";
 import { agentId } from "./env.js";
 import { appendSynced, mkdirSynced } from "./synced.js";
 import { claimInvoiceSubmission, invoiceOperations, recordInvoiceOperation, type PaymentState } from "./invoice-store.js";
+import { isTerminal } from "./operation-status.js";
+
+export { isTerminal };
 
 /**
  * The append-only log of one agent's money actions, `.ops/<agent id>.jsonl`. A request line is
@@ -53,11 +56,6 @@ export type Op = Context & {
   status?: string;
   refused?: string;
 };
-
-const TERMINAL = new Set(["SUCCESS", "REFUNDED", "FAILED"]);
-
-/** A provider status after which nothing more happens to the operation. */
-export const isTerminal = (status: string) => TERMINAL.has(status);
 
 /** Outcome proven: settled terminally, or refused before anything was sent. */
 export const isResolved = (op: Op) => op.refused !== undefined || (op.status !== undefined && isTerminal(op.status));

@@ -149,12 +149,15 @@ test("a payout may withdraw wNEAR or USDC to an agreed NEAR account, from the co
   for (const purpose of ["treasury", "autopilot"] as const) assert.equal(code(purpose, withdraw()), "withdraw_not_allowed", purpose);
 });
 
-test("an approval releasing a payee the policy no longer agrees to is refused; sends leave payees to the provider", () => {
-  assert.equal(code("approval", pay("stranger.near")), "payee_not_agreed");
-  for (const purpose of ["payout", "invoice"] as const) assert.equal(code(purpose, pay("stranger.near")), "ok", purpose);
+test("a payout or an approval to a payee the policy doesn't agree to is refused before sending; invoices leave payees to the provider", () => {
+  // The provider refuses an unlisted payee with `policy_destination_denied`, which isn't a proven refusal: sent, it would
+  // leave the operation unresolved and block every later payout of the agent (docs/crash-test.md).
+  for (const purpose of ["approval", "payout"] as const) assert.equal(code(purpose, pay("stranger.near")), "payee_not_agreed", purpose);
+  assert.equal(code("invoice", pay("stranger.near")), "ok");
   const except: Policy = { ...payout, destinations: { mode: "except", list: [{ action: "transfer", address: "forbidden.near", confidential: true }] } };
   assert.deepEqual([...agreedPayees(except)], []);
-  assert.equal(code("approval", pay("other.near"), { view: policyView(except, 11) }), "payee_not_agreed");
+  for (const purpose of ["approval", "payout"] as const)
+    assert.equal(code(purpose, pay("other.near"), { view: policyView(except, 11) }), "payee_not_agreed", `${purpose}: only an only-mode policy agrees to anyone`);
   const mixed: Policy = { ...payout, destinations: { mode: "only", list: [
     { action: "transfer", address: "payee.near", confidential: true },
     { action: "transfer", address: "public.near", confidential: false },
@@ -182,6 +185,13 @@ test("a payout repeating a held payout's recipient, asset and amount is refused;
   assert.equal(code("payout", pay(), { heldPayouts }), "duplicate_held_payout");
   assert.equal(code("payout", pay("payee.near", USDC(2)), { heldPayouts }), "ok");
   assert.equal(code("invoice", pay()), "ok");
+});
+
+test("a payout request may opt out of the duplicate check only; every other check still applies", () => {
+  const heldPayouts = [{ recipient: "payee.near", asset: ASSETS.USDC, amount: USDC(1) }];
+  assert.equal(code("payout", pay(), { heldPayouts, allowDuplicateHeld: true }), "ok");
+  assert.equal(code("payout", pay(), { heldPayouts, allowDuplicateHeld: true, available: "0" }), "insufficient_balance");
+  assert.equal(code("payout", pay("stranger.near"), { heldPayouts, allowDuplicateHeld: true }), "payee_not_agreed");
 });
 
 test("a plan's send is refused once anything it was previewed under has changed", () => {

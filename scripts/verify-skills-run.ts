@@ -1,12 +1,12 @@
 // Runs the SDK skills' examples (copied into an isolated consumer by verify-skills.mjs) against stand-in servers:
-// an oRPC owner agent and a payee entry. Each check records what was sent and asserts the documented recovery.
+// an oRPC owner agent, a payee entry and the platform host's routes. Each check records what was sent and asserts the documented recovery.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
 import { appClient, ownerClient, proposalText, type ProposalView } from "@multiagency/sdk";
-import { payeeClient } from "@multiagency/sdk/payee";
+import { payeeClient, payeeDisclosureMessage, type PayeePolicyProof } from "@multiagency/sdk/payee";
 import { owner as setupOwner } from "./examples/owner-workflows-1.ts";
 import { heldPayouts } from "./examples/owner-workflows-2.ts";
 import { freezeAgent } from "./examples/owner-workflows-3.ts";
@@ -16,6 +16,7 @@ import { payee as setupPayee } from "./examples/payee-workflows-1.ts";
 import { agentFor } from "./examples/payee-workflows-2.ts";
 import { newReport, readRequest, revision, send } from "./examples/payee-workflows-3.ts";
 import { connectAgent, revokeAll } from "./examples/payee-workflows-4.ts";
+import { verifyTerms } from "./examples/payee-workflows-5.ts";
 import { platformFor } from "./examples/app-server-1.ts";
 import { connect } from "./examples/app-server-2.ts";
 import { ownerAction } from "./examples/app-server-3.ts";
@@ -217,6 +218,39 @@ ok(sent.filter(s => s.path.startsWith("/api/agent-connections")).every(s => s.au
 ran.connections = "started, listed and revoked from the browser session";
 await entry.close();
 
+// Platform host stand-in for a payee's own terms: both signed texts arrive, and the published proof comes back.
+const proofSent: { path: string; body: { disclosure: { message: string }; read: { message: string } } }[] = [];
+const payeeTerms: PayeePolicyProof["policy"] = { agentId: "agent-1", payee: "alice.near", observedAt: new Date().toISOString(), revision: 4, status: "APPLIED",
+  appliedAt: null, synced: true, notInForce: null, terms: { frozen: false, ownerApproval: true, mode: "only", agreed: true,
+    destinations: [{ action: "transfer", address: "alice.near", confidential: true, enabled: true }], perTransaction: { "usdc.near": "25000000" } } };
+const platformHost = await listen((req, res) => {
+  let text = ""; req.on("data", chunk => text += chunk);
+  req.on("end", () => {
+    proofSent.push({ path: req.url!, body: JSON.parse(text) });
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ host: "127.0.0.1", owner: "owner.near", agent: "payout",
+      disclosureExpiresAt: new Date(Date.now() + 86_400_000).toISOString(), policy: payeeTerms }));
+  });
+});
+const disclosed = { message: payeeDisclosureMessage({ host: new URL(platformHost.base).host, owner: "owner.near", agent: "payout", agentId: "agent-1",
+  payee: "alice.near", expiresAt: new Date(Date.now() + 86_400_000).toISOString() }), nonce: Buffer.alloc(32).toString("base64"),
+  publicKey: `ed25519:${"1".repeat(44)}`, signature: "owner-signature" };
+const readSigned: string[] = [];
+const signRead = async (_message: string, recipient: string) => {
+  readSigned.push(recipient);
+  return { nonce: Buffer.alloc(32, 1).toString("base64"), publicKey: `ed25519:${"2".repeat(44)}`, signature: "payee-signature" };
+};
+const verified = await verifyTerms(platformHost.base, disclosed, signRead, { asset: "usdc.near", perPayment: "25000000", ownerApproval: true, revision: 4 });
+deepStrictEqual(verified.ok && verified.value, { revision: 4, observedAt: payeeTerms.observedAt, inForce: true, agreedPayee: true,
+  perPayment: true, ownerApproval: true, unchanged: true });
+deepStrictEqual(readSigned, [new URL(platformHost.base).host], "the read is signed for the platform host");
+deepStrictEqual(proofSent.map(p => p.path), ["/confirm/v1/payee-policy"]);
+equal(proofSent[0]!.body.disclosure.message, disclosed.message, "the owner's disclosure is sent unchanged");
+equal(JSON.parse(proofSent[0]!.body.read.message).type, "multiagency.payee-policy-read");
+const changed = await verifyTerms(platformHost.base, disclosed, signRead, { asset: "usdc.near", perPayment: "50000000", ownerApproval: true, revision: 3 });
+ok(changed.ok && !changed.value.perPayment && changed.value.unchanged === false);
+ran.payeeTerms = "own terms read from the platform host with the owner's disclosure and a fresh read, compared with what was agreed";
+await platformHost.close();
+
 // App routes stand-in: identity, consents (the first answer lost) and an agent's payout procedures (the request's answer lost).
 ok(platformFor("https://platform.test", "tap_test"), "the setup example constructs its client");
 const appSent: { path: string; authorization: string | null; body: string }[] = [];
@@ -268,6 +302,9 @@ const platform = await listen(async (req, res) => {
     return res.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify(filedAnswer({ ...daoRequest, proposal: proposal.id, verdict: "approve" }))); }
   if (req.url === `/apps/v1/dao-votes/${"d".repeat(64)}`) return res.writeHead(200, { "content-type": "application/json" })
     .end(JSON.stringify({ state: "relayed", request: { ...daoRequest, proposal: proposal.id, verdict: "approve" }, proposalState: "approved" }));
+  // The platform's consent nonce: the skill signs with this one, never one it picked.
+  if (req.url === "/apps/v1/consent-nonces") return res.writeHead(200, { "content-type": "application/json" })
+    .end(JSON.stringify({ nonce: Buffer.alloc(32, 7).toString("base64"), issuedAt: Date.now() }));
   if (req.url === "/apps/v1/consents") {
     if (dropConsent-- > 0) return req.socket.destroy();
     const consent = { id: "c".repeat(64), deployment: "staging", host: "platform.test", organization: "org_1", owner: "owner.near", agent: "payout",
@@ -280,7 +317,7 @@ const platform = await listen(async (req, res) => {
 const app = appClient({ base: platform.base as `http://${string}`, credential: "tap_test" });
 let signed = 0;
 const consented = await connect(app, "platform.test", "staging", "org_1", "payout", async (message, recipient, nonce) => {
-  signed++; equal(recipient, "platform.test"); equal(nonce.length, 32); ok(message.includes('"multiagency.app-consent"'));
+  signed++; equal(recipient, "platform.test"); deepStrictEqual([...nonce], [...Buffer.alloc(32, 7)], "signed with the platform's nonce"); ok(message.includes('"multiagency.app-consent"'));
   return { publicKey: "ed25519:k", signature: "s" };
 });
 ok(consented.ok && consented.value.consent.id === "c".repeat(64), JSON.stringify(consented));
@@ -288,8 +325,9 @@ const submissions = appSent.filter(s => s.path === "/apps/v1/consents");
 equal(signed, 1, "the owner signs once");
 equal(submissions.length, 2, "a lost consent answer is submitted again");
 equal(submissions[0]!.body, submissions[1]!.body, "with the same signed body");
+equal(JSON.parse(submissions[0]!.body).nonce, Buffer.alloc(32, 7).toString("base64"), "submitted with the platform's nonce");
 ok(appSent.every(s => s.authorization === "Bearer tap_test"), "every call carries the deployment's credential");
-ran.appConnect = "identity, consent signed once, lost answer resubmitted with the same body";
+ran.appConnect = "identity, platform nonce, consent signed once, lost answer resubmitted with the same body";
 
 const opened: string[] = [];
 const signReadable = async (intent: typeof nep413) => ({ ...intent, public_key: "ed25519:k", signature: "s" });

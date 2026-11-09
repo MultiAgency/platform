@@ -62,6 +62,18 @@ test("typed errors arrive as defined errors with their kind, and their data is n
   assert.equal((next.value as { kind: string }).kind, "unresolved");
 });
 
+test("a provider refusal while preparing an owner action is typed; after a submission it stays untyped", async () => {
+  // A code no proven list names: after owner/submit it may follow an effect, so it stays untyped (the client reads unknown).
+  const refused = () => new AgentApiError(400, { errors: [{ status: "400", code: "unsupported_by_simulator", title: "Unsupported", meta: { retryable: false } }] } as never);
+  const prepared = serve({ owner: { prepare: owner.owner.prepare.handler(() => { throw refused(); }) } });
+  await assert.rejects(prepared.raw("owner/prepare", { action: { type: "grant_issue", label: "payout" }, signer: "wallet" }), (error: unknown) =>
+    error instanceof ORPCError && error.code === "BAD_REQUEST" && error.defined === true
+      && (error.data as Record<string, unknown>).kind === "provider" && (error.data as Record<string, unknown>).code === "unsupported_by_simulator");
+  const submitted = serve({ owner: { submit: owner.owner.submit.handler(() => { throw refused(); }) } });
+  await assert.rejects(submitted.raw("owner/submit", { correlationId: "c", signedData: {} }), (error: unknown) =>
+    error instanceof ORPCError && error.code === "INTERNAL_SERVER_ERROR");
+});
+
 test("input validation failures stay undefined errors with their issues (not matched to a kind)", async () => {
   const { raw, bodies } = serve({ executePlan: owner.executePlan.handler(async function* () { yield undefined as never; }) });
   await assert.rejects(raw("executePlan", { planId: "not-a-uuid" }), (error: unknown) => error instanceof ORPCError && error.code === "BAD_REQUEST" && error.defined === false);

@@ -7,7 +7,6 @@ import { status as autopilotStatus, tick } from "../autopilot.js";
 import { ticks } from "../evidence.js";
 import { exportRunLog } from "../run-log-export.js";
 import { agentId, executes, saveEnv } from "../env.js";
-import { steward } from "../llm.js";
 import { executePlan } from "../plans.js";
 import { strategyGrantProblems, strategyGrantRequired } from "../planning/strategy-grant.js";
 import { ExternalPlanInput, prepareExternalPlan } from "../planning/external.js";
@@ -80,12 +79,6 @@ export const treasuryRoutes = {
   /** Quotes the caller’s exact swaps and saves the complete plan without submitting funds. */
   externalPlan: os.input(ExternalPlanInput).handler(({ input }) => prepareExternalPlan(input)),
   sweep: os.input(run).handler(({ input }) => sweep(input)),
-  steward: {
-    /** The model proposes; the result is a saved plan, and nothing moves. */
-    propose: os
-      .input(z.object({ instruction: z.string().trim().max(2000).optional() }))
-      .handler(({ input }) => steward({ instruction: input.instruction || undefined })),
-  },
   /**
    * Executes a saved plan (including an external agent's chosen swaps) exactly as previewed, or refuses if anything
    * material changed. An app's call (`app:`, under `treasury-execute`) or a machine credential's (`machine:`) runs only

@@ -34,6 +34,9 @@ test("owner creation signs the fixed work-order policy and grant expires at its 
   assert.throws(() => ownerRequests.agent_create({ ...fixtureOwner, account_id: "other.near" }, "payout"), /owner/);
   assert.equal((await grantRequest({ label: "invoices" })).request.expires_at, order.until);
   await assert.rejects(grantRequest({ label: "treasury" }), /work order/i);
+  // The order's deadline is the grant's expiry: the same one is accepted, any other refused.
+  assert.equal((await grantRequest({ label: "invoices", expiresAt: order.until })).request.expires_at, order.until);
+  await assert.rejects(grantRequest({ label: "invoices", expiresAt: new Date(Date.parse(order.until) - 60_000).toISOString() }), /work order/i);
 });
 
 test("altered terms and fresh submission identities cannot become payments in an order executor", async () => {
@@ -113,4 +116,32 @@ test("owner submission requires exact observed funding and follows the original 
   Object.assign(api, { getBalances: async (_id: string, { source }: { source: string }) => ({ source, balances: [{ asset_id: order.asset, balance_raw: "9000000" }] }) });
   await handleWorkOrderCommand({ type: "file", payee: order.payee });
   assert.equal(sends.length, 1);
+});
+
+test("a creation the owner never signed doesn't block preparing another; any other retained creation does", async t => {
+  const { handleWorkOrderCommand } = await import("../src/work-order-runtime.js");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const previous = process.env.AGENT_ID;
+  delete process.env.AGENT_ID;
+  t.after(() => { process.env.AGENT_ID = previous; });
+  let prepared = 0;
+  t.mock.method(api, "generateIntent", async () => ({ type: "agent_create", correlation_id: `creation-${++prepared}`, preview: {},
+    expires_at: new Date(Date.now() + 60_000).toISOString(), intent: {}, signer: fixtureOwner }) as never);
+  const retained = (result: { status: string; failureCode?: string | null }) => {
+    mkdirSync(".owner-intents", { recursive: true });
+    writeFileSync(".owner-intents/.env.json", JSON.stringify({ earlier: { type: "agent_create", stage: "settled", result,
+      expiresAt: new Date(Date.now() - 60_000).toISOString(), signedData: {} } }));
+  };
+  const create = () => handleWorkOrderCommand({ type: "prepare", action: "create", signer: "wallet" });
+  retained({ status: "SUCCESS" });
+  await assert.rejects(create(), /retained record/);
+  retained({ status: "FAILED", failureCode: "rejected" });
+  await assert.rejects(create(), /retained record/, "what a provider FAILED leaves on chain isn't established");
+  retained({ status: "EXPIRED", failureCode: "signing_window_closed" });
+  await create();
+  // Prepared, never signed, its window closed: no agent can come of it, even before the lock drops the record.
+  writeFileSync(".owner-intents/.env.json", JSON.stringify({ unsigned: { type: "agent_create", stage: "prepared",
+    expiresAt: new Date(Date.now() - 60_000).toISOString() } }));
+  await create();
+  assert.equal(prepared, 2);
 });

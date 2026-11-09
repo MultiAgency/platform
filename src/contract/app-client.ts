@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import { retryAfterSeconds } from "./retry-after.js";
-import { appAgent, appConsentList, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
+import { appAgent, appConsentList, appConsentNonce, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appReservations, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
 import type { appConsentSubmission } from "./app-consent.js";
 import { ownerClient, type OwnerCallOptions, type OwnerFailure, type OwnerOutput, type OwnerProcedure, type OwnerResult } from "./owner-client.js";
 import type { ownerStreams } from "./owner-outputs.js";
@@ -37,7 +37,10 @@ export type AppRouteResult<T> =
 export type AppPrepared = OwnerOutput<"owner/prepare">;
 /** `signer: "dao"`: the DAO's transactions a member files, and the policy for an edit. */
 export type AppDaoPrepared = AppPrepared & { dao: NonNullable<AppPrepared["dao"]> };
-/** `signer: "wallet"`: an intent the owner's wallet signs (NEP-413), or the platform's confirm link (NEP-366). */
+/**
+ * `signer: "wallet"`: an intent the owner's wallet signs (NEP-413), the platform's confirm link (NEP-366), or for a vote
+ * on a held payout both.
+ */
 export type AppWalletPrepared = AppPrepared & ({ intent: NonNullable<AppPrepared["intent"]> } | { confirm: NonNullable<AppPrepared["confirm"]> });
 /** Narrows `owner/prepare`'s answer to the DAO's, which carries the transactions a member files. */
 export const isDaoPrepared = (prepared: AppPrepared): prepared is AppDaoPrepared => prepared.dao !== undefined;
@@ -95,6 +98,14 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
   return {
     /** The agent's owner and current provider ID (`agentId`, null until created): what a consent must name. */
     identity: (agent: string, options?: AppRouteOptions) => route(`/agents/${encodeURIComponent(agent)}`, appAgent, {}, options),
+    /**
+     * The hosted agents this deployment's setups reserved for an Organization, narrowed by owner and area: how to learn
+     * an agent's name when a setup's reply was lost and the signed setup has since expired (until then, sending the same
+     * setup again answers the same agent and consent). Nothing is reserved or signed. Gateways before 0.5.5 answer
+     * `refused` 404.
+     */
+    reservations: (query: { organization: string; owner?: string; area?: "treasury" | "payables" }, options?: AppRouteOptions) =>
+      route(`/agents?${new URLSearchParams(Object.entries(query).filter((e): e is [string, string] => e[1] !== undefined))}`, appReservations, {}, options),
     /** A wallet owner's signed setup text: reserves the hosted agent and returns its setup consent. */
     setup: (submission: AppConsentSubmission, options?: AppRouteOptions) => route("/setup", appSetupStored, post(submission), options),
     consents: {
@@ -103,6 +114,12 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
       submit: (submission: AppConsentSubmission, options?: AppRouteOptions) => route("/consents", appConsentStored, post(submission), options),
       /** Permanent: the owner signs a new consent to restore access. */
       revoke: (id: string, options?: AppRouteOptions) => route(`/consents/${encodeURIComponent(id)}`, appRevoked, { method: "DELETE" }, options),
+      /**
+       * A NEP-413 nonce for the owner to sign the next consent or setup text with, in place of one the app picks. It shows
+       * the text was signed after any wallet stop the owner signed before: after a stop, only such a text is stored
+       * (`owner_stopped` otherwise). Ask for one per text.
+       */
+      nonce: (options?: AppRouteOptions) => route("/consent-nonces", appConsentNonce, post({}), options),
     },
     /**
      * A DAO owner's consent, signed by the DAO's own vote. `file` takes the canonical consent text (scopes within

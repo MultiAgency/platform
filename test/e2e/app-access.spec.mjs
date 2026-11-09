@@ -229,7 +229,8 @@ test('an app requests a payout once under its requestId, follows it by requestId
     const created = value(await app.identity(name)).agentId;
     await consent('org_1', name, ['owner', 'payout', 'read']);
     const agent = app.agent('org_1', name);
-    await ownerStep(agent, { type: 'grant_issue', label: 'invoices' });
+    // A `payout` grant, the label an app's payout agent holds (platform#54: the simulator refused it).
+    await ownerStep(agent, { type: 'grant_issue', label: 'payout' });
     const reviewed = async () => { const o = value(await agent.call('overview')); return { revision: o.policy.revision, digest: o.digest }; };
     await ownerStep(agent, { type: 'policy_update', expectedPolicy: await reviewed(), changes: { destinations: [{ address: BUILDER, confidential: true }] } });
     const deposit = value(await agent.call('deposit'));
@@ -284,6 +285,9 @@ test('an app requests a payout once under its requestId, follows it by requestId
     stack.simulated.settle(withdrawn.correlationId);
     await expect.poll(async () => value(await agent.call('payouts/status', { requestId: 'wd-1' })).state).toBe('succeeded');
     expect(stack.simulated.transfers.filter(p => p.type === 'withdraw'), 'the approved withdrawal was sent once').toHaveLength(1);
+    // The approving vote's own status ends with the withdrawal it released, on the owner-intent watcher's next pass (10 s).
+    await expect.poll(async () => value(await agent.call('owner/status', { correlationId: approve.correlationId })), { timeout: 30_000 })
+      .toEqual({ stage: 'submitted', status: 'SUCCESS', failureCode: null, phase: 'settled' });
     steps.push("a withdrawal to chain near was held for the owner; the owner's vote, with the terms proven against the provider's hash, released it once");
     // A vote's status follows the payout it decides: a rejected one ends FAILED.
     const second = value(await agent.call('payouts/request', { requestId: 'wd-2', asset: USDC, delivery: { chain: 'near' }, recipient: BUILDER,

@@ -19,6 +19,7 @@ sources:
   - 'MultiAgency/platform:src/contract/app-access.ts'
   - 'MultiAgency/platform:src/contract/app-consent.ts'
   - 'MultiAgency/platform:src/contract/dao-roles.ts'
+  - 'MultiAgency/platform:src/testing/payout-double.ts'
   - 'MultiAgency/platform:docs/app-access.md'
 ---
 
@@ -31,6 +32,13 @@ under a live owner consent for that Organization and agent, and only within the 
 its own tests. Until a production host does, build against the SDK repository's local stack
 (`pnpm test:e2e:stack --app <deployment>`). Use only `/apps/v1` and the confirm page on the platform's host: it serves
 nothing else (no sign-in or owner page), and setup there is for Payables agents only.
+
+The local stack serves HTTPS with its own self-signed certificate, written to `<stack dir>/environment/localhost.crt`
+(the stack prints `<stack dir>/state.json` when ready). Trust that certificate only, never turn verification off. In
+Node, start your server with `NODE_EXTRA_CA_CERTS=<stack dir>/environment/localhost.crt`, as the platform's own
+end-to-end tests do. In Bun, pass `appClient` a `fetch` that adds Bun's `tls.ca` option:
+`fetch: (input, init) => fetch(input, { ...init, tls: { ca: caPem } })`, where `caPem` is that file's text. Covenant
+runs on the stack this way.
 
 ## Setup
 
@@ -47,8 +55,10 @@ Result: `await app.identity("payout")` answers `{ ok: true, value: { agent, owne
 
 ## Connect an Organization's agent: the owner signs a consent
 
-Your server builds the exact consent text and a 32-byte nonce; the owner's wallet signs it with NEP-413, recipient the
-platform host, no callback URL; your server submits it. Show the owner the text the wallet signs.
+Your server builds the exact consent text and asks the platform for a 32-byte nonce (`consents.nonce()`); the owner's
+wallet signs the text with that nonce using NEP-413, recipient the platform host, no callback URL; your server submits
+it. Show the owner the text the wallet signs. A platform nonce shows the text was signed after any wallet stop the owner
+signed earlier: after one, a text signed with a nonce your server picked is refused.
 
 ```ts
 import { appClient, consentMessage, type AppConsentSubmission } from "@multiagency/sdk";
@@ -62,9 +72,10 @@ export async function connect(app: ReturnType<typeof appClient>, host: string, d
   if (!identity.value.agentId) throw new Error("Not created yet: set it up and create it first");
   const message = consentMessage({ host, deployment, organization, owner: identity.value.owner, agent, agentId: identity.value.agentId,
     scopes: ["read", "owner"], expiresAt: new Date(Date.now() + 90 * 86_400_000).toISOString() });
-  const nonce = crypto.getRandomValues(new Uint8Array(32));
-  const signed = await sign(message, host, nonce);
-  const submission: AppConsentSubmission = { message, nonce: btoa(String.fromCharCode(...nonce)), ...signed };
+  const issued = await app.consents.nonce();
+  if (!issued.ok) return issued;
+  const signed = await sign(message, host, Uint8Array.from(atob(issued.value.nonce), c => c.charCodeAt(0)));
+  const submission: AppConsentSubmission = { message, nonce: issued.value.nonce, ...signed };
   let stored = await app.consents.submit(submission);
   // No answer: the same signed body is safe to submit again; never ask the owner to sign again for that.
   if (!stored.ok && stored.kind === "unavailable") stored = await app.consents.submit(submission);
@@ -75,7 +86,8 @@ export async function connect(app: ReturnType<typeof appClient>, host: string, d
 Result: `{ ok: true, value: { consent: { id, scopes, expiresAt, … } } }`; keep `consent.id` with the Organization. Decide
 by `code` (`APP_GATEWAY_CODES`), not status: `signature_invalid` or `invalid_request` means the text or signature was not
 accepted; `agent_changed`, `owner_changed` or `not_created` means the agent isn't the one the text names: read
-`identity` again and ask the owner to sign a new text. Later agent calls answer `forbidden` once the consent ends, with
+`identity` again and ask the owner to sign a new text. `owner_stopped` means the owner's wallet stop covers the agent
+and the text's nonce wasn't issued by the platform after it: ask for a new nonce and a new signature. Later agent calls answer `forbidden` once the consent ends, with
 `code` `no_consent` (expired or revoked), `consent_revoked` (the owner's signing key removed) or `agent_changed` (the
 agent was replaced): the owner signs a new one. `scope` means no consent covers that procedure. `unavailable` (503: a
 check went unanswered) means send the same request again.
@@ -87,6 +99,13 @@ With `owner` scope an app may prepare `agent_create` without payees (naming the 
 through `app.agent(organization, agent).call(...)`. Everything else is refused before it reaches the agent. A vote the
 platform can't verify (an expired or changed approval, other terms, a withdrawal approval naming unobserved fields) is refused before
 anything reaches the provider (`refused`, code `local_authorization_held`), at prepare or at submit.
+
+To bind a grant to an end date (a contract's end, say), send `grant_issue` with `expiresAt` (ISO timestamp): at least
+an hour and at most 365 days ahead, the provider's maximum (`MIN_GRANT_MS`, `MAX_GRANT_MS`), refused outside that range, never clamped; with no
+`expiresAt` the grant lasts 30 days. Show the owner `grant.expiresAt` from the prepared answer (the top-level `expiresAt`
+is the signing window). Per the provider's docs the expired grant then authorizes no new sends; not observed on
+mainnet. A longer engagement needs a new grant before the old one ends, and a new grant doesn't end earlier ones:
+revoke those to end their authority.
 
 ```ts
 import { appClient, type AppOwnerAction } from "@multiagency/sdk";
@@ -100,7 +119,7 @@ export async function ownerAction(app: ReturnType<typeof appClient>, organizatio
   const prepared = await calls.call("owner/prepare", { action, signer: "wallet" });
   if (!prepared.ok) return prepared;
   const { correlationId, intent, confirm } = prepared.value;
-  if (confirm) openForOwner(confirm.url); // NEP-366: the owner reads the platform's record and signs there
+  if (confirm) openForOwner(confirm.url); // NEP-366, or a vote on a held payout: the owner reads the platform's record and signs there
   else if (intent?.standard === "nep413")
     await calls.call("owner/submit", { correlationId, signedData: await signReadable(intent) });
   return calls.call("owner/status", { correlationId });
@@ -110,7 +129,8 @@ export async function ownerAction(app: ReturnType<typeof appClient>, organizatio
 Result: `owner/status` answers the outcome; read it again until it is final. Open a `confirm` link for the owner right
 away (the intent expires in minutes). It shows the action's terms to whoever holds it; the bytes to sign go only to
 whoever presents the owner's signature over the link's text, which the page asks the wallet for, and `owner/submit`
-through the app is refused for it.
+through the app is refused for it. A vote's link is the exception: you hold its text too, so the page signs it
+directly and you may still submit it.
 
 To stop quickly:
 - If you turned autopilot on (treasury-app), call `autopilot/stop` first. Revoking your consent doesn't stop it: the
@@ -120,15 +140,20 @@ To stop quickly:
   new consent. It doesn't cancel a call already forwarded.
 - Relay `agent_freeze` for the owner: it opens the confirm page, and the owner must sign there before the link expires
   (minutes). `agent_unfreeze` releases it the same way; `approval_vote` is only for held payouts.
+- A wallet owner can also stop and freeze without you, on the platform's page `https://<host>/confirm/wallet/stop/<agent>`
+  (platform 0.5.5): it ends every app's consent for the agent and, if the owner ticks the freeze, has their wallet sign
+  the provider's freeze there. Link to it rather than building your own; unfreezing is still yours to relay.
 - Treat anything `executing`, `processing` or `unknown` as possibly sent: neither step undoes it. Whether a freeze or a
   revoked grant stops a payout the provider already holds is not established
   ([enforcement](https://github.com/MultiAgency/platform/blob/main/docs/enforcement.md)).
 
 A vote on a held payout names it from `held` (`approvalId`, `correlationId`). The prepared vote's `payment.terms`
 (recipient, asset, amount) are what the platform proved against the provider's evidence: show those to the owner, not
-your own record of the request. The vote's signed text holds only an identifier and a hash, so your display is the only
-place the owner reads the terms. A payout an owner approves can still read `processing` until the provider settles it;
-follow `payouts/status`.
+your own record of the request. The vote's signed text holds only an identifier and a hash, so the wallet can't show
+the terms. The prepared vote also carries `confirm.url`: the platform's page showing those proven terms, where the owner
+signs with their own wallet. Prefer sending the owner there; the platform submits from it, and you follow the outcome
+with `owner/status`. You also get `intent` and may have the owner sign it in your app as before. A payout an owner
+approves can still read `processing` until the provider settles it; follow `payouts/status`.
 
 ## Set up a hosted agent for an Organization
 
@@ -139,6 +164,13 @@ payees, naming the key that signed the setup. Then read `identity` until it is c
 consent naming its `agentId`. `already_created` means it already exists (ask for a consent); `setup_failed` says why
 it couldn't be set up (for example the deployment's agent limit on the host); `unavailable` means a check went
 unanswered: submit the same body again.
+
+**Lost setup reply.** Until the setup's `expiresAt`, submit the same signed body again: it answers the same agent and
+the same setup consent, and reserves nothing new. After it expires the platform refuses the body; ask
+`app.reservations({ organization, owner, area })` instead, which lists the agents your deployment's setups reserved for
+that Organization (only yours, nothing reserved or signed). It also names the agent after `already_created`. Then read
+`identity`: if the agent isn't created yet, the owner signs a new setup, which finds the same agent. A platform before
+0.5.5 answers `refused` 404.
 
 ## A DAO owner: every signature is the DAO's vote
 
@@ -182,7 +214,8 @@ same shape covers the rest:
   only, and only on a host whose setup includes Treasury (the deployed platform host's doesn't yet: 403). `state` answers `reserved` with the agent and a setup consent. Then `owner/prepare` with
   `{ type: "agent_create", role: "treasury" }` and `signer: "dao"`. Then file the DAO's consent naming the new `agentId`.
 - **Owner actions:** under a `treasury` consent, `owner/prepare` with `signer: "dao"` prepares the `treasury` grant,
-  `grant_revoke`, a `policy_update`, freeze or unfreeze. A policy edit's public proposal names only the fields it
+  `grant_revoke`, a `policy_update`, freeze or unfreeze. The grant may name `expiresAt`, as above; its proposal names
+  the grant's expiry apart from the signing window. A policy edit's public proposal names only the fields it
   changes: show members `policy.current` and `policy.requested` from the answer before they vote. For an on-chain edit
   (actions, assets, limits, approval, `max_actions_per_hour`; 600 s) the bytes carry the policy encrypted, so members
   rely on that preview, as a wallet owner does.
@@ -194,8 +227,8 @@ same shape covers the rest:
 - **Treasury proposals:** see treasury-app.
 
 Scopes: `read`, `treasury`, and `treasury-execute` if the DAO votes it in. Not `owner` or `payout`. Consent and
-proposal votes may take the DAO's voting period (at most 7 days). Creation, the grant, freeze and unfreeze are provider
-intents with fixed windows, 600 s for wallet requests (creation, freeze, unfreeze) and about 290 s for consent messages (the grant), per the provider's docs (owner-signing, signing-standards, read 2026-11-05); nothing lengthens them. They complete only for a DAO whose vote passes that fast:
+proposal votes may take the DAO's voting period (at most 7 days). Creation, the grant, its revocation, policy edits, freeze and unfreeze are provider
+intents with fixed windows, 600 s for wallet requests (creation, freeze, unfreeze, on-chain policy edits) and about 290 s for consent messages (the grant, a revocation, off-chain policy edits), per the provider's docs (owner-signing, signing-standards, read 2026-11-05); nothing lengthens them. They complete only for a DAO whose vote passes that fast:
 show `expiresAt`. A slower DAO can still approve each swap as a Treasury proposal (treasury-app), but can't issue the
 strategy grant that unattended swaps (autopilot) need (#20). A
 signature found once completes on a later read until what the DAO signed expires, never after (410). A DAO can also stop
@@ -230,7 +263,7 @@ To fund the agent first, `agentCalls.call("deposit")` (payout or treasury scope)
 
 Write the `requestId` (1–64 of `[A-Za-z0-9_-]`) and the exact terms to your database before calling. The platform sends
 one request at most once per deployment, Organization, agent and `requestId`. Never send the same payout under a new `requestId` until
-the first is `refused`, or `failed` and checked by a person.
+the first is `refused`, `failed` with `neverExecuted: true`, or `failed` and checked by a person.
 
 ```ts
 import { appClient } from "@multiagency/sdk";
@@ -246,9 +279,10 @@ export async function payOnce(app: ReturnType<typeof appClient>, organization: s
 }
 ```
 
-Result: `{ ok: true, value: { requestId, state, status, correlationId, code } }`. `state` is `succeeded`, `failed`
-(FAILED or REFUNDED: not proof that nothing moved, so a person checks), `held` (waiting for the owner's vote),
-`processing`, `refused` (proven not sent, `code` says why, for example `insufficient_balance`; recorded, so a new
+Result: `{ ok: true, value: { requestId, state, status, correlationId, code, failureCode, neverExecuted } }`. `state` is `succeeded`, `failed`
+(FAILED or REFUNDED: not proof that nothing moved, so a person checks, unless `neverExecuted` is true), `held` (waiting for the owner's vote),
+`processing`, `refused` (proven not sent, `code` says why, for example `insufficient_balance`, or `payee_not_agreed`
+for a recipient the owner hasn't agreed to pay, which the owner adds by a `policy_update` first; recorded, so a new
 attempt needs a new `requestId`), `unknown`, or
 `not_found` (nothing recorded yet: a request still on its way can read so; ask again with the same `requestId`
 and terms, which sends at most once). `processing` and `unknown` block that agent's payouts until resolved: read
@@ -256,6 +290,32 @@ and terms, which sends at most once). `processing` and `unknown` block that agen
 (`code: "request_conflict"`). A named recipient that doesn't exist on NEAR is refused before anything is recorded
 (`recipient_not_found`: fix the payee, then a new `requestId`); `recipient_unchecked` means the chain didn't answer:
 ask again with the same `requestId`. These two come back as a refused result, not a state.
+
+On `failed` (0.5.5; absent from older platforms, so treat a missing field as null or false): `failureCode` is the
+provider's code (`rejected` when the owner rejected a held payout, as observed on mainnet), null when it names none or
+couldn't be read. `neverExecuted: true` means the provider's own record of that operation says it never executed, with
+no transaction, delivered amount or refund: per the provider's docs nothing was sent and the operation has ended (an
+owner's rejection ends a held payout so; offline-tested, not yet mainnet-observed), so a new `requestId` for that payout
+needn't wait for a person's check. `false` proves nothing: a delivery failure, REFUNDED, or
+an unread status all read false, and a person checks before a new attempt.
+
+`payouts/status` also works under `read` consent and answers only your own requests (this deployment and Organization).
+Keep a `read` consent for as long as you may need to follow requests, for example after a contract's `payout` consent
+ends.
+
+One payout per recipient, asset and amount waits for approval at a time, across the whole agent: while any of the
+agent's payments with those three terms is held for the owner (yours, another app's, or the owner's own), a request
+repeating them is refused before sending (`state: "refused"`, `code: "duplicate_held_payout"`), whatever its
+`requestId`. It keeps one payout from being held, and then paid, twice. Keep at most one open request per recipient,
+asset and amount until the owner votes on it; send the next once the held one is approved or rejected, under a new
+`requestId`. Don't change an amount or recipient to get past it: a payout the owner meant twice is asked for twice, in
+turn. If your `requestId`s already make each payout unique (one per deliverable, say), send `allowDuplicateHeld: true`
+(0.5.5) and equal payouts may wait side by side; the owner then votes on each, and nothing else tells them apart, so
+show the owner what each one is for. A platform before 0.5.5 ignores the field and keeps refusing.
+
+Ask only for an agreed payee: `overview`'s `agreed` lists them. A request to anyone else is refused before anything is
+sent (`payee_not_agreed`). A request without a live `payout` (or `invoices`) grant is refused `grant_purpose_denied`,
+not `grant_missing`.
 
 To pay a NEAR account directly, the owner first agrees it as a withdrawal payee (a `policy_update` with
 `withdrawals: [{ address }]`; the first one turns withdrawals on, an on-chain edit signed on the confirm page). To pay
@@ -270,22 +330,57 @@ withdrawal is approved or rejected like a transfer (0.5.5; offline- and stack-te
 `payment.terms` carry `chain: "near"`, so show the owner it's a public withdrawal that may arrive less a route fee. Fund wNEAR with `deposit` and
 `{ asset: "nep141:wrap.near" }`.
 
+## Test without the platform
+
+`payoutDouble` from `@multiagency/sdk/testing` (Node) stands in for one Organization's payout agent behind `/apps/v1`,
+in process: your server's code keeps its own `appClient`, given the double's `fetch`.
+
+```ts
+import { appClient, ASSETS } from "@multiagency/sdk";
+import { payoutDouble } from "@multiagency/sdk/testing";
+
+const double = payoutDouble({ organization: "org_1", agent: "payout", payees: ["payee.near"] });
+const app = appClient({ base: double.base, credential: double.credential, fetch: double.fetch });
+const calls = app.agent("org_1", "payout");
+const asked = await calls.call("payouts/request", { requestId: "r-1", asset: ASSETS.USDC, delivery: "intents",
+  recipient: "payee.near", amount: "1000000", expectedPolicy: double.reviewedPolicy() }); // state "held"
+double.vote("r-1", "approve");
+double.settle("r-1"); // or "FAILED" / "REFUNDED"
+await calls.call("payouts/status", { requestId: "r-1" }); // state "succeeded"
+```
+
+It answers `payouts/request`, `payouts/status`, `held` and `overview`. It runs the platform's own authorization rule,
+mandate digest, payout policy template and input schemas, so refusals carry the platform's codes
+(`insufficient_balance` less held payouts, `duplicate_held_payout`, `per_transaction_exceeded`,
+`policy_not_in_force`, `reviewed_policy_changed`, `grant_purpose_denied`, `payee_not_agreed` and `asset_not_allowed`
+for withdrawals, `request_conflict`, `chain_not_supported`, the recipient checks). The order of those checks and the
+journal's answers are restated, and the platform's tests run every scenario against both and require the same answers.
+Controls: `setPolicy`, `setPolicyState`, `setGrant`, `setBalance`, `vote`, `settle`, `loseNextAnswer` (an `unknown`
+that blocks new requests), `recipients.absent` / `unregistered` / `unchecked`, `revokeConsent` (`forbidden`,
+`no_consent`); a consent without `payout` answers `forbidden` with `code: "scope"`. Not modelled: budgets and hourly or
+monthly limits, approval expiry, provider outages, owner actions (`owner/prepare`: votes are `double.vote`), `deposit`
+and other procedures (answered 501, listed by `double.unmodelled()`). For those, and for the wire to a real gateway, use
+the local stack (`pnpm test:e2e:stack --app <deployment>`): its controls sign as the owner (`signOwner`) or a payee
+(`signPayee`), lose a transfer's or withdrawal's reply, unregister a recipient, refuse the next payout under a provider
+code, expire an approval and end a payout `FAILED` or `REFUNDED` (docs/testing.md).
+
 ## Common mistakes
 
 - **Asking an owner to sign `Sign in to <platform host>`** (CRITICAL): a signed sign-in is a full platform session that
   can send payouts without another signature. An app asks only for consent and setup texts.
 - **Sending the credential to a browser** (CRITICAL): whoever holds it acts within every consent the deployment holds.
 - **A new requestId after `unknown`** (CRITICAL): the first may have been sent. Read `payouts/status`.
-- **Treating `rate_limited` as a refusal or as `unknown`** (HIGH): the deployment's request limit (1,200 an hour, shared
-  by every owner) refused the call before anything happened. Send the same call again after `retryAfterSeconds`; don't
+- **Treating `rate_limited` as a refusal or as `unknown`** (HIGH): the app credential's hourly request limit (1,200 by
+  default, set by the operator, shared by every owner and Organization of the deployment) refused the call before anything happened. Send the same call again after `retryAfterSeconds`; don't
   tell an owner they lack access, and don't cache it as an answer.
-- **Treating `failed` as unpaid** (HIGH): a partial payout fails too. A person checks before a new attempt.
+- **Treating `failed` as unpaid** (HIGH): a partial payout fails too. A person checks before a new attempt, unless
+  `neverExecuted` is true. A `failureCode` alone, even `rejected`, doesn't prove nothing moved.
 - **Showing your own summary instead of the signed text** (HIGH): the owner must read what the wallet signs.
 - **Asking the owner to sign the confirm page's text ("Open a MultiAgency confirm page.") in your app** (CRITICAL): it
   is the owner's proof to the platform's page; signed elsewhere, it hands out the bytes for a blind signature.
 - **Withdrawing to a `nearcom:` address** (CRITICAL): it is not on any chain; near.com users are paid through `intents`.
-- **Showing your own record of a held payout when asking for a vote** (HIGH): show the prepared vote's
-  `payment.terms`, which the platform proved; your record may name another payout than the one the vote releases.
+- **Showing your own record of a held payout when asking for a vote** (HIGH): send the owner to the vote's `confirm.url`,
+  or show its `payment.terms`, which the platform proved; your record may name another payout than the one the vote releases.
 - **Building a DAO's proposal yourself** (CRITICAL): file only the transaction the platform answered, and show its check
   link. A proposal that signs another hash isn't the request, whatever its description says.
 - **Letting anyone signed in act for a DAO** (HIGH): the platform admits your app, not the member. Check

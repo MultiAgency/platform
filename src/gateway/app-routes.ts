@@ -19,6 +19,9 @@ import { agentOrigin } from "./agent-origin.js";
 import { chainDaoVotes, daoConsent, type DaoConsentRequest, type DaoFiled, type DaoRequest, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
 import { AuthorityUnanswered, chainDaoOwner, type DaoOwnerReads, resolveDaoAuthority, resolveWalletAuthority } from "./machine-authority.js";
 import { forwardRpc } from "./rpc-proxy.js";
+import { issueNonce, nonceIssuedAt } from "./consent-nonce.js";
+import { walletStopCutoff } from "./wallet-stop.js";
+import { setupRequest } from "./hosted-agents.js";
 
 const ROOT = ".app-access";
 const credentials = new AppCredentials(ROOT), consents = new AppConsents(ROOT);
@@ -29,6 +32,9 @@ const mayUse = hourlyLimit(DEFAULT_REQUESTS_PER_HOUR);
 const publicConsent = ({ message: _m, nonce: _n, signature: _s, ...record }: ConsentRecord) => record;
 
 const FOLLOW_CREATION = new Set(["owner/status", "owner/actions", "owner/pending"]);
+/** `GET /apps/v1/agents`: an Organization's reservations, narrowed by the owner and area a setup names. */
+const reservationQuery = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+  owner: setupRequest.shape.owner.optional(), area: setupRequest.shape.area.optional() });
 const daoConsentFiling = z.strictObject({ message: z.string().min(1).max(2_048) });
 const daoVoteFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), agent: z.string().regex(/^[a-z0-9-]{1,32}$/),
   proposal: z.string().min(1).max(128), verdict: z.enum(["approve", "reject"]) });
@@ -63,7 +69,9 @@ const reachable = (agent: AgentEntry, deployment: string, organization?: string)
 /** Chain reads the routes make, replaceable in tests. */
 export type AppRouteOptions = { keyState?: KeyStateLookup; setup?: HostedSetup; daoOwner?: DaoOwnerReads; daoVotes?: DaoVotes;
   /** The areas `setup` reserves agents for on this host: a DAO's setup for any other is refused before its vote is filed. */
-  setupAreas?: readonly string[] };
+  setupAreas?: readonly string[];
+  /** The gateway's secret, from which consent nonces are signed (`consent-nonce.ts`). Without it none is issued or recognised. */
+  nonceSecret?: string };
 
 export async function appRoutes(req: IncomingMessage, res: ServerResponse, pathname: string, host: string,
   selected: AgentEntry[], stopping: () => boolean, options: AppRouteOptions = {}): Promise<boolean> {
@@ -126,6 +134,18 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
    * own pass revokes every consent given before it, so a consent filed before a stop is never left live once it applies.
    */
   const endedByStop = (record: DaoConsentRequest) => !!record.stoppedBy || !!daoRequests.stopEnding(record.agent, record.host, record.createdAt);
+  /**
+   * The owner's wallet stop covering this agent ends texts signed before it: after it, a text counts only if this platform
+   * issued its nonce later. Checked with no wait before storing, so a stop applying meanwhile either finds the consent
+   * stored (and ends it) or is found here.
+   */
+  const signedBeforeStop = (owner: string, agent: string | undefined, nonce: string) => {
+    const cutoff = walletStopCutoff(ROOT, { host, owner, agent });
+    if (cutoff === null) return false;
+    const issued = options.nonceSecret ? nonceIssuedAt(options.nonceSecret, { host, deployment: credential.deployment }, nonce) : null;
+    return issued === null || issued <= cutoff;
+  };
+  const ownerStopped = () => json(res, 409, { code: "owner_stopped", error: "The owner stopped this agent's app access, and this text may have been signed before that. Nothing was stored; ask the platform for a consent nonce and ask the owner to sign the text with it." });
   const stoppedAnswer = () => json(res, 409, { code: "dao_stopped", error: "The DAO stopped this agent after this consent was filed. Nothing was stored; file a new consent for the DAO's vote." });
   /** A DAO-owned agent this app reaches under a live DAO consent with `treasury`, as it is now; or why not. */
   const daoTreasury = async (name: string, organization: string) => {
@@ -141,6 +161,22 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     const consent = covering.reduce((best, c) => c.expiresAt > best.expiresAt ? c : best);
     return { agent, authority, consent, live: covering.map(c => c.id) };
   };
+
+  // The agents this deployment's setups reserved for an Organization, as the registry records them: how an app whose
+  // setup reply was lost learns the name once the signed setup has expired. Only reservations it caused; no chain read.
+  if (pathname === "/apps/v1/agents") {
+    if (req.method !== "GET") { json(res, 405, { code: "invalid_request", error: "Use GET" }); return true; }
+    const query = reservationQuery.safeParse(Object.fromEntries(url.searchParams));
+    if (!query.success) { json(res, 400, { code: "invalid_request", error: "Name the organization, and optionally the owner and area (treasury or payables)." }); return true; }
+    const { organization, owner, area } = query.data;
+    const agents = selected.flatMap(a => {
+      const scope = a as AgentEntry & { deployment?: string; organization?: string };
+      return scope.deployment === credential.deployment && scope.organization === organization && a.area !== undefined
+        && (owner === undefined || a.owner === owner) && (area === undefined || a.area === area)
+        ? [{ agent: a.name, organization, owner: a.owner, area: a.area }] : [];
+    });
+    json(res, 200, { agents }); return true;
+  }
 
   // What the owner signs names the agent's current provider ID, so the app reads it here first.
   const identity = pathname.match(/^\/apps\/v1\/agents\/([a-z0-9-]{1,32})$/);
@@ -165,8 +201,9 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     catch { json(res, 503, { error: "Whether the owner is a DAO couldn't be checked. Nothing was set up." }); return true; }
     if (dao) { json(res, 409, { code: "dao_owned", error: "A DAO's setup is signed by its vote: file it at /apps/v1/dao-setups. Nothing was set up." }); return true; }
     if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was set up." }); return true; }
-    // Whether its consent can be stored, before reserving anything for it.
+    // Whether its consent can be stored, before reserving anything for it: a stop for every agent covers one not reserved yet.
     consents.admit(setupConsent(verified, "pending"));
+    if (signedBeforeStop(verified.setup.owner, undefined, verified.signed.nonce)) { ownerStopped(); return true; }
     const known = new Set(selected.map(a => a.name));
     let agent: AgentEntry;
     try { agent = await options.setup({ owner: verified.setup.owner, kind: "wallet", area: verified.setup.area, deployment: credential.deployment, organization: verified.setup.organization }); }
@@ -180,10 +217,17 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     // Reserving and the re-read above wait: a credential revoked or a stop begun meanwhile stores nothing.
     if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was stored; send the same setup again." }); return true; }
     if (!stillAuthorized()) { json(res, 403, { code: "access_ended", error: "Access ended before storing. Nothing was stored." }); return true; }
+    if (signedBeforeStop(verified.setup.owner, agent.name, verified.signed.nonce)) { ownerStopped(); return true; }
     const record = consents.store(setupConsent(verified, agent.name));
     appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
       event: "setup", consent: record.id, organization: record.organization, owner: record.owner, agent: record.agent, area: verified.setup.area });
     json(res, 201, { agent: agent.name, consent: publicConsent(record) }); return true;
+  }
+
+  if (pathname === "/apps/v1/consent-nonces") {
+    if (req.method !== "POST") { json(res, 405, { code: "invalid_request", error: "Use POST" }); return true; }
+    if (!options.nonceSecret) { json(res, 503, { error: "This host issues no consent nonces." }); return true; }
+    json(res, 200, issueNonce(options.nonceSecret, { host, deployment: credential.deployment })); return true;
   }
 
   if (pathname === "/apps/v1/consents") {
@@ -201,6 +245,7 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     if (authority.agentId !== verified.agentId) { json(res, 409, { code: "agent_changed", error: "The consent names another agent identity. Read the agent again and ask the owner to sign." }); return true; }
     if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was stored." }); return true; }
     if (!stillAuthorized()) { json(res, 403, { code: "access_ended", error: "Access ended before storing. Nothing was stored." }); return true; }
+    if (signedBeforeStop(verified.owner, agent.name, verified.nonce)) { ownerStopped(); return true; }
     const record = consents.store(verified);
     appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
       event: "consent", consent: record.id, organization: record.organization, owner: record.owner, agent: record.agent, scopes: record.scopes });
@@ -233,7 +278,8 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     if (req.method !== "GET") { json(res, 405, { code: "invalid_request", error: "Use GET" }); return true; }
     const record = daoRequests.read(daoState[1]!);
     if (record?.kind !== "consent" || record.deployment !== credential.deployment || record.host !== host.toLowerCase()) { json(res, 404, { code: "not_found", error: "No such DAO consent request" }); return true; }
-    const settled = record.consent && consents.list({ deployment: credential.deployment }).find(c => c.id === record.consent);
+    const found = record.consent ? consents.find(record.consent) : null;
+    const settled = found?.deployment === credential.deployment ? found : null;
     if (settled) { json(res, 200, { state: "signed", consent: publicConsent(settled) }); return true; }
     // Ended before anything is read or recorded for it.
     if (endedByStop(record)) { stoppedAnswer(); return true; }
@@ -284,7 +330,8 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     if (req.method !== "GET") { json(res, 405, { code: "invalid_request", error: "Use GET" }); return true; }
     const record = daoRequests.read(setupState[1]!);
     if (record?.kind !== "setup" || record.deployment !== credential.deployment || record.host !== host.toLowerCase()) { json(res, 404, { code: "not_found", error: "No such DAO setup request" }); return true; }
-    const stored = record.consent && consents.list({ deployment: credential.deployment }).find(c => c.id === record.consent);
+    const found = record.consent ? consents.find(record.consent) : null;
+    const stored = found?.deployment === credential.deployment ? found : null;
     if (stored && record.reserved) { json(res, 200, { state: "reserved", agent: record.reserved, consent: publicConsent(stored) }); return true; }
     if (!options.setup) { json(res, 403, { code: "setup_unavailable", error: "Agent setup isn't available on this host" }); return true; }
     const signature = await daoSignature(record, () => ({ state: "pending", request: publicDaoSetup(record) }));
@@ -466,10 +513,34 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     const raw = reply as { json?: unknown; meta?: unknown };
     const output = ownerPrepareOutput.safeParse(raw.json);
     const standard = output.success ? output.data.intent?.standard : undefined;
-    if (standard === "nep413" && !byDao) return null;
+    // A vote on a held payout is readable but names no payee or amount, so it gets a confirm link too (below).
+    const vote = !byDao && standard === "nep413" && prepared.type === "approval_vote" ? prepared : null;
+    if (standard === "nep413" && !byDao && !vote) return null;
     const log = (event: string) => appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment,
       credential: credential.id, event, consent: consent.id, organization, owner: agent.owner, agent: name, action: prepared.type,
       correlationId: (raw.json as { correlationId?: unknown } | undefined)?.correlationId ?? null });
+    /** The confirm link for an owner action, and the answer that carries it: a NEP-366 intent and its signer are held back. */
+    const link = (data: z.infer<typeof ownerPrepareOutput>) => {
+      const { intent, signer, ...answer } = data;
+      const held = intent?.standard === "nep366";
+      const { token } = confirms.hold({ deployment: credential.deployment, host: host.toLowerCase(), organization, owner: agent.owner, agent: name,
+        agentId: authority.agentId, consent: consent.id, correlationId: answer.correlationId, type: prepared.type, action: prepared,
+        policy: answer.policy ?? null, summary: answer.preview.summary ?? null, expiresAt: answer.expiresAt,
+        intent: intent as never, signer: signer as never, ...(answer.payment && { payment: answer.payment }) });
+      log("confirm");
+      // The serializer's notes about a withheld intent go with it.
+      const meta = !Array.isArray(raw.meta) ? [] : held ? raw.meta.filter(entry => !(Array.isArray(entry) && entry[1] === "intent")) : raw.meta;
+      const confirm = { url: `https://${host.toLowerCase()}/confirm/${token}`, expiresAt: answer.expiresAt };
+      return { answer: { json: { ...(held ? answer : data), confirm }, meta } };
+    };
+    if (vote && output.success) {
+      // The terms the page shows are the agent's, proven against the provider's evidence, and must name the payout and
+      // verdict the app asked for; without them there is no page to show, and the app gets the vote as before.
+      const { payment, signer } = output.data;
+      const proven = payment && payment.correlationId === vote.correlationId && payment.verdict === vote.verdict &&
+        (payment.terms === null) === (vote.verdict === "reject") && signer?.type === "near";
+      return proven ? link(output.data) : null;
+    }
     // A DAO's action comes back as the proposal its members file, never as an intent the app could have signed elsewhere.
     if (byDao) {
       if (output.success && !output.data.intent && !output.data.signer && output.data.dao) { log("dao-vote-prepared"); return null; }
@@ -480,15 +551,7 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
       log("withheld");
       return "This owner action came back in a form the platform can't show the owner. It wasn't released and expires unsigned.";
     }
-    const { intent, signer, ...answer } = output.data;
-    const { token } = confirms.hold({ deployment: credential.deployment, host: host.toLowerCase(), organization, owner: agent.owner, agent: name,
-      agentId: authority.agentId, consent: consent.id, correlationId: answer.correlationId, type: prepared.type, action: prepared,
-      policy: answer.policy ?? null, summary: answer.preview.summary ?? null, expiresAt: answer.expiresAt,
-      intent: intent as never, signer: signer as never });
-    log("confirm");
-    // The serializer's notes about the withheld intent go with it.
-    const meta = Array.isArray(raw.meta) ? raw.meta.filter(entry => !(Array.isArray(entry) && entry[1] === "intent")) : [];
-    return { answer: { json: { ...answer, confirm: { url: `https://${host.toLowerCase()}/confirm/${token}`, expiresAt: answer.expiresAt } }, meta } };
+    return link(output.data);
   });
   // A proposal is bound to the consent it was made under and the host its owner signs for; it is withdrawn once that
   // consent is no longer among this app's live consents for the agent.

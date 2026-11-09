@@ -4,8 +4,10 @@ import { appConsent } from "../contract/app-consent.js";
 /**
  * A wallet owner's own stop, with no app involved: signed with NEP-413 (recipient the platform host) on the platform's
  * stop page, or by any tool that signs NEP-413. It names one agent, or `"*"` for every agent the wallet owns on the
- * host. Applied, it ends every app consent for them given before it is applied and turns their autopilot off. It only
- * removes authority. Pure, so the stop page builds the same text the gateway checks.
+ * host. Applied, it ends every app consent for them given before it is applied and turns their autopilot off. Ending
+ * `,"freeze":true`, it also asks the platform to prepare each agent's freeze for the owner's wallet to sign (absent is
+ * the only form of not asking, so a text without it is exactly the text it was before freezing was offered). Pure, so the
+ * stop page builds the same text the gateway checks.
  */
 export const WALLET_STOP_TYPE = "multiagency.wallet-stop";
 /** Every agent the signing wallet owns on the host. Not a valid agent name, so it never names one. */
@@ -20,13 +22,16 @@ export const walletStop = z.strictObject({
   owner: appConsent.shape.owner,
   agent: z.union([z.literal(EVERY_AGENT), appConsent.shape.agent]),
   expiresAt: z.iso.datetime(),
+  /** The owner asks for each agent's freeze too (wallet-stop.ts). */
+  freeze: z.literal(true).optional(),
 });
 export type WalletStop = z.output<typeof walletStop>;
 
 /** The canonical text to sign: fixed key order, no whitespace. */
 export function walletStopMessage(stop: Omit<WalletStop, "type" | "version">): string {
   const value = walletStop.parse({ type: WALLET_STOP_TYPE, version: 1, ...stop });
-  return JSON.stringify({ type: value.type, version: value.version, host: value.host, owner: value.owner, agent: value.agent, expiresAt: value.expiresAt });
+  return JSON.stringify({ type: value.type, version: value.version, host: value.host, owner: value.owner, agent: value.agent, expiresAt: value.expiresAt,
+    ...(value.freeze && { freeze: true }) });
 }
 
 /** The stop a signed text states, or null unless the text is exactly its canonical form. */

@@ -8,6 +8,7 @@ import { client, errorMessage, minutesSeconds, short, useCountdown } from "../..
 import { Button, Spinner } from "../../shared/ui";
 import { useCanCall, useViewer } from "../../app/viewer";
 import { connect, dao, disconnect, ownerWallet, sendAsMember, signIntent, useWallet } from "./wallet";
+import { isTerminal } from "../../../../src/operation-status.js";
 
 export type Setup = Awaited<ReturnType<typeof client.setup>>;
 export type Destination = { address: string; confidential: boolean };
@@ -116,7 +117,7 @@ export function useOwnerAction(setup: Setup, options?: { transport: OwnerTranspo
     setStep("settling");
     try {
       const result = await transport.submit({ correlationId: prepared.correlationId, signedData });
-      if (["SUCCESS", "FAILED", "REFUNDED"].includes(result.status))
+      if (isTerminal(result.status))
         return ended(transport, action, prepared.correlationId, result.status, result.failureCode);
     } catch (error) {
       const state = await transport.status({ correlationId: prepared.correlationId });

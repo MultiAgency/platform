@@ -94,7 +94,10 @@ export async function handleWorkOrderCommand(raw: WorkOrderCommand) {
   switch (command.action) {
     case "create":
       workOrderInvoice(record, record.payee);
-      if (process.env.AGENT_ID || actions.some(action => action.type === "agent_create"))
+      // Only a creation the owner never signed proves no agent exists: never submitted before its window closed, or settled
+      // EXPIRED because the provider still awaited the signature then. What a provider FAILED leaves on chain isn't established.
+      if (process.env.AGENT_ID || actions.some(action => action.type === "agent_create" && !(action.phase === "expired" ||
+        (action.phase === "settled" && action.status === "EXPIRED"))))
         throw new Error("Agent creation already has a retained record. Recover it before preparing another.");
       action = { type: "agent_create", owner: record.owner, role: "payout", payees: [record.payee] };
       break;

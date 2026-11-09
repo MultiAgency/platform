@@ -7,9 +7,13 @@ import type { OwnerAction } from "./owner-inputs.js";
  * the app client is typed by them. Presenting never authorizes.
  */
 
-/** Reads the app may make with `read` consent. Workflow records (agreements, invoices, work orders) stay out. */
+/**
+ * Reads the app may make with `read` consent. Workflow records (agreements, invoices, work orders) stay out.
+ * `payouts/status` answers only the app's own requests (the agent keys each by `app:<deployment>:<organization>` and
+ * its `requestId`), so an app whose `payout` consent ended can still follow what it asked for.
+ */
 export const APP_READS = ["instance", "account", "reconcileBooks", "overview", "policyHistory", "activity", "unresolved", "held", "ledger", "ledgerCsv",
-  "owner/actions", "owner/pending", "owner/status", "paymentHistory", "paymentStatus"] as const;
+  "owner/actions", "owner/pending", "owner/status", "paymentHistory", "paymentStatus", "payouts/status"] as const;
 /** Owner actions with `owner` consent: prepared here, completed only by the owner's own wallet signature at submit. */
 export const APP_OWNER = ["owner/prepare", "owner/submit", "owner/status", "owner/pending", "owner/actions"] as const;
 /**
@@ -73,7 +77,8 @@ export type AppOwnerAction =
  * A NEP-366 owner action the platform holds for the owner to sign on its confirm page (`/confirm/<token>`). The link
  * shows the action's terms to whoever holds it; the bytes to sign go only to whoever presents the owner's signature over
  * the link's text, which the page asks the owner's wallet for. Open it for the owner right away: the intent expires in minutes. Follow the outcome with
- * `owner/status`; the app can't submit it.
+ * `owner/status`; the app can't submit it. A vote on a held payout carries one too, showing its proven terms, beside
+ * its `intent`, which the app may still submit (#48).
  */
 export const appConfirm = z.looseObject({ url: z.string(), expiresAt: z.string() });
 
@@ -175,7 +180,14 @@ export const appConsentList = z.looseObject({ consents: z.array(appConsentView) 
 export const appConsentStored = z.looseObject({ consent: appConsentView });
 /** `POST /apps/v1/setup`: the hosted agent's name and its setup consent (agent ID `unborn`). */
 export const appSetupStored = z.looseObject({ agent: z.string(), consent: appConsentView });
+/**
+ * `GET /apps/v1/agents?organization=`: the hosted agents this deployment's setups reserved for that Organization (one per
+ * owner and area), narrowed by `owner` and `area`. How an app whose setup reply was lost learns the agent's name.
+ */
+export const appReservations = z.looseObject({ agents: z.array(z.looseObject({ agent: z.string(), organization: z.string(), owner: z.string(), area: z.string() })) });
 export const appRevoked = z.looseObject({ revoked: z.literal(true) });
+/** A NEP-413 nonce (32 bytes, base64) the platform issued this deployment, and when (ms). */
+export const appConsentNonce = z.looseObject({ nonce: z.string(), issuedAt: z.number() });
 
 /**
  * Why the gateway refused an app's request: the `code` on a `refused` or `forbidden` result from the app routes, and on
@@ -185,7 +197,8 @@ export const appRevoked = z.looseObject({ revoked: z.literal(true) });
  *   owner signs on the platform's page), `not_created` (set the agent up first), `already_created` (ask for a consent).
  * - Ask the owner (or DAO) to sign again, after reading the agent's identity: `agent_changed`, `owner_changed`,
  *   `consent_ended`, `consent_revoked`, `no_consent`, `scope` (a consent with that scope), `setup_key` (create with the
- *   key that signed the setup), `signed_expired`, `vote_lapsed`, `dao_stopped`.
+ *   key that signed the setup), `signed_expired`, `vote_lapsed`, `dao_stopped`, `owner_stopped` (the owner's wallet stop
+ *   covers this agent: ask for a consent nonce, and ask the owner to sign the text with it).
  * - Not for this app or host: `not_owner`, `not_allowed`, `setup_unavailable`, `access_ended` (its credential or consent
  *   ended while the request was checked; nothing was stored, filed or forwarded).
  * - Wait, then file again: `dao_requests_limited` (the deployment's DAO requests waiting for a vote, or filed in the last
@@ -199,6 +212,6 @@ export const appRevoked = z.looseObject({ revoked: z.literal(true) });
  */
 export const APP_GATEWAY_CODES = ["invalid_request", "not_found", "signature_invalid", "browser", "dao_owned", "not_dao", "confirm_page",
   "not_created", "already_created", "agent_changed", "owner_changed", "consent_ended", "consent_revoked", "no_consent", "scope", "setup_key",
-  "signed_expired", "vote_lapsed", "dao_stopped", "not_owner", "not_allowed", "setup_unavailable", "access_ended", "proposal_unanswered",
+  "signed_expired", "vote_lapsed", "dao_stopped", "owner_stopped", "not_owner", "not_allowed", "setup_unavailable", "access_ended", "proposal_unanswered",
   "proposal_not_open", "expires_too_soon", "setup_failed", "agent_refused", "too_many_consents", "dao_requests_limited"] as const;
 export type AppGatewayCode = (typeof APP_GATEWAY_CODES)[number];

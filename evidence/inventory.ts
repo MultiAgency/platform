@@ -205,7 +205,7 @@ export const PROTOTYPES: Record<Kind, { name: string; tagline: string; briefs: [
             stoppedBy: "nothing",
             known: "not-yet",
             evidence:
-              "Not built: campaign winner identity and prize validation. Offline tests cover only a manual payout matching the recipient, asset and amount of an existing held payout (test/authorize.test.ts). Provider replay deduplication is unverified.",
+              "Not built: campaign winner identity and prize validation. Offline tests cover only a manual payout matching the recipient, asset and amount of an existing held payout (test/authorize.test.ts), unless the request opts out (allowDuplicateHeld, 0.5.5). Provider replay deduplication is unverified.",
           },
           {
             type: "guarantee",
@@ -234,7 +234,7 @@ export const PROTOTYPES: Record<Kind, { name: string; tagline: string; briefs: [
         catalog: "02",
         title: "Agentic Treasury Management",
         limitations: [
-          "Whether simultaneous requests can exceed asset limits or the USD budget remains unverified.",
+          "This executor's own simultaneous sends can't overrun asset limits or the USD budget (tested offline); whether other senders' simultaneous requests can is the provider's, and unverified.",
           "This server checks which assets can be bought; the provider does not.",
           "This server requests confidential swaps, but the policy also permits public swaps and moving funds back to a public balance. A confidential balance does not establish protection against every form of tracing.",
           "The agent has not yet run unattended for days.",
@@ -255,7 +255,7 @@ export const PROTOTYPES: Record<Kind, { name: string; tagline: string; briefs: [
             known: "mainnet",
             where: "agent",
             evidence:
-              "The policy caps every asset per transaction, hour, day and month. On the treasury agent, a transfer over its hourly cap was refused with policy_denied (policy revision 8, 2026-10-11); a swap over the monthly cap was refused on an isolated test agent, 2026-10-13",
+              "The policy caps every asset per transaction, hour, day and month. On the treasury agent, a transfer over its hourly cap was refused with policy_denied (policy revision 8, 2026-10-11); a swap over the monthly cap was refused on an isolated test agent, 2026-10-13. Offline, this executor's simultaneous payouts never got a daily cap admitted past it by a simulated provider that admits racily (test/spending-limits-race.test.ts)",
           },
           {
             type: "capability",
@@ -289,7 +289,7 @@ export const PROTOTYPES: Record<Kind, { name: string; tagline: string; briefs: [
             known: "mainnet",
             where: "other",
             evidence:
-              "Five simultaneous swaps on an isolated test agent: one settled, the rest refused, no overshoot, 2026-10-13 (one trial)",
+              "Five simultaneous swaps on an isolated test agent: one settled, the rest refused, no overshoot, 2026-10-13 (one trial). Offline, this executor's simultaneous swaps never got the budget admitted past it by a simulated provider that admits racily (test/spending-limits-race.test.ts)",
           },
           {
             type: "capability",

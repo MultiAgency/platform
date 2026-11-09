@@ -164,6 +164,7 @@ const plannedAction = z.discriminatedUnion("type", [
 /** planning/model.ts Plan. */
 const plan = z.looseObject({
   id: z.string(),
+  // `steward`: a plan the removed LLM steward proposed (to 0.5.4); stored plans keep it.
   source: z.enum(["steward", "rebalance", "external", "proposal"]),
   createdAt: z.string(),
   expiresAt: z.string(),
@@ -443,6 +444,12 @@ export const paymentHistoryOutput = z.looseObject({
  * `processing` was accepted and is still moving; `refused` was proven not sent (`code`); `unknown` has no proven
  * outcome. `processing` and `unknown` block the agent's sends and are never sent again; `not_found` was never recorded
  * by this executor.
+ *
+ * For `failed` only (0.5.5; absent from earlier platforms): `failureCode` is the provider's `failure_code` from its
+ * status of that operation, read when answering (null when unread or none). `neverExecuted` is true only when that status
+ * reads FAILED with the provider's `never_executed` and no transaction, intent, delivered amount or refund: per the
+ * provider's docs, nothing was sent (an owner's rejection of a held payout ends it so). False, or absent, proves nothing:
+ * a person still checks before asking again. REFUNDED never reads true.
  */
 export const payoutRequestOutput = z.looseObject({
   requestId: z.string(),
@@ -450,6 +457,8 @@ export const payoutRequestOutput = z.looseObject({
   status: z.string().nullable(),
   correlationId: z.string().nullable(),
   code: z.string().nullable(),
+  failureCode: z.string().nullable().optional(),
+  neverExecuted: z.boolean().optional(),
 });
 export const paymentStatusOutput = z.looseObject({
   status,
@@ -484,6 +493,13 @@ const agreement = z.looseObject({
 });
 /** agreements.ts AgreementStore.list. */
 export const agreementsListOutput = z.array(agreement);
+/**
+ * Where an owner action's durable record stands, named the same in `owner/status`, `owner/pending` and `owner/actions`
+ * (each `stage`/`state` keeps its own older words): `open` until its signing window closes unsubmitted (`expired`);
+ * `submitted` once a signature went to the provider; `settled` once the provider proved how it ended. Absent from a
+ * server before 0.5.5, and from `owner/status` for an action it holds no record of.
+ */
+export const ownerActionPhase = z.enum(["open", "expired", "submitted", "settled"]);
 /** owner-intents.ts status (the `outcomes` map's entries included). */
 export const ownerStatusOutput = z.looseObject({
   stage: z.enum(["submitted", "submitting", "expired", "failed", "voting", "unknown"]),
@@ -492,6 +508,7 @@ export const ownerStatusOutput = z.looseObject({
   error: z.string().optional(),
   /** Only for `voting`. */
   expiresAt: z.string().optional(),
+  phase: ownerActionPhase.optional(),
 });
 /** owner-intents.ts daoRequests: kept requests and the archived expired ones (`.expired.jsonl`, unvalidated JSON). */
 export const ownerPendingOutput = z.array(z.looseObject({
@@ -504,6 +521,7 @@ export const ownerPendingOutput = z.array(z.looseObject({
   /** "done" | "waiting" | "expired" at runtime; the handler's type widens it to string, so it is declared as one. */
   state: z.string(),
   payment: votedPayment,
+  phase: ownerActionPhase.optional(),
 }));
 /** owner-intents.ts ownerActions. */
 export const ownerActionsOutput = z.array(z.looseObject({
@@ -516,6 +534,7 @@ export const ownerActionsOutput = z.array(z.looseObject({
   status: z.string().nullable(),
   failureCode: z.string().nullable(),
   payment: votedPayment,
+  phase: ownerActionPhase.optional(),
 }));
 /** compensation.ts ownerCompensation (CompensationOwnerView); reused from compensation-contract.ts, top level kept loose. */
 const compensationOwnerView = ownerCompensationView.loose();
@@ -597,9 +616,13 @@ export const ownerPrepareOutput = z.looseObject({
   /** Creation and policy edits: the policy this server asked the provider to sign, and the one in force it replaces
    * (null for a creation). */
   policy: z.looseObject({ current: policy.nullable(), requested: policy }).optional(),
+  /** Grants only: the label and expiry this server asked the provider to sign. `expiresAt` is when the grant ends; the
+   * top-level `expiresAt` is when the signing window closes. Absent from servers before SDK 0.5.5. */
+  grant: z.looseObject({ label: z.string(), expiresAt: z.string() }).optional(),
   /** Wallet signer only; absent through an app when the intent is NEP-366 (see `confirm`). */
   intent: intent.optional(),
-  /** App routes only: a NEP-366 intent held on the platform for the owner to sign on its confirm page (`appConfirm`). */
+  /** App routes only: a NEP-366 intent held on the platform for the owner to sign on its confirm page, or a vote on a held
+   * payout, which the page shows with its proven terms (`appConfirm`). */
   confirm: appConfirm.optional(),
   /** Wallet signer only. */
   signer: ownerWallet.optional(),
@@ -705,14 +728,6 @@ export const sweepEvent = z.discriminatedUnion("type", [
   z.looseObject({ type: z.literal("plan"), exposed: z.array(holding) }),
   z.looseObject({ type: z.literal("shield"), asset: z.string(), status, correlationId: z.string(), failureCode: z.string().nullable().optional() }),
 ]);
-/** llm.ts steward StewardEvent. */
-export const stewardProposeEvent = z.discriminatedUnion("type", [
-  z.looseObject({ type: z.literal("say"), text: z.string() }),
-  z.looseObject({ type: z.literal("call"), name: z.string(), input: z.unknown() }),
-  z.looseObject({ type: z.literal("result"), name: z.string(), result: z.string() }),
-  z.looseObject({ type: z.literal("verified"), completionId: z.string(), signatureKind: z.string() }),
-  z.looseObject({ type: z.literal("plan"), plan }),
-]);
 
 export const ownerOutputs = {
   "setup": setupOutput,
@@ -776,7 +791,6 @@ export const ownerOutputs = {
   "rebalance": rebalanceEvent,
   "executePlan": executePlanEvent,
   "sweep": sweepEvent,
-  "steward/propose": stewardProposeEvent,
   "proposals/create": proposalView,
   "proposals/get": proposalView,
   "proposals/list": proposalList,
@@ -787,4 +801,4 @@ export const ownerOutputs = {
 } as const;
 
 /** Procedures whose output is an event stream: `ownerOutputs` holds the schema of one yielded event. */
-export const ownerStreams = ["rebalance", "executePlan", "sweep", "steward/propose"] as const;
+export const ownerStreams = ["rebalance", "executePlan", "sweep"] as const;

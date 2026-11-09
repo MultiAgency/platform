@@ -25,6 +25,7 @@ import { refusalText } from "../../shared/words";
 
 import { paymentOwnerState } from "./payment-owner-state";
 import { WorkOrders } from "./work-orders";
+import { termsInForce } from "./payment-terms";
 
 /**
  * Payments held for the owner, each as a timeline that doubles as its receipt, approved or rejected in
@@ -87,12 +88,12 @@ function Moment({ status, when, title, detail, outsider, last, children }: {
 type Agreement = Awaited<ReturnType<typeof client.agreements.list>>[number];
 
 /**
- * A held payout against its payee's latest agreed terms (src/agreements.ts `withinTerms`): what a
+ * A held payout against its payee's newest agreed terms (`termsInForce`; src/agreements.ts `withinTerms`): what a
  * voter checks. The terms are this server's record; the vote is what enforces them.
  */
 function TermsCheck({ request, agreements }: { request: Record<string, unknown>; agreements: Agreement[] }) {
   const { recipient, amount } = request as { recipient?: string; amount?: string };
-  const terms = agreements.filter((a) => a.payee === recipient && a.terms && a.status !== "declined").at(-1)?.terms;
+  const terms = recipient ? termsInForce(agreements, recipient) : undefined;
   if (!terms || !amount || !/^\d+$/.test(amount)) return <Badge>No agreed terms on record</Badge>;
   const over = BigInt(amount) > BigInt(terms.maxAmount);
   const late = Date.now() > Date.parse(terms.until);
@@ -242,7 +243,8 @@ export function Payments({ title = "Payments", historyOpen = false, compact = fa
   const selected = search.invoice ? mismatched ? undefined : invoice?.operation.correlationId : search.payment;
   if (selected && !list.some(([id]) => id === selected)) list.unshift([selected, { at: "" }]);
   const agreementQuery = useQuery(queries.agreements);
-  const agreements = agreementQuery.isSuccess ? [...agreementQuery.data].reverse() : undefined;
+  // Newest first, as agreements/list answers and `termsInForce` reads it.
+  const agreements = agreementQuery.isSuccess ? agreementQuery.data : undefined;
   const heldIds = new Set((held.data ?? []).map((h) => h.correlationId));
   const showQueue = compact || (!search.payment && !search.invoice);
   const shown = showQueue ? [] : list.filter(([id]) => id === selected);

@@ -8,6 +8,7 @@ import { APP_ROOT, appRoutes, appSetupAreas, confirms } from "./app-routes.js";
 import { confirmAssets, confirmRoutes } from "./app-confirm.js";
 import { daoStopRoutes } from "./dao-stop.js";
 import { walletStopRoutes } from "./wallet-stop.js";
+import { payeePolicyRoutes } from "./payee-policy.js";
 import { payeeBase, supplierCookie, supplierEnvironment, payeeRoute } from "./hosted-supplier.js";
 import { demoHost, demoCrossSite, demoSession, invoiceRoute, assignedToHost } from "./demo-hosts.js";
 import { forwardRpc } from "./rpc-proxy.js";
@@ -170,11 +171,12 @@ const server = createServer(async (req, res) => {
     if (await confirmRoutes(req, res, pathname, signingHost, confirms, APP_ROOT, selected, DIST, () => stopping)) return;
     if (await daoStopRoutes(req, res, pathname, signingHost, APP_ROOT, selected, () => stopping)) return;
     if (await walletStopRoutes(req, res, pathname, signingHost, APP_ROOT, selected, DIST, () => stopping)) return;
+    if (await payeePolicyRoutes(req, res, pathname, signingHost, APP_ROOT, selected)) return;
     const setupAreas = appSetupAreas(config.appSetup, site ?? undefined);
-    if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, config.appSetup.length ? { setup: async ({ owner, kind, area, deployment, organization }) => {
+    if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, { nonceSecret: SECRET, ...(config.appSetup.length && { setup: async ({ owner, kind, area, deployment, organization }) => {
       if (!setupAreas.includes(area)) throw new Error("This area is not available on this host");
       return await reserveHosted({ owner, kind, area }, { deployment, organization });
-    }, setupAreas } : {})) return;
+    }, setupAreas }) })) return;
     // Anything under /apps/ or /confirm/ that neither answered: never the file server's pages.
     if (config.headless) return json(res, 404, { error: "Not found" });
 

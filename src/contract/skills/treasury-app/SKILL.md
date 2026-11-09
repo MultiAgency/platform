@@ -181,6 +181,16 @@ before they vote. Under it, autopilot runs once your app turns it on (`autopilot
 (only if the DAO voted it into its consent) your plans run. Saving another strategy needs a new grant vote, and
 invalidates open proposals: the next read of each answers `invalidated`.
 
+Freezing and unfreezing the agent (`agent_freeze`, `agent_unfreeze`) are DAO votes too, prepared like the grant with
+`owner/prepare` and `signer: "dao"` (app-server, "A DAO owner"). The grant, its revocation, a policy edit, freeze and
+unfreeze are each a provider owner intent with a fixed window that nothing lengthens: 600 s for wallet requests
+(creation, freeze, unfreeze, on-chain policy edits) and about 290 s for consent messages (the grant, a revocation,
+off-chain policy edits), per the provider's docs read 2026-11-05. The DAO's delegate action stays valid on chain for
+6,000 blocks, but the provider's expiry comes first. Show members `expiresAt`: only a vote that passes before it
+completes the action, so a slower DAO can't freeze its agent by vote. The DAO's own stop
+(`/confirm/dao/stop/<dao>/<agent>`) ends app consents and turns autopilot off, but neither freezes the agent nor
+revokes the grant: under a consent the DAO votes later, an app can turn autopilot on again.
+
 ## Common mistakes
 
 - **Building your own approval text** (CRITICAL): sign only `proposalText(proposal, "approve")` from the proposal the

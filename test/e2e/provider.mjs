@@ -70,6 +70,19 @@ export const listen = server => new Promise((resolve, reject) => {
   server.listen(0, '127.0.0.1', () => resolve(server.address().port));
 });
 const json = (res, value, status = 200) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(value));
+/** A refusal in the provider's error document shape (the SDK's `ErrorDocument`, read into `AgentApiError`): nothing is recorded. */
+const refusal = (res, status, code, layer, detail) =>
+  json(res, { errors: [{ status: String(status), code, layer, title: code, detail, meta: { retryable: false } }], meta: {} }, status);
+/** A request the real provider may accept but this simulator doesn't model: refused, never a 500 that reads as an unknown outcome. */
+const unsupported = (res, detail) => refusal(res, 400, 'unsupported_by_simulator', 'request', `The local simulator doesn't model this request: ${detail}`);
+/**
+ * Provider refusals of a payout that record nothing (`refuseNextPayout`), by the layer that refuses: per the provider's
+ * skills references (budget and limit codes, the API's own `insufficient_balance`) and `policy_denied` as observed on
+ * mainnet (2026-10-11). Which of them the platform proves sent nothing is its own rule (`provenRefusal`, src/ops.ts).
+ */
+const PAYOUT_REFUSALS = { spend_budget_exceeded: 'budget', policy_transaction_limit_exceeded: 'policy', policy_limit_exceeded: 'policy',
+  policy_action_limit_exceeded: 'policy', policy_usage_unavailable: 'policy', policy_denied: 'policy', policy_destination_denied: 'policy',
+  insufficient_balance: 'balance' };
 const bodyOf = async req => { let body = ''; for await (const chunk of req) body += chunk; return body ? JSON.parse(body) : null; };
 
 /** Policy fields the provider enforces, so an edit to any of them is signed on chain (provider skills `references/policy.md`). */
@@ -129,10 +142,14 @@ export async function provider(directory, { treasury = false, account = OWNER, p
     const hashed = { amount: payment.body.amount, chain: 'near', flow: withdraw ? 'withdraw' : 'transfer', kind: 'confidential', to: payment.body.recipient, token: payment.body.asset };
     const data = withdraw ? { amount: hashed.amount, chain: 'near', destination_asset: hashed.token, to: hashed.to, token: hashed.token } : hashed;
     return { approval_id: payment.approval, wallet_id: agents.get(payment.agent).wallet.wallet_id, status: payment.status === 'PENDING_APPROVAL' ? 'PENDING' : payment.failure === 'rejected_by_owner' ? 'REJECTED' : 'APPROVED',
-      expires_at: expires, request_type: 'confidential', request_data: data,
+      expires_at: payment.approvalExpiresAt ?? expires, request_type: 'confidential', request_data: data,
       request_hash: createHash('sha256').update(JSON.stringify(hashed)).digest('hex') };
   };
-  let dropNextTransfer = false, dropNextSignature = false, ownerOutcomeUnavailable = false;
+  let dropNextTransfer = false, dropNextWithdraw = false, dropNextSignature = false, ownerOutcomeUnavailable = false;
+  /** The next transfer or withdrawal is refused by the provider's rules (`refuseNextPayout`): `{ code, status }`. */
+  let nextPayoutRefusal = null;
+  /** Token contract and account pairs not registered (NEP-145) on that token (`unregister`); every other declared account is. */
+  const unregistered = new Set();
   /** The DAO's keys on `intents.near` (`public_keys_of`): none until it is set up for confidential intents. */
   const daoIntentKeys = [];
   /** A chain view method whose every read fails, as an unreachable RPC would (`failChainView`). */
@@ -193,7 +210,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         // Token registration (NEP-145) for a withdrawal's recipient: the declared accounts are registered on every token.
         if (params.request_type === 'call_function' && params.method_name === 'storage_balance_of') {
           const { account_id } = args();
-          return view(known.includes(account_id) ? { total: '1250000000000000000000', available: '0' } : null);
+          return view(known.includes(account_id) && !unregistered.has(`${params.account_id}\n${account_id}`) ? { total: '1250000000000000000000', available: '0' } : null);
         }
         throw new Error(`Undeclared chain request: ${JSON.stringify(params)}`);
       }
@@ -278,6 +295,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         const allowed = agent.policy.destinations.list.some(d => d.action === 'transfer' && d.address === body.recipient && d.confidential);
         if (!allowed || body.asset !== USDC || body.confidential !== true) throw new Error('Unexpected transfer terms');
         if (BigInt(body.amount) > BigInt(agent.policy.limits.per_transaction[USDC]) || BigInt(body.amount) > agent.funded - spent(agent)) throw new Error('Transfer exceeds policy limit or funded balance');
+        if (nextPayoutRefusal) { const { code, status: refused } = nextPayoutRefusal; nextPayoutRefusal = null; return refusal(res, refused, code, PAYOUT_REFUSALS[code], 'Refused by the simulated provider'); }
         const payment = { agent: agent.id, body, key: entry.key, correlation: randomUUID(), approval: randomUUID(), status: 'PENDING_APPROVAL', at: new Date().toISOString() };
         transfers.push(payment);
         if (dropNextTransfer) { dropNextTransfer = false; return res.destroy(); }
@@ -289,15 +307,18 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         const allowed = agent.policy.actions.includes('withdraw') && agent.policy.destinations.list.some(d => d.action === 'withdraw' && d.chain === 'near' && d.address === body.recipient && d.memo === null);
         if (!allowed || body.asset !== USDC || body.chain !== 'near' || body.confidential !== true || body.memo !== undefined) throw new Error('Unexpected withdrawal terms');
         if (BigInt(body.amount) > BigInt(agent.policy.limits.per_transaction[USDC]) || BigInt(body.amount) > agent.funded - spent(agent)) throw new Error('Withdrawal exceeds policy limit or funded balance');
+        if (nextPayoutRefusal) { const { code, status: refused } = nextPayoutRefusal; nextPayoutRefusal = null; return refusal(res, refused, code, PAYOUT_REFUSALS[code], 'Refused by the simulated provider'); }
         const payment = { type: 'withdraw', agent: agent.id, body, key: entry.key, correlation: randomUUID(), approval: randomUUID(), status: 'PENDING_APPROVAL', at: new Date().toISOString() };
         transfers.push(payment);
+        if (dropNextWithdraw) { dropNextWithdraw = false; return res.destroy(); }
         return json(res, { correlation_id: payment.correlation });
       }
       if (req.method === 'POST' && url.pathname === '/v1/generate-intent') {
         // A Treasury agent's grant: plain `treasury`, or bound to a saved strategy (`treasury:<suffix>`).
         const strategyTarget = body.type === 'grant_issue' && agents.get(body.agent_id);
         if (strategyTarget?.treasury) {
-          if (!/^treasury(:[0-9a-f]{32})?$/.test(body.label) || !body.credential || !body.expires_at) throw new Error('Unexpected Treasury grant');
+          if (!body.credential || !body.expires_at) throw new Error('Unexpected Treasury grant');
+          if (!/^treasury(:[0-9a-f]{32})?$/.test(body.label)) return unsupported(res, `a "${body.label}" grant for a Treasury agent`);
           const generated = { correlation_id: randomUUID(), type: 'grant_issue', signer: strategyTarget.owner, expires_at: expires,
             intent: { standard: 'nep413', payload: { message: JSON.stringify(body), nonce: randomBytes(32).toString('base64'), recipient: 'local-provider' } },
             preview: { summary: body.label === 'treasury' ? 'Authorize the local Treasury agent' : 'Authorize the saved local strategy' } };
@@ -337,9 +358,13 @@ export async function provider(directory, { treasury = false, account = OWNER, p
           intents.push({ ...generated, agent: target, revoked }); return json(res, generated);
         }
         if (body.type === 'grant_issue') {
+          // A payout agent the owner created (a work order's, an app's hosted one): an `invoices` or `payout` grant.
           const target = agents.get(body.agent_id);
-          if (!target || target.id === id || body.label !== 'invoices' || !body.credential || !body.expires_at) throw new Error('Unexpected work order grant');
-          const generated = { correlation_id: randomUUID(), type: 'grant_issue', signer: target.owner, expires_at: expires, intent: nep413(), preview: { summary: 'Authorize the local work order payout' } };
+          if (!target || !body.credential || !body.expires_at) throw new Error('Unexpected payout grant');
+          if (target.id === id) return unsupported(res, 'another grant for the configured agent, which already holds its own');
+          if (!['invoices', 'payout'].includes(body.label)) return unsupported(res, `a "${body.label}" grant for a payout agent`);
+          const generated = { correlation_id: randomUUID(), type: 'grant_issue', signer: target.owner, expires_at: expires, intent: nep413(),
+            preview: { summary: body.label === 'payout' ? 'Authorize the local payouts' : 'Authorize the local work order payout' } };
           intents.push({ ...generated, agent: target, grantRequest: body }); return json(res, generated);
         }
         const payment = transfers.find(p => p.approval === body.approval_id);
@@ -431,11 +456,37 @@ export async function provider(directory, { treasury = false, account = OWNER, p
       let release; const wait = new Promise(resolve => { release = resolve; });
       observationGate = { wait, release, reached: false }; return observationGate;
     },
+    /** The provider accepts the next transfer, or withdrawal, but its response is lost: an outcome the platform must reconcile. */
     dropTransferResponse() { dropNextTransfer = true; },
+    dropWithdrawResponse() { dropNextWithdraw = true; },
+    /** `account` is no longer registered (NEP-145) on `asset`'s token contract, as a NEAR account that never paid its storage. */
+    unregister(account, asset = USDC) { unregistered.add(`${asset.replace(/^nep141:/, '')}\n${account}`); },
+    /**
+     * The provider refuses the next transfer or withdrawal by its rules, recording nothing: `code` one of PAYOUT_REFUSALS
+     * (budgets among them, which this simulator doesn't count), at the HTTP `status` given, since the provider's status for
+     * most of them is not observed here.
+     */
+    refuseNextPayout({ code, status }) {
+      if (!Object.hasOwn(PAYOUT_REFUSALS, code)) throw new Error(`Give a code: one of ${Object.keys(PAYOUT_REFUSALS).join(', ')}`);
+      if (!Number.isInteger(status) || status < 400 || status > 499) throw new Error('Give the refusal a 4xx status');
+      nextPayoutRefusal = { code, status };
+    },
+    /**
+     * The held payment's approval reads expired (`expires_at` passed), so the platform refuses a vote on it. What the provider
+     * then does with the payment is not observed here: its status stays as it was.
+     */
+    expireApproval(correlation) {
+      const payment = transfers.find(p => p.correlation === correlation);
+      if (!payment || payment.status !== 'PENDING_APPROVAL') throw new Error('Not held for approval');
+      payment.approvalExpiresAt = new Date(Date.now() - 1000).toISOString();
+    },
     dropSignatureResponse() { dropNextSignature = true; ownerOutcomeUnavailable = true; },
-    revealOwnerOutcome() { ownerOutcomeUnavailable = false; }, settle(correlation) {
+    revealOwnerOutcome() { ownerOutcomeUnavailable = false; },
+    /** An approved payment ends: `SUCCESS` by default, or `FAILED` or `REFUNDED` (which don't prove nothing moved). */
+    settle(correlation, outcome = 'SUCCESS') {
+      if (!['SUCCESS', 'FAILED', 'REFUNDED'].includes(outcome)) throw new Error('outcome is SUCCESS, FAILED or REFUNDED');
       const payment = correlation ? transfers.find(p => p.correlation === correlation) : transfers[0];
-      if (!payment || payment.status !== 'PROCESSING') throw new Error('Not approved'); payment.status = 'SUCCESS';
+      if (!payment || payment.status !== 'PROCESSING') throw new Error('Not approved'); payment.status = outcome;
     },
     close: () => new Promise(resolve => server.close(resolve)) };
 }

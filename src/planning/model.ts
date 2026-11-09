@@ -14,7 +14,10 @@ export type Snapshot = {
   balances: Record<string, { public: string; confidential: string }>;
 };
 
-/** What proposed the plan; its actions are logged under this kind. */
+/**
+ * What proposed the plan; its actions are logged under this kind. `steward` names plans the LLM steward proposed
+ * before it left the platform (SDK 0.5.5); stored ones keep it, and nothing saves a new one.
+ */
 export type PlanSource = "steward" | "rebalance" | "external" | "proposal";
 
 export type Plan = Snapshot & {

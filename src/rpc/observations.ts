@@ -23,6 +23,8 @@ import { status } from "../owner-intents.js";
 import { agreed } from "../invoices.js";
 import { os, owner } from "./base.js";
 import { readOutput } from "./read-output.js";
+import { payeeTerms } from "../payee-terms.js";
+import { payeeDisclosure } from "../contract/payee-policy.js";
 import { run, account, depositInput } from "../contract/inputs.js";
 import { unresolvedEvidence } from "../contract/owner-outputs.js";
 
@@ -55,6 +57,15 @@ export const observationsRoutes = {
     const agent = await api.getAgent(id);
     // A successful read without ownership is invalid evidence, not an outage or an uncreated agent.
     return { agentId: id, owner: agent?.owner ?? null };
+  }),
+  /**
+   * For the gateway alone, like `ownerIdentity` (no owner, app or machine permission names it): one payee's terms, read
+   * from the provider's current policy now, which the gateway answers only under the owner's payee disclosure
+   * (src/gateway/payee-policy.ts), with the mandate digest only when asked under the owner's opt-in. Reads only.
+   */
+  payeeTerms: os.input(z.object({ payee: payeeDisclosure.shape.payee, digest: z.boolean().optional() })).handler(async ({ input }) => {
+    const id = agentId();
+    return payeeTerms(await api.getPolicy(id), input.payee, id, new Date(), { digest: input.digest });
   }),
   /**
    * The agent's account and the grants this executor holds, observed now. Pure, unlike `setup`: it adopts nothing. A

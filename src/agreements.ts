@@ -127,7 +127,7 @@ export function declineAgreement(id: string) {
   appendSynced(file(), { decline: id } satisfies Line);
 }
 
-/** The latest terms set for a payee, if any: what a held payout to them is checked against. */
+/** The terms of a payee's newest agreement that has terms and isn't declined, if any: what a held payout to them is checked against. */
 export function termsFor(payee: string): Terms | undefined {
   return [...read().values()].filter((e) => e.payee === payee && e.terms && !e.declined).at(-1)?.terms;
 }

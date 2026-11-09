@@ -2,14 +2,13 @@ import { UsersThree, Wallet as WalletIcon } from "@phosphor-icons/react";
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { client, errorMessage, short, useAttempt } from "../shared/lib";
-import { ensureDao, ownerName, ownerSigner, type Setup, type Signer, useOwnerAction, useSigner } from "../features/owner/owner";
+import { ensureDao, type Setup, type Signer, useOwnerAction } from "../features/owner/owner";
 import { Button, Card, ErrorBox, input, Section, Spinner, Step } from "../shared/ui";
 import { connect, dao, send, useWallet } from "../features/owner/wallet";
 import { SetupActions, useSetupActions } from "./setup-progress";
 import { useCanCall, useViewer } from "./viewer";
 import { useGateway } from "./gateway-context";
 import { BASE } from "../shared/client";
-import { useAppHref } from "../features/demo/app-link";
 
 /** Connects a DAO in Trezu and links it as the treasury. */
 async function linkTrezuDao() {
@@ -35,13 +34,11 @@ function ActionRow({ label, busy, disabled, onClick, children }: { label: ReactN
  * DAO's votes can sign for owns the agent, and every owner action is one proposal.
  */
 export function Onboarding({ setup }: { setup: Setup }) {
-  const treasuryApp = useAppHref("treasury");
   const queryClient = useQueryClient();
   const wallet = useWallet();
   const daoWallet = dao.use();
   const action = useOwnerAction(setup);
   const existing = useSetupActions(true);
-  const { canSign } = useSigner(setup);
   const viewer = useViewer();
   const reserved = useGateway()?.agents.find(agent => `/a/${agent.name}` === BASE && agent.name.startsWith("own-"));
   const canLink = useCanCall("treasury/link");
@@ -51,14 +48,15 @@ export function Onboarding({ setup }: { setup: Setup }) {
   const [role, setRole] = useState<"treasury" | "payout">(reserved?.area === "payables" ? "payout" : "treasury");
   const [payees, setPayees] = useState(setup.dao?.id ?? "");
   const payeeList = payees.split(/[\s,]+/).filter(Boolean);
-  const signer: Signer = setup.agentId ? ownerSigner(setup) : (choice ?? "wallet");
+  const signer: Signer = choice ?? "wallet";
   const isDao = signer === "dao" && Boolean(setup.dao);
   const canCreate = canPrepare && (viewer === null || (signer === "dao" ? viewer.access?.canPropose : viewer.access?.canSign));
 
   const chosen = isDao ? true : wallet.status === "connected";
   type StepId = "owner" | "fund" | "create" | "grant";
   const steps: StepId[] = isDao ? ["owner", "fund", "create", "grant"] : ["owner", "create", "grant"];
-  const done: Record<StepId, boolean> = { owner: chosen, fund: Boolean(setup.dao?.funded), create: Boolean(setup.agentId), grant: Boolean(setup.grant) };
+  // Mounted only before the agent exists: creating it, and then its grant, are still ahead.
+  const done: Record<StepId, boolean> = { owner: chosen, fund: Boolean(setup.dao?.funded), create: false, grant: false };
   const current = steps.find((s) => !done[s]);
   const status = (s: StepId) => (done[s] ? "complete" : s === current ? "current" : "upcoming");
 
@@ -192,19 +190,7 @@ export function Onboarding({ setup }: { setup: Setup }) {
               {isDao ? "Propose creating the agent" : "Create agent"}
             </ActionRow>
           </Step>
-          <Step number={++n} title="Issue the agent's grant" status={status("grant")} last>
-            <p className="text-sm text-muted-foreground">
-              Lets this server act for the agent inside the policy for 30 days. The owner can revoke the grant
-              from Policy & grants.
-            </p>
-            {!canSign && (
-              <p className="text-sm text-warning-muted-foreground">{isDao ? "Proposing a grant requires permission to propose owner actions for this DAO." : `Only ${ownerName(setup)} can issue grants. Connect that wallet.`}</p>
-            )}
-            <ErrorBox error={action.error} />
-            {role === "treasury" ? <a href={treasuryApp("/automations")} className="underline">Review and authorize the strategy in Treasury</a> : <ActionRow label={action.label} busy={action.busy || !canSign} onClick={() => action.run({ type: "grant_issue" })}>
-              {isDao ? "Propose the grant" : "Issue grant"}
-            </ActionRow>}
-          </Step>
+          <Step number={++n} title="Issue the agent's grant" status={status("grant")} last />
         </ol>
       </Card>
     </Section>

@@ -100,9 +100,8 @@ lease does not enforce that across machines. Other instances use `EXECUTOR=off`.
 
 ## Two kinds of agent
 
-- A **treasury agent** swaps between USDC, wNEAR and ETH toward a target, shields anything public,
-  and, as an experiment reached only at `/steward`, can be steered by an LLM whose responses are verified
-  against its TEE. No vote per action.
+- A **treasury agent** swaps between USDC, wNEAR and ETH toward a target and shields anything public.
+  Its experimental LLM steward (`/steward`) was removed in SDK 0.5.5. No vote per action.
 - A **payout agent** only transfers USDC, confidentially, to payees the owner agreed to. Every payout
   waits for the owner's approval. Approval verification checks the intended terms against the current
   policy; cumulative enforcement and the final signed artifact retain the provider dependencies

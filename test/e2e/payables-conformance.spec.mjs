@@ -16,13 +16,13 @@ const MUTATE = ['pay', 'deposit', 'recover', 'cancelPreparedInvoice', 'inbox/dis
   'agreements/decline', 'compensation/agreement', 'compensation/review', 'compensation/prepare', 'compensation/send', 'workOrders/create', 'workOrders/prepare',
   'workOrders/submit', 'workOrders/deposit', 'workOrders/file', 'strategy/save', 'autopilot/enable', 'autopilot/stop', 'autopilot/tick', 'treasury/link',
   'treasury/unlink', 'treasury/fund'];
-const STREAM = ['rebalance', 'executePlan', 'sweep', 'steward/propose'];
+const STREAM = ['rebalance', 'executePlan', 'sweep'];
 const LISTED = [...READ, ...MUTATE, ...STREAM];
 const until = () => new Date(Date.now() + 2 * 86_400_000).toISOString();
 
 test('Payables: every listed procedure through ownerClient equals its raw answer, with each reachable error kind', async ({ browser }, info) => {
   test.setTimeout(300_000);
-  expect(LISTED).toHaveLength(56);
+  expect(LISTED).toHaveLength(55);
   const stack = await environment(info.outputPath('environment'));
   const owner = await browserContext(browser, stack, OWNER), payeeBrowser = await browserContext(browser, stack, PAYEE);
   try {
@@ -122,7 +122,6 @@ test('Payables: every listed procedure through ownerClient equals its raw answer
     await check('executePlan', { planId: randomUUID() }, 'refused');
     await check('sweep', { execute: false }, undefined);
     await check('sweep', { execute: true }, undefined);
-    await check('steward/propose', {}, undefined);
 
     // refused: invalid input never reaches a handler.
     for (const [procedure, input] of [['pay', { recipient: PAYEE }], ['paymentStatus', { correlationId: '' }], ['cancelPreparedInvoice', { id: 'x' }], ['inbox/dismiss', { id: 'x' }],
@@ -132,7 +131,7 @@ test('Payables: every listed procedure through ownerClient equals its raw answer
       ['workOrders/create', { id: 'x' }], ['workOrders/get', { id: 'x' }], ['workOrders/status', { id: 'x' }], ['workOrders/prepare', { id: 'x' }], ['workOrders/submit', { id: 'x' }],
       ['workOrders/deposit', { id: 'x' }], ['workOrders/file', { id: 'x' }], ['strategy/save', { strategy: {}, expectedDigest: 'x' }], ['autopilot/enable', { expectedDigest: 'x' }],
       ['autopilot/evidence', { since: 'yesterday' }], ['autopilot/log', { tickId: '' }], ['treasury/link', { accountId: 'x' }],
-      ['treasury/fund', { asset: 'DOGE', amount: '1' }], ['executePlan', { planId: 'x' }], ['sweep', { execute: 'yes' }], ['steward/propose', { instruction: 'x'.repeat(3000) }]])
+      ['treasury/fund', { asset: 'DOGE', amount: '1' }], ['executePlan', { planId: 'x' }], ['sweep', { execute: 'yes' }]])
       await check(procedure, input, 'refused');
 
     // busy: another holder has this agent's money lock.
@@ -151,8 +150,7 @@ test('Payables: every listed procedure through ownerClient equals its raw answer
       excluded: { pay: approveOnly, 'compensation/send': approveOnly, cancelPreparedInvoice: 'no never-submitted invoice exists on this fixture',
         'autopilot/log': 'the payout agent records no autopilot runs', 'autopilot/enable': 'the payout agent has no treasury strategy to enable',
         'autopilot/stop': 'the payout agent has no schedule to stop', 'strategy/save': 'the payout agent has no treasury strategy',
-        rebalance: 'the payout agent has no treasury strategy', executePlan: 'no plan exists for the payout agent',
-        'steward/propose': 'attested inference is not available offline' },
+        rebalance: 'the payout agent has no treasury strategy', executePlan: 'no plan exists for the payout agent' },
     });
 
     report(info.outputPath('coverage.json'));

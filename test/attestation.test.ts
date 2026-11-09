@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ATTESTATION, MODEL, steward, verifiedInference } from "../src/llm.js";
+import { ATTESTATION, MODEL, verifiedInference } from "../src/llm.js";
 
 // Live: needs NEARAI_API_KEY. Attestation can't be faked offline, so this runs against NEAR AI Cloud,
 // whose gateway reported TCB OutOfDate with four Intel advisories on 2026-10-10 (pinned in ATTESTATION).
@@ -14,7 +14,7 @@ const refusal = (error: unknown): string => {
   return [String(error), cause ? String(cause) : "", JSON.stringify((error as { failure?: unknown }).failure ?? "")].join(" ");
 };
 
-test("today's deployment passes the steward's policy", live, async () => {
+test("today's deployment passes the attestation policy", live, async () => {
   await verifiedInference(apiKey!).inference.verify(MODEL);
 });
 
@@ -36,22 +36,6 @@ test("the model must still be UpToDate: a chat request fails closed otherwise", 
       return true;
     },
   );
-});
-
-test("when attestation is refused, the steward stops before its first model turn or tool call", live, async () => {
-  const events: unknown[] = [];
-  await assert.rejects(
-    async () => {
-      for await (const event of steward({ instruction: "Review the treasury.", attestation: { ...ATTESTATION, modelTcb: ["Revoked"] } }))
-        events.push(event);
-    },
-    (error) => {
-      // Surfaced as the refusal itself, not as the OpenAI client's "Connection error".
-      assert.match(String(error), /tcb_status_not_allowed|not allowed by policy/);
-      return true;
-    },
-  );
-  assert.deepEqual(events, []);
 });
 
 test("a response whose signature can't be verified is rejected", live, async () => {

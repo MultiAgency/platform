@@ -126,6 +126,9 @@ for (const sharedHosts of [false, true]) test(`${sharedHosts ? "shared hosts" : 
   const carolEntry = (JSON.parse(readFileSync(join(dir, ".hosted", "apps.json"), "utf8")).entries as { name: string; deployment?: string; organization?: string }[]).find(e => e.name === carolAgent);
   assert.deepEqual([carolEntry?.deployment, carolEntry?.organization], ["staging", "org_1"], "the app's setup reserves an Organization's own agent");
   assert.deepEqual([setupConsentRecord.agentId, setupConsentRecord.scopes], ["unborn", ["owner"]]);
+  const lookup = await dashboard("/apps/v1/agents?organization=org_1&owner=carol.near&area=payables", "fixture.test");
+  assert.deepEqual(await lookup.json(), { agents: [{ agent: carolAgent, organization: "org_1", owner: "carol.near", area: "payables" }] },
+    "a lost setup reply is recovered from the registry, by Organization, owner and area");
   let created: unknown;
   for (let i = 0; i < 150; i++) {
     const identity = await dashboard(`/apps/v1/agents/${carolAgent}`, "fixture.test");
@@ -168,8 +171,10 @@ for (const sharedHosts of [false, true]) test(`${sharedHosts ? "shared hosts" : 
   }
   await stop();
   if (sharedHosts) {
-    // Offline-created identities: no provider creation or owner action is submitted by this test.
-    for (const [instance, id] of [[daoName, "a".repeat(64)], [walletPayout!, "b".repeat(64)]]) {
+    // Offline-created identities: no provider creation or owner action is submitted by this test. Each child takes the
+    // executor lease, a lock in the OS temp directory named by agent id (src/executor-lease.ts), so these ids are used by
+    // no other test: the fixture AGENT_ID ("a" x 64) would collide with any test file running an agent server alongside.
+    for (const [instance, id] of [[daoName, "7".repeat(64)], [walletPayout!, "8".repeat(64)]]) {
       const file = join(dir, ".hosted", `${instance}.env`);
       writeFileSync(file, readFileSync(file, "utf8") + `AGENT_ID=${id}\n`);
     }

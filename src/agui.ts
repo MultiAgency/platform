@@ -1,5 +1,6 @@
 import type { ProgressRecord } from "./run-progress-schema.js";
 import type { Tick } from "./evidence.js";
+import { isTerminal } from "./operation-status.js";
 import { AGUI_PROTOCOL_VERSION, AGUI_VERSION, BudgetSchema, DisplaySchema, JournalHistorySchema, MAX_RECORDING_BYTES, PlanSchema,
   RecordingSchema, SeenSchema, StartSchema, iso, recordedTickFailed, type Gap, type JournalHistory, type JournalRecord,
   type Recording, type RunLogEvent } from "./run-log-schema.js";
@@ -89,7 +90,7 @@ export function tickLog(tick: Tick, history: JournalHistory, options: Options): 
         if (time > Date.parse(endAt!)) laterObservations.push({ correlationId: cid, source: "journal", record: row });
         else within.push(row);
       }
-      const terminal = new Set(within.filter((r) => r.type === "status" && ["SUCCESS", "FAILED", "REFUNDED"].includes(r.status!)).map((r) => r.status));
+      const terminal = new Set(within.filter((r) => r.type === "status" && r.status !== undefined && isTerminal(r.status)).map((r) => r.status));
       if (terminal.size > 1) gap("status_conflict", ref);
       return { history: within, untimedHistory: untimed };
     };

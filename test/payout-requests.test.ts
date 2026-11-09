@@ -10,6 +10,7 @@ import { opsLog, readOps, record } from "../src/ops.js";
 import { readFileSync } from "node:fs";
 import { payoutStatus, requestKey, requestPayout } from "../src/payout-requests.js";
 import { payoutRequestInput } from "../src/contract/inputs.js";
+import { payoutRequestOutput } from "../src/contract/owner-outputs.js";
 import { ASSETS, payoutPolicy } from "../src/policy.js";
 import { PublicError } from "../src/public-error.js";
 import { router } from "../src/router.js";
@@ -24,6 +25,8 @@ let policy: Policy;
 let sends: { key: string; recipient: string }[];
 let transfer: (key: string, request: { recipient: string }) => Promise<{ correlation_id: string }>;
 let status: string;
+/** The rest of the provider's status reply: `failure_code` and `details`. */
+let reply: Record<string, unknown>;
 
 freshDirectory("payout-requests");
 beforeEach(() => {
@@ -31,11 +34,12 @@ beforeEach(() => {
   policy = payoutPolicy(["payee.near", "other.near"]);
   sends = [];
   status = "SUCCESS";
+  reply = {};
   transfer = async (key, request) => { sends.push({ key, recipient: request.recipient }); return { correlation_id: `op_${sends.length}` }; };
   offline();
   for (const [name, method] of Object.entries(authorityFixture())) mock.method(api, name as keyof typeof api, method as never);
   mock.method(api, "getPolicy", async () => policyView(policy));
-  mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, status }));
+  mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, status, ...reply }));
   const send = (_id: string, request: { recipient: string }, { idempotencyKey }: { idempotencyKey: string }) => transfer(idempotencyKey, request);
   mock.method(api, "forGrant", () => ({ transfer: send, swap: send, shield: send, unshield: send }));
 });
@@ -47,7 +51,7 @@ const request = (requestId: string, recipient = "payee.near", amount = "1000000"
 
 test("a request is sent once under a key derived from its caller and requestId; asking again sends nothing", async () => {
   const first = await requestPayout(APP, request("r-1"));
-  assert.deepEqual(first, { requestId: "r-1", state: "succeeded", status: "SUCCESS", correlationId: "op_1", code: null });
+  assert.deepEqual(first, { requestId: "r-1", state: "succeeded", status: "SUCCESS", correlationId: "op_1", code: null, failureCode: null, neverExecuted: false });
   assert.deepEqual(sends, [{ key: requestKey(APP, "r-1"), recipient: "payee.near" }], "the provider's idempotency key is the request's identity");
   assert.deepEqual(await requestPayout(APP, request("r-1")), first);
   assert.deepEqual(await payoutStatus(APP, "r-1"), first);
@@ -73,7 +77,7 @@ test("two callers' requests never share an identity, even under the same request
 
 test("a lost send stays unknown: never sent again, it blocks other requests until its outcome is proven", async () => {
   transfer = async (key, request) => { sends.push({ key, recipient: request.recipient }); throw new Error("socket hang up"); };
-  assert.deepEqual(await requestPayout(APP, request("r-1")), { requestId: "r-1", state: "unknown", status: null, correlationId: null, code: null });
+  assert.deepEqual(await requestPayout(APP, request("r-1")), { requestId: "r-1", state: "unknown", status: null, correlationId: null, code: null, failureCode: null, neverExecuted: false });
   assert.deepEqual((await requestPayout(APP, request("r-1"))).state, "unknown");
   assert.deepEqual((await payoutStatus(APP, "r-1")).state, "unknown");
   assert.equal(sends.length, 1, "a lost request is never resent");
@@ -113,8 +117,22 @@ test("a payout held for the owner's approval reads as held, then as settled once
   status = "PENDING_APPROVAL";
   assert.equal((await requestPayout(APP, request("r-1"))).state, "held");
   status = "SUCCESS";
-  assert.deepEqual(await payoutStatus(APP, "r-1"), { requestId: "r-1", state: "succeeded", status: "SUCCESS", correlationId: "op_1", code: null });
+  assert.deepEqual(await payoutStatus(APP, "r-1"), { requestId: "r-1", state: "succeeded", status: "SUCCESS", correlationId: "op_1", code: null, failureCode: null, neverExecuted: false });
   assert.equal(sends.length, 1);
+});
+
+test("two equal payouts may both wait for the owner only when the request opts out of the duplicate check", async () => {
+  status = "PENDING_APPROVAL";
+  assert.equal((await requestPayout(APP, request("r-1"))).state, "held");
+  const repeated = await requestPayout(APP, request("r-2"));
+  assert.deepEqual([repeated.state, repeated.code], ["refused", "duplicate_held_payout"], "the default refuses a repeat of a held payout");
+  const both = await requestPayout(APP, { ...request("r-3"), allowDuplicateHeld: true });
+  assert.equal(both.state, "held", "an opted-out request is held beside the first: each still needs the owner's vote");
+  assert.equal(sends.length, 2);
+  // Through the procedure, the field survives the input schema.
+  assert.equal((await viaProcedure({ ...request("r-4"), allowDuplicateHeld: true })).state, "held");
+  assert.equal(payoutRequestInput.parse({ ...request("r-5"), allowDuplicateHeld: true }).allowDuplicateHeld, true);
+  assert.equal(payoutRequestInput.safeParse({ ...request("r-6"), allowDuplicateHeld: false }).success, false, "only `true` opts out");
 });
 
 test("a request that never reached the send site is not recorded, so its status is not_found and asking again may send", async () => {
@@ -334,4 +352,73 @@ test("implicit accounts need no account on NEAR: no chain read", async () => {
   policy = payoutPolicy(["payee.near", implicit]);
   assert.equal((await requestPayout(APP, { ...request("r-1"), recipient: implicit, expectedPolicy: reviewed() })).state, "succeeded");
   assert.equal(read.mock.callCount(), 0);
+});
+
+/** An answer's failure fields: the provider's code, and whether its own record proves the payout never executed. */
+const failure = (answer: { failureCode?: string | null; neverExecuted?: boolean }) => [answer.failureCode, answer.neverExecuted];
+
+test("a held payout the owner rejected reads failed with the provider's code, and never executed when the provider says so", async () => {
+  status = "PENDING_APPROVAL";
+  reply = { details: { approval_id: "ap_1" } };
+  assert.deepEqual(failure(await requestPayout(APP, request("r-1"))), [null, false], "held: nothing ended");
+  status = "FAILED";
+  reply = { failure_code: "rejected", details: { approval_id: "ap_1", never_executed: true } };
+  const read = await payoutStatus(APP, "r-1");
+  assert.deepEqual([read.state, ...failure(read)], ["failed", "rejected", true]);
+  assert.deepEqual(await requestPayout(APP, request("r-1")), read, "asked again, the same answer");
+  assert.deepEqual(await payoutStatus(APP, "r-1"), read, "read again once the journal holds FAILED");
+  assert.equal(sends.length, 1);
+});
+
+test("never executed is claimed only from the provider's own record: not with a transaction, a refund, a missing flag, or an unread status", async () => {
+  const cases: [string, string, Record<string, unknown>, string | null][] = [
+    ["tx", "FAILED", { failure_code: "delivery_failed", details: { never_executed: true, tx_hash: "fixture-tx" } }, "delivery_failed"],
+    ["intent", "FAILED", { failure_code: "rejected", details: { never_executed: true, intent_hash: "fixture-intent" } }, "rejected"],
+    ["out", "FAILED", { failure_code: "rejected", details: { never_executed: true, amount_out: "1" } }, "rejected"],
+    ["no-flag", "FAILED", { failure_code: "rejected", details: {} }, "rejected"],
+    ["no-details", "FAILED", { failure_code: "rejected" }, "rejected"],
+    ["no-code", "FAILED", { details: {} }, null],
+    ["flag-not-true", "FAILED", { failure_code: "rejected", details: { never_executed: "true" } }, "rejected"],
+    ["refunded", "REFUNDED", { failure_code: "refunded", details: { never_executed: true, refund_tx_hash: "fixture-refund" } }, "refunded"],
+    ["refunded-bare", "REFUNDED", { details: { never_executed: true } }, null],
+  ];
+  for (const [id, final, rest, code] of cases) {
+    status = final;
+    reply = rest;
+    const answer = await requestPayout(APP, request(`r-${id}`, "payee.near", String(1000 + sends.length)));
+    assert.deepEqual([answer.state, ...failure(answer)], ["failed", code, false], id);
+    const read = await payoutStatus(APP, `r-${id}`);
+    assert.deepEqual([read.state, ...failure(read)], ["failed", code, false], id);
+  }
+  status = "FAILED";
+  reply = { failure_code: "rejected", details: { never_executed: true } };
+  await requestPayout(APP, request("r-unread", "payee.near", "999"));
+  mock.method(api, "getStatus", async () => { throw new Error("provider unreachable"); });
+  const unread = await payoutStatus(APP, "r-unread");
+  assert.deepEqual([unread.state, ...failure(unread)], ["failed", null, false], "an unread status claims nothing and still answers");
+  mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, status: "SUCCESS", failure_code: "rejected", details: { never_executed: true } }));
+  assert.deepEqual(failure(await payoutStatus(APP, "r-unread")), [null, false], "a provider answer that disagrees with the journal claims nothing");
+  mock.method(api, "getStatus", async () => ({ correlation_id: "op_other", status: "FAILED", failure_code: "rejected", details: { never_executed: true } }));
+  assert.deepEqual(failure(await payoutStatus(APP, "r-unread")), [null, false], "another operation's answer claims nothing");
+});
+
+test("a succeeded or refused request reads no failure, and a settled success reads nothing more from the provider", async () => {
+  const first = await requestPayout(APP, request("r-1"));
+  assert.deepEqual(failure(first), [null, false]);
+  const reads = mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, status }));
+  assert.deepEqual(await requestPayout(APP, request("r-1")), first);
+  assert.deepEqual(await payoutStatus(APP, "r-1"), first);
+  assert.equal(reads.mock.callCount(), 0, "a settled success is answered from the journal");
+  mock.method(api, "getBalances", async () => ({ balances: [] }));
+  assert.deepEqual(failure(await requestPayout(APP, request("r-2"))), [null, false]);
+});
+
+test("the failure fields pass the read's published contract, which still accepts an answer from a platform without them", async () => {
+  status = "FAILED";
+  reply = { failure_code: "rejected", details: { never_executed: true } };
+  await requestPayout(APP, request("r-1"));
+  const read = await createRouterClient(router, { context: { actor: APP } }).payouts.status({ requestId: "r-1" });
+  assert.deepEqual(failure(read), ["rejected", true], "validated by the read's output check on the way out");
+  const older = { requestId: "r-1", state: "failed", status: "FAILED", correlationId: "op_1", code: null };
+  assert.deepEqual(payoutRequestOutput.parse(older), older, "an older platform's answer still parses");
 });

@@ -38,7 +38,8 @@ export function usePayment(id: string, knownPayment: Known) {
   const vote = useQuery({
     ...queries.ownerStatus(approval?.correlationId ?? ""),
     enabled: Boolean(approval),
-    refetchInterval: settled ? false : 4_000,
+    // Submitted, expired and failed are where a vote ends; anything else (unknown included) may still change.
+    refetchInterval: (q) => settled || (q.state.data && ["submitted", "expired", "failed"].includes(q.state.data.stage)) ? false : 4_000,
   });
   const proposal = approval && !accessDenied(proposals.error)
     ? visibleProposals(proposals.data ?? [], access).find(p => p.hash === approval.hash) : undefined;

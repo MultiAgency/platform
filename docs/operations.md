@@ -29,7 +29,10 @@ machine credentials; `.app-access/` holds app service credentials (hashed), owne
 never delete: losing one lets that consent be stored again), held confirm-page actions (`confirm/`, one record per link,
 named by its token's hash, and a `.claim` file once a submission was made; an older build ignores them), DAO requests
 (`dao-requests/`, one record per request a DAO votes on: consent, setup, proposal vote or stop; additive, no migration;
-an earlier build can't read some of them and 0.4.1 never looks, see app access, "Rolling back"), ended consents' records
+an earlier build can't read some of them and 0.4.1 never looks, see app access, "Rolling back"), wallet stops (`wallet-stops/`, one
+record per signed stop, named by its signature's hash; it fixes the stop's cutoff, so never delete one while its text can
+still be sent) and the freezes those stops prepared (`wallet-freezes/`, from 0.5.5, named the same; additive, an earlier
+build never reads them), ended consents' records
 (`consents-ended/`, from 0.5.3) and the access log, one file a month (`access-YYYY-MM.jsonl`, from 0.5.3; earlier builds
 wrote `access.jsonl`). Run `pnpm app-credential check-keys` on a schedule so a removed owner key ends its consents even
 when no call observes it, and `pnpm app-credential archive-consents` (weekly is enough) so ended consents' records leave

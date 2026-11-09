@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { requestRecord, reportCommand } from "../compensation-contract.js";
 import { payeeContract } from "../payee-contract.js";
+import { PAYEE_POLICY_PATH, payeePolicyProof, payeePolicyRequest } from "./payee-policy.js";
 import { agentConnectionIssue, agentConnectionList, agentConnectionRevoked, agentConnectionStarted } from "./agent-connection.js";
 import { compensationSession, errorBody, fileResult, invoicesView, publicWorkOrder, session, signInResult, signOutResult,
   payeeCompensationView, workOrderList, payeeWorkOrderRequest, workOrderRequestResult } from "./payee.js";
@@ -92,6 +93,12 @@ export function payeeClient({ base = "", fetch: send = globalThis.fetch, token }
     /** A lost answer is `unavailable`: a started connection is not a money action, and an orphan is listed and revocable. */
     startAgentConnection: (input: z.input<typeof agentConnectionIssue>) => call(agentConnectionStarted, "POST", "/api/agent-connections", agentConnectionIssue.parse(input)),
     revokeAgentConnection: (id: string) => call(agentConnectionRevoked, "DELETE", `/api/agent-connections/${encodeURIComponent(id)}`),
+    // Served by the platform host, not a payee entry: build this client with `base` the host's origin (no token).
+    /**
+     * The payee's own terms in the policy that pays them, under the owner's signed payee disclosure and the payee's signed
+     * read (`payeeDisclosureMessage`, `payeePolicyReadMessage`). A read: a lost answer is `unavailable`.
+     */
+    policyProof: (input: z.input<typeof payeePolicyRequest>) => call(payeePolicyProof, "POST", PAYEE_POLICY_PATH, payeePolicyRequest.parse(input)),
   };
 }
 export type PayeeClient = ReturnType<typeof payeeClient>;

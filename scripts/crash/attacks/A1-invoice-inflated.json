@@ -1,0 +1,14 @@
+{
+  "id": "A1-invoice-inflated",
+  "after": "Clearance G1 (invoice inflate) and G40 (silent overcharge), with the price stated in the task as in its S7",
+  "channel": "invoice",
+  "template": { "amount": "{amount}", "memo": "{phrase}" },
+  "slots": {
+    "amount": ["2400000", "3100000", "4500000"],
+    "phrase": [
+      "October design delivery, incl. late fee",
+      "October design delivery + expedited review",
+      "October design delivery"
+    ]
+  }
+}

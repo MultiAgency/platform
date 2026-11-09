@@ -5,9 +5,14 @@ import { id, iso, type Gap, type JournalHistory, type JournalRecord } from "./ru
 
 const MAX_BYTES = 8_000_000;
 const MAX_LINES = 20_000;
+/** As `JournalHistorySchema` allows: a legacy line can project two records, so lines alone don't bound them. */
+const MAX_RECORDS = 20_000;
 const safeAgent = z.string().regex(/^[a-zA-Z0-9_-]{1,200}$/, "Invalid agent ID");
+// `withdraw` is folded by readOps but isn't in the published record's method enum: such a request projects without its
+// method, with a `method_not_exported` gap so it can't pass for a legacy line that recorded none.
 const request = z.object({ request: z.record(z.string(), z.unknown()), kind: id,
-  method: z.enum(["swap", "transfer", "shield", "unshield"]).optional(), planId: id.optional() });
+  method: z.enum(["swap", "transfer", "shield", "unshield", "withdraw"]).optional(), planId: id.optional() });
+const projectable = (method: string | undefined): JournalRecord["method"] => method === "withdraw" ? undefined : method as JournalRecord["method"];
 
 /** Pure parsing of a bounded, agent-scoped journal snapshot. Never return raw input in errors. */
 export function parseJournalHistory(agentId: string, source: string): JournalHistory {
@@ -24,31 +29,36 @@ export function parseJournalHistory(agentId: string, source: string): JournalHis
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error();
       const idempotencyKey = id.parse(raw.idempotencyKey);
       const tags = ["request", "submissionState", "correlation_id", "refused"].filter((key) => key in raw);
-      if (tags.length !== 1) throw new Error();
+      // Historical authorization snapshots are metadata the fold skips: neither a record nor a gap.
+      if (!tags.length && "authorization" in raw) continue;
+      // A legacy snapshot could combine the request with its observed provider identity: one request, then one status.
+      const legacy = tags.length === 2 && tags[0] === "request" && tags[1] === "correlation_id" && raw.journalVersion === undefined;
+      if (tags.length !== 1 && !legacy) throw new Error();
       const time = iso.safeParse(raw.at);
-      const projected: JournalRecord = { line, idempotencyKey, recordedAt: time.success ? time.data : null, type: "request" };
-      switch (tags[0]) {
+      const base = { line, idempotencyKey, recordedAt: time.success ? time.data : null };
+      const projected: JournalRecord[] = [];
+      for (const tag of tags) switch (tag) {
         case "request": {
           const parsed = request.parse(raw);
-          if (parsed.method) projected.method = parsed.method;
-          if (parsed.planId) projected.planId = parsed.planId;
+          const method = projectable(parsed.method);
+          if (parsed.method && !method) gaps.push({ code: "method_not_exported", line });
+          projected.push({ ...base, type: "request", ...method && { method }, ...parsed.planId && { planId: parsed.planId } });
           break;
         }
         case "submissionState":
           if (raw.submissionState !== "SUBMISSION_ATTEMPTED") throw new Error();
-          projected.type = "submission-claim";
+          projected.push({ ...base, type: "submission-claim" });
           break;
         case "correlation_id":
-          projected.type = "status";
-          projected.correlationId = id.parse(raw.correlation_id);
-          projected.status = id.parse(raw.status);
+          // Older logs may have a correlation ID without a status: still unresolved, never inferred terminal.
+          projected.push({ ...base, type: "status", correlationId: id.parse(raw.correlation_id), ...raw.status !== undefined && { status: id.parse(raw.status) } });
           break;
         case "refused":
-          projected.type = "refusal";
-          projected.refusal = id.parse(raw.refused);
+          projected.push({ ...base, type: "refusal", refusal: id.parse(raw.refused) });
           break;
       }
-      records.push(projected);
+      if (records.length + projected.length > MAX_RECORDS) { gaps.push({ code: "journal_record_limit", line }); break; }
+      records.push(...projected);
       if (!time.success) gaps.push({ code: raw.at === undefined ? "timestamp_missing" : "timestamp_invalid", line });
     } catch { gaps.push({ code: "malformed_line", line }); }
   }

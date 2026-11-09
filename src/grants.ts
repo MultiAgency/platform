@@ -1,7 +1,7 @@
 import { createGrantCredential, grantCommitment } from "@near-intents-agent-api/sdk";
 
 import { api } from "./api.js";
-import { GRANT_LABELS, type GrantLabel } from "./contract/inputs.js";
+import { DEFAULT_GRANT_MS, GRANT_LABELS, type GrantLabel, MAX_GRANT_MS, MIN_GRANT_MS } from "./contract/inputs.js";
 export { GRANT_LABELS, type GrantLabel };
 import { agentId, saveEnv } from "./env.js";
 import { PublicError } from "./public-error.js";
@@ -38,17 +38,34 @@ async function agentGrantLabel(): Promise<GrantLabel> {
 }
 
 /**
+ * When a new grant ends: the work order's deadline under one, else the owner's `expiresAt` between `MIN_GRANT_MS` and
+ * `MAX_GRANT_MS` ahead (refused outside, never clamped: the owner signs what they asked for), else `DEFAULT_GRANT_MS`.
+ */
+function grantExpiry(expiresAt: string | undefined, until: string | undefined, now = Date.now()) {
+  if (until !== undefined) {
+    if (expiresAt !== undefined && Date.parse(expiresAt) !== Date.parse(until)) throw new PublicError("A work order's grant expires at the order's deadline.");
+    return until;
+  }
+  if (expiresAt === undefined) return new Date(now + DEFAULT_GRANT_MS).toISOString();
+  const at = Date.parse(expiresAt);
+  if (!Number.isFinite(at)) throw new PublicError("Name the grant's expiry as an ISO timestamp.");
+  if (at < now + MIN_GRANT_MS || at > now + MAX_GRANT_MS) throw new PublicError("A grant expires between an hour and 365 days from now.");
+  return new Date(at).toISOString();
+}
+
+/**
  * A fresh grant credential: the token is the agent's secret, the commitment is what the owner signs.
  * A treasury grant's label carries the strategy in force (`strategyLabelSuffix`), so signing it is
  * the owner's approval of that strategy, which the autopilot requires before acting alone.
  */
-export async function grantRequest({ label, suffix, expectedStrategyDigest, requireStrategyReview = false }: { label?: GrantLabel; suffix?: string; expectedStrategyDigest?: string; requireStrategyReview?: boolean } = {}) {
+export async function grantRequest({ label, suffix, expectedStrategyDigest, expiresAt, requireStrategyReview = false }: { label?: GrantLabel; suffix?: string; expectedStrategyDigest?: string; expiresAt?: string; requireStrategyReview?: boolean } = {}) {
   const chosen = label ?? (await agentGrantLabel());
   const order = currentWorkOrder();
   if (order) {
     workOrderInvoice(order, order.payee);
     if (chosen !== "invoices" || suffix !== undefined) throw new Error("A work order requires its invoices grant.");
   }
+  const expires = grantExpiry(expiresAt, order?.until);
   const strategy = chosen === "treasury" ? loadStrategy() : null;
   if (strategy && (requireStrategyReview || expectedStrategyDigest !== undefined)) {
     if (requireStrategyReview && process.env.AUTOPILOT === "on") throw new Error("Turn the schedule off before authorizing a Treasury strategy.");
@@ -65,7 +82,7 @@ export async function grantRequest({ label, suffix, expectedStrategyDigest, requ
       agent_id: agentId(),
       label: full,
       credential: commitment,
-      expires_at: order?.until ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      expires_at: expires,
     } as const,
   };
 }

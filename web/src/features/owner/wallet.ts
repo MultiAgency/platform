@@ -142,6 +142,22 @@ export async function signStopMessage({ message, recipient, nonce }: { message: 
   return { publicKey: signed.publicKey, signature: signed.signature };
 }
 
+/**
+ * Signs the provider's intent for a freeze the stop prepared, with the stop page's wallet, exactly as generated. A NEP-366
+ * intent needs a wallet that signs delegate actions, which a message-only wallet the page also lists doesn't.
+ */
+export async function signStopIntent(intent: Intent) {
+  const { wallet } = await stopper.connector.getConnectedWallet();
+  if (intent.standard === "nep366" && !wallet.manifest.features?.signDelegateActions)
+    throw new Error("This wallet doesn't sign delegate actions (NEP-366), which the provider's freeze is. Connect the owner's account with a wallet that does, then sign the freeze.");
+  return signWith(wallet, intent);
+}
+/** Connects another wallet on the stop page, for a freeze the first one can't sign. */
+export async function switchStopWallet() {
+  await stopper.disconnect().catch(() => undefined);
+  await stopper.connect();
+}
+
 /** Sends a transaction from the signed-in member's own wallet, such as a DAO proposal they file. */
 export const sendAsMember = (transaction: Transaction) => member.send(transaction);
 export const connect = () => owner.connect();
@@ -173,7 +189,11 @@ export async function ownerWallet() {
 
 /** Signs an owner intent's payload exactly as the API generated it, by the standard it chose. */
 export async function signIntent(intent: Intent): Promise<Record<string, unknown>> {
-  const { wallet } = await owner.connector.getConnectedWallet();
+  return signWith((await owner.connector.getConnectedWallet()).wallet, intent);
+}
+
+type ConnectedWallet = Awaited<ReturnType<NearConnector["getConnectedWallet"]>>["wallet"];
+async function signWith(wallet: ConnectedWallet, intent: Intent): Promise<Record<string, unknown>> {
   switch (intent.standard) {
     case "nep413": {
       const { publicKey, signature } = await wallet.signMessage({ ...intent.payload, nonce: fromBase64(intent.payload.nonce) });
