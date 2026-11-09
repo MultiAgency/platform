@@ -198,7 +198,14 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 - what the provider answers for a DAO-owned hosted agent
 
 **Before starting**
-- **Staging runs 0.5.4's `platform` package.** Since 2026-11-08 (checked at 22:05Z): candidate `2d8d30d6`, commit
+- **Staging runs commit `96a0bb6`'s `platform` package.** Since 2026-11-09 (checked at 16:17Z): candidate `49e3ead8`,
+  Railway deployment `46380681`, image `sha256:7526873d…` (base `node:24.22.0-slim`), with
+  `deploy/platform-staging.json`. It brings #45 (`treasury/get` reads a DAO's confidential setting from chain), #44
+  (reads close a proposal whose agent or strategy changed) and #43 (a vote on a proposal that ended answers
+  `proposal_not_open`). The platform smoke checks passed (18 of 18), and its confirm page's 6 assets were each fetched
+  and byte-equal to the package's. On it, treasury.dev's DAO vote on an invalidated proposal, refused once a minute
+  before, read `ended` at 16:06Z and stopped.
+- **Before that, 0.5.4's `platform` package.** Since 2026-11-08 (checked at 22:05Z): candidate `2d8d30d6`, commit
   `f2c7b7f`, Railway deployment `e6e6e9f1`, image `sha256:3285a695…` (base `node:24.22.0-slim`), with
   `deploy/platform-staging.json` (the gateway signs for `api.dev.multiagency.ai`); its three hosted agents started. The
   platform smoke checks passed (18 of 18), and its confirm page's 6 assets were each fetched and byte-equal to the
