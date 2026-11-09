@@ -151,6 +151,12 @@ const scenarios: Record<string, (world: World) => Promise<unknown[]>> = {
     const ask = () => world.call("payouts/request", { requestId: "r-1", asset: ASSETS.USDC, delivery: "intents", recipient: PAYEE, amount: usdc(1), expectedPolicy: reviewed });
     return [seen(await ask()), seen(await ask()), seen(await world.call("payouts/status", { requestId: "r-1" }))];
   },
+  "a request that opts out of the duplicate check is held beside an equal one": async world => {
+    const reviewed = world.reviewedPolicy();
+    const ask = (requestId: string, optOut: boolean) => world.call("payouts/request", { requestId, asset: ASSETS.USDC, delivery: "intents", recipient: PAYEE, amount: usdc(1), expectedPolicy: reviewed,
+      ...(optOut && { allowDuplicateHeld: true }) });
+    return [seen(await ask("r-1", false)), seen(await ask("r-2", false)), seen(await ask("r-3", true))];
+  },
   "the balance less held payouts, a duplicate held payout and the per-transaction cap": async world => {
     world.setBalance(ASSETS.USDC, usdc(50));
     const reviewed = world.reviewedPolicy();

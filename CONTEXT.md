@@ -407,7 +407,9 @@ page with no app, that ends every consent for its agent given before the stop is
 filed by then) and turns its autopilot off; consents the DAO gives after it applied stay live. The DAO parts are
 offline- and stack-tested; setup, creation, consent, the grant and the stop are mainnet-observed on platform staging
 (2026-11-04). A **wallet stop** is the same for a wallet owner: one NEP-413 signature over a canonical text, sent
-from the platform's stop page or any tool, for one agent or every agent the wallet owns on the host (offline-tested).
+from the platform's stop page or any tool, for one agent or every agent the wallet owns on the host (offline-tested). A
+wallet stop whose text says `"freeze":true` also has the platform prepare each agent's freeze, an **owner intent** the
+owner's wallet signs on the stop page and the agent submits (offline- and browser-tested; unfreezing isn't offered there).
 Revocable by the deployment or the operator, and an owner's consents by their own stop; a
 revocation is a permanent tombstone. A wallet's consent is offline- and stack-tested and mainnet-observed on platform
 staging (2026-10-28); not in production. See docs/app-access.md.
@@ -462,6 +464,9 @@ at most 16 Organization agents per host.
 An app's setup reserves that deployment and Organization's own agent per owner and area, reachable only by that deployment
 for that Organization; self-service setups stay per owner and area. Offline- and stack-tested; mainnet-observed on
 platform staging (2026-10-28); not in production.
+A lost setup reply is recovered by sending the same signed setup until it expires (it answers the same agent and setup
+consent), and afterwards by reading the deployment's own reservations for the Organization (`GET /apps/v1/agents`), by
+owner and area; an expired setup is never accepted again. Offline-tested.
 
 
 **External plan**:

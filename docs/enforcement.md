@@ -373,7 +373,8 @@ with the same payee, asset and amount only while the first is held. Once it has 
 invoice is a new payout, held for the owner's vote; the vote's text names no payee or amount (see app access). In the
 crash test, each "pay again" lie (failed, pending, an `unknown` urging a new `requestId`, a reissued invoice) gave a
 gullible scripted agent a second 2 USDC payout when the owner approved every held payout. The owner's vote is the only
-check left; nothing here measures owners.
+check left; nothing here measures owners. A request that opts out of the duplicate check (`allowDuplicateHeld`,
+0.5.5) is in the same position while the first is still held.
 
 ## Local presentation limits
 
@@ -1009,8 +1010,14 @@ Limits:
     swaps still pass the guarded send path.
   - Owner actions already waiting for the DAO's vote (a grant, a freeze) still take effect if that vote passes.
 - **A wallet owner's own stop** (`/confirm/wallet/stop`, [app access](app-access.md)) does the same for agents a
-  wallet owns, signed by the owner's full-access key with no app, and has the DAO stop's limits above. Freezing still
-  needs an app to prepare `agent_freeze`, so a wallet owner without an app has no "no new sends" stop on the platform.
+  wallet owns, signed by the owner's full-access key with no app, and has the DAO stop's limits above. From 0.5.5 the
+  same page also offers the freeze, the one control that stops every send: a stop text ending `"freeze":true` has the
+  platform prepare each named agent's `agent_freeze` through that agent's own `owner/prepare`, the owner's wallet signs
+  the provider's intent on the page, and the platform checks that signature against the held intent before forwarding it
+  to the agent's `owner/submit`, where the provider verifies it. Only the signed stop authorizes it, and the page hands
+  out only a NEP-366 intent calling `freeze_wallet` (or a NEP-413 text) for the owner's account. The freeze intent is
+  signable for 600 s (Limits above); unfreezing isn't offered there. Offline- and browser-tested with a stand-in
+  wallet; no freeze is recorded on mainnet ([app access](app-access.md)).
   It ends the consents stored by its cutoff, and after it a consent or setup for those agents is stored only if the
   platform issued its NEP-413 nonce after the cutoff ([app access](app-access.md)), so one the owner signed before the
   stop and an app sends later is refused. Apps that pick their own nonces keep working until the owner's first stop;

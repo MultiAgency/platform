@@ -21,6 +21,7 @@ import { AuthorityUnanswered, chainDaoOwner, type DaoOwnerReads, resolveDaoAutho
 import { forwardRpc } from "./rpc-proxy.js";
 import { issueNonce, nonceIssuedAt } from "./consent-nonce.js";
 import { walletStopCutoff } from "./wallet-stop.js";
+import { setupRequest } from "./hosted-agents.js";
 
 const ROOT = ".app-access";
 const credentials = new AppCredentials(ROOT), consents = new AppConsents(ROOT);
@@ -31,6 +32,9 @@ const mayUse = hourlyLimit(DEFAULT_REQUESTS_PER_HOUR);
 const publicConsent = ({ message: _m, nonce: _n, signature: _s, ...record }: ConsentRecord) => record;
 
 const FOLLOW_CREATION = new Set(["owner/status", "owner/actions", "owner/pending"]);
+/** `GET /apps/v1/agents`: an Organization's reservations, narrowed by the owner and area a setup names. */
+const reservationQuery = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+  owner: setupRequest.shape.owner.optional(), area: setupRequest.shape.area.optional() });
 const daoConsentFiling = z.strictObject({ message: z.string().min(1).max(2_048) });
 const daoVoteFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), agent: z.string().regex(/^[a-z0-9-]{1,32}$/),
   proposal: z.string().min(1).max(128), verdict: z.enum(["approve", "reject"]) });
@@ -157,6 +161,22 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     const consent = covering.reduce((best, c) => c.expiresAt > best.expiresAt ? c : best);
     return { agent, authority, consent, live: covering.map(c => c.id) };
   };
+
+  // The agents this deployment's setups reserved for an Organization, as the registry records them: how an app whose
+  // setup reply was lost learns the name once the signed setup has expired. Only reservations it caused; no chain read.
+  if (pathname === "/apps/v1/agents") {
+    if (req.method !== "GET") { json(res, 405, { code: "invalid_request", error: "Use GET" }); return true; }
+    const query = reservationQuery.safeParse(Object.fromEntries(url.searchParams));
+    if (!query.success) { json(res, 400, { code: "invalid_request", error: "Name the organization, and optionally the owner and area (treasury or payables)." }); return true; }
+    const { organization, owner, area } = query.data;
+    const agents = selected.flatMap(a => {
+      const scope = a as AgentEntry & { deployment?: string; organization?: string };
+      return scope.deployment === credential.deployment && scope.organization === organization && a.area !== undefined
+        && (owner === undefined || a.owner === owner) && (area === undefined || a.area === area)
+        ? [{ agent: a.name, organization, owner: a.owner, area: a.area }] : [];
+    });
+    json(res, 200, { agents }); return true;
+  }
 
   // What the owner signs names the agent's current provider ID, so the app reads it here first.
   const identity = pathname.match(/^\/apps\/v1\/agents\/([a-z0-9-]{1,32})$/);

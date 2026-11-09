@@ -187,6 +187,13 @@ test("a payout repeating a held payout's recipient, asset and amount is refused;
   assert.equal(code("invoice", pay()), "ok");
 });
 
+test("a payout request may opt out of the duplicate check only; every other check still applies", () => {
+  const heldPayouts = [{ recipient: "payee.near", asset: ASSETS.USDC, amount: USDC(1) }];
+  assert.equal(code("payout", pay(), { heldPayouts, allowDuplicateHeld: true }), "ok");
+  assert.equal(code("payout", pay(), { heldPayouts, allowDuplicateHeld: true, available: "0" }), "insufficient_balance");
+  assert.equal(code("payout", pay("stranger.near"), { heldPayouts, allowDuplicateHeld: true }), "payee_not_agreed");
+});
+
 test("a plan's send is refused once anything it was previewed under has changed", () => {
   const leg = { type: "swap" as const, from: ASSETS.wNEAR, to: ASSETS.USDC, amount: NEAR(1), amountOut: USDC(2), minAmountOut: String(1_960_000), costBps: 200 };
   const plan = { id: "p", source: "rebalance", createdAt: new Date(NOW - 60_000).toISOString(), expiresAt: new Date(NOW + 60_000).toISOString(),

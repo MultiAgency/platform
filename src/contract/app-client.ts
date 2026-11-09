@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import { retryAfterSeconds } from "./retry-after.js";
-import { appAgent, appConsentList, appConsentNonce, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
+import { appAgent, appConsentList, appConsentNonce, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appReservations, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
 import type { appConsentSubmission } from "./app-consent.js";
 import { ownerClient, type OwnerCallOptions, type OwnerFailure, type OwnerOutput, type OwnerProcedure, type OwnerResult } from "./owner-client.js";
 import type { ownerStreams } from "./owner-outputs.js";
@@ -98,6 +98,14 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
   return {
     /** The agent's owner and current provider ID (`agentId`, null until created): what a consent must name. */
     identity: (agent: string, options?: AppRouteOptions) => route(`/agents/${encodeURIComponent(agent)}`, appAgent, {}, options),
+    /**
+     * The hosted agents this deployment's setups reserved for an Organization, narrowed by owner and area: how to learn
+     * an agent's name when a setup's reply was lost and the signed setup has since expired (until then, sending the same
+     * setup again answers the same agent and consent). Nothing is reserved or signed. Gateways before 0.5.5 answer
+     * `refused` 404.
+     */
+    reservations: (query: { organization: string; owner?: string; area?: "treasury" | "payables" }, options?: AppRouteOptions) =>
+      route(`/agents?${new URLSearchParams(Object.entries(query).filter((e): e is [string, string] => e[1] !== undefined))}`, appReservations, {}, options),
     /** A wallet owner's signed setup text: reserves the hosted agent and returns its setup consent. */
     setup: (submission: AppConsentSubmission, options?: AppRouteOptions) => route("/setup", appSetupStored, post(submission), options),
     consents: {

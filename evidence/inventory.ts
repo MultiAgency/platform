@@ -205,7 +205,7 @@ export const PROTOTYPES: Record<Kind, { name: string; tagline: string; briefs: [
             stoppedBy: "nothing",
             known: "not-yet",
             evidence:
-              "Not built: campaign winner identity and prize validation. Offline tests cover only a manual payout matching the recipient, asset and amount of an existing held payout (test/authorize.test.ts). Provider replay deduplication is unverified.",
+              "Not built: campaign winner identity and prize validation. Offline tests cover only a manual payout matching the recipient, asset and amount of an existing held payout (test/authorize.test.ts), unless the request opts out (allowDuplicateHeld, 0.5.5). Provider replay deduplication is unverified.",
           },
           {
             type: "guarantee",

@@ -180,6 +180,11 @@ export const appConsentList = z.looseObject({ consents: z.array(appConsentView) 
 export const appConsentStored = z.looseObject({ consent: appConsentView });
 /** `POST /apps/v1/setup`: the hosted agent's name and its setup consent (agent ID `unborn`). */
 export const appSetupStored = z.looseObject({ agent: z.string(), consent: appConsentView });
+/**
+ * `GET /apps/v1/agents?organization=`: the hosted agents this deployment's setups reserved for that Organization (one per
+ * owner and area), narrowed by `owner` and `area`. How an app whose setup reply was lost learns the agent's name.
+ */
+export const appReservations = z.looseObject({ agents: z.array(z.looseObject({ agent: z.string(), organization: z.string(), owner: z.string(), area: z.string() })) });
 export const appRevoked = z.looseObject({ revoked: z.literal(true) });
 /** A NEP-413 nonce (32 bytes, base64) the platform issued this deployment, and when (ms). */
 export const appConsentNonce = z.looseObject({ nonce: z.string(), issuedAt: z.number() });

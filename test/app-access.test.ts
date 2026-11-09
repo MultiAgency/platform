@@ -971,6 +971,55 @@ test("a setup stores no consent when access ends or a stop begins while its agen
   assert.equal(new AppConsents(".app-access").list({}).length, 0, "nothing stored");
 });
 
+test("a setup whose reply was lost: the same signed setup answers the same agent until it expires; afterwards the deployment finds the agent it reserved by Organization, owner and area", async t => {
+  const { port, agent, state, staging, production } = await routeHarness(t);
+  Object.assign(agent, { deployment: "staging", organization: "org_1" });
+  state.providerId = null;
+  const reserved: string[] = [];
+  let stopDuring = true;
+  // A gateway that dies between reserving and storing leaves the reservation and no consent, like a stop begun meanwhile.
+  state.setup = async input => { reserved.push(input.owner); if (stopDuring) state.stopping = true; return agent; };
+  const body = await signed(setupMessage(setupFields()));
+  assert.equal((await call(port, "/apps/v1/setup", "POST", staging, body)).status, 503, "reserved, then the reply was lost");
+  assert.equal(new AppConsents(".app-access").list({}).length, 0, "and no setup consent names the agent");
+  state.stopping = false; stopDuring = false;
+  const again = await call(port, "/apps/v1/setup", "POST", staging, body);
+  assert.deepEqual([again.status, again.body.agent], [201, "payout"], "the same signed setup answers the same reservation");
+  const once = await call(port, "/apps/v1/setup", "POST", staging, body);
+  assert.deepEqual([once.body.agent, once.body.consent.id], ["payout", again.body.consent.id], "and the same setup consent");
+  assert.deepEqual(reserved, ["owner.near", "owner.near", "owner.near"], "each found the one reservation (the registry returns it again)");
+
+  const expired = Date.parse(JSON.parse(body.message).expiresAt) + 60_000;
+  t.mock.method(Date, "now", () => expired);
+  const late = await call(port, "/apps/v1/setup", "POST", staging, body);
+  assert.deepEqual([late.status, late.body.code], [400, "invalid_request"], "an expired setup reserves and answers nothing");
+  assert.equal(reserved.length, 3, "nothing reserved for it");
+  new AppConsents(".app-access").archive(expired + 31 * 86_400_000);
+  assert.deepEqual((await call(port, "/apps/v1/consents?organization=org_1", "GET", staging)).body.consents, [], "its setup consent archived, no consent names the agent");
+
+  const find = (query: string, token = staging) => call(port, `/apps/v1/agents?${query}`, "GET", token);
+  const found = await find("organization=org_1&owner=owner.near&area=payables");
+  assert.equal(found.status, 200, JSON.stringify(found.body));
+  assert.deepEqual(found.body, { agents: [{ agent: "payout", organization: "org_1", owner: "owner.near", area: "payables" }] });
+  assert.deepEqual((await find("organization=org_1")).body.agents.map((a: { agent: string }) => a.agent), ["payout"], "owner and area narrow it");
+  for (const query of ["organization=org_1&owner=other.near", "organization=org_1&area=treasury", "organization=org_2"])
+    assert.deepEqual((await find(query)).body, { agents: [] }, query);
+  assert.deepEqual((await find("organization=org_1", production)).body, { agents: [] }, "another deployment's reservations are never listed");
+  Object.assign(agent, { deployment: undefined, organization: undefined });
+  assert.deepEqual((await find("organization=org_1")).body, { agents: [] }, "nor an agent no app set up");
+  for (const query of ["", "organization=", "organization=org_1&area=invoices", "organization=org_1&owner=Bad%20Owner"])
+    assert.deepEqual([(await find(query)).status, (await find(query)).body.code], [400, "invalid_request"], query);
+  assert.equal((await call(port, "/apps/v1/agents?organization=org_1", "POST", staging, {})).status, 405);
+  assert.equal((await call(port, "/apps/v1/agents?organization=org_1", "GET")).status, 401);
+
+  Object.assign(agent, { deployment: "staging", organization: "org_1" });
+  const client = appClient({ base: `http://127.0.0.1:${port}`, credential: staging, fetch: httpFetch });
+  const typed = await client.reservations({ organization: "org_1", owner: "owner.near", area: "payables" });
+  assert.deepEqual(typed.ok && typed.value.agents.map(a => [a.agent, a.area]), [["payout", "payables"]], "the SDK reads the same, typed");
+  const bad = await client.reservations({ organization: "org 1" });
+  assert.deepEqual(bad.ok === false && [bad.kind, "code" in bad && bad.code], ["refused", "invalid_request"]);
+});
+
 test("under a wallet's consent, read reaches account and reconcileBooks, treasury reaches the link and a tick, and no scope reaches setup, recover or fund", async t => {
   const { port, forwarded, staging, rpc, consent } = await routeHarness(t);
   assert.equal((await consent({ scopes: ["owner"] })).status, 201);

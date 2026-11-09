@@ -33,6 +33,13 @@ its own tests. Until a production host does, build against the SDK repository's 
 (`pnpm test:e2e:stack --app <deployment>`). Use only `/apps/v1` and the confirm page on the platform's host: it serves
 nothing else (no sign-in or owner page), and setup there is for Payables agents only.
 
+The local stack serves HTTPS with its own self-signed certificate, written to `<stack dir>/environment/localhost.crt`
+(the stack prints `<stack dir>/state.json` when ready). Trust that certificate only, never turn verification off. In
+Node, start your server with `NODE_EXTRA_CA_CERTS=<stack dir>/environment/localhost.crt`, as the platform's own
+end-to-end tests do. In Bun, pass `appClient` a `fetch` that adds Bun's `tls.ca` option:
+`fetch: (input, init) => fetch(input, { ...init, tls: { ca: caPem } })`, where `caPem` is that file's text. Covenant
+runs on the stack this way.
+
 ## Setup
 
 ```ts
@@ -133,6 +140,9 @@ To stop quickly:
   new consent. It doesn't cancel a call already forwarded.
 - Relay `agent_freeze` for the owner: it opens the confirm page, and the owner must sign there before the link expires
   (minutes). `agent_unfreeze` releases it the same way; `approval_vote` is only for held payouts.
+- A wallet owner can also stop and freeze without you, on the platform's page `https://<host>/confirm/wallet/stop/<agent>`
+  (platform 0.5.5): it ends every app's consent for the agent and, if the owner ticks the freeze, has their wallet sign
+  the provider's freeze there. Link to it rather than building your own; unfreezing is still yours to relay.
 - Treat anything `executing`, `processing` or `unknown` as possibly sent: neither step undoes it. Whether a freeze or a
   revoked grant stops a payout the provider already holds is not established
   ([enforcement](https://github.com/MultiAgency/platform/blob/main/docs/enforcement.md)).
@@ -154,6 +164,13 @@ payees, naming the key that signed the setup. Then read `identity` until it is c
 consent naming its `agentId`. `already_created` means it already exists (ask for a consent); `setup_failed` says why
 it couldn't be set up (for example the deployment's agent limit on the host); `unavailable` means a check went
 unanswered: submit the same body again.
+
+**Lost setup reply.** Until the setup's `expiresAt`, submit the same signed body again: it answers the same agent and
+the same setup consent, and reserves nothing new. After it expires the platform refuses the body; ask
+`app.reservations({ organization, owner, area })` instead, which lists the agents your deployment's setups reserved for
+that Organization (only yours, nothing reserved or signed). It also names the agent after `already_created`. Then read
+`identity`: if the agent isn't created yet, the owner signs a new setup, which finds the same agent. A platform before
+0.5.5 answers `refused` 404.
 
 ## A DAO owner: every signature is the DAO's vote
 
@@ -292,7 +309,9 @@ repeating them is refused before sending (`state: "refused"`, `code: "duplicate_
 `requestId`. It keeps one payout from being held, and then paid, twice. Keep at most one open request per recipient,
 asset and amount until the owner votes on it; send the next once the held one is approved or rejected, under a new
 `requestId`. Don't change an amount or recipient to get past it: a payout the owner meant twice is asked for twice, in
-turn.
+turn. If your `requestId`s already make each payout unique (one per deliverable, say), send `allowDuplicateHeld: true`
+(0.5.5) and equal payouts may wait side by side; the owner then votes on each, and nothing else tells them apart, so
+show the owner what each one is for. A platform before 0.5.5 ignores the field and keeps refusing.
 
 Ask only for an agreed payee: `overview`'s `agreed` lists them. A request to anyone else is refused before anything is
 sent (`payee_not_agreed`). A request without a live `payout` (or `invoices`) grant is refused `grant_purpose_denied`,

@@ -100,6 +100,12 @@ export const payoutRequestInput = z.object({
   recipient: z.string().trim().min(1).max(80),
   amount: units,
   expectedPolicy: reviewedPolicy,
+  /**
+   * Opt out of `duplicate_held_payout`, the refusal of a payout repeating the recipient, asset and amount of one already
+   * held for the owner (0.5.5). For callers whose requestIds already make each payout unique: each held payout still needs
+   * the owner's vote. An older platform ignores it and keeps refusing.
+   */
+  allowDuplicateHeld: z.literal(true).optional(),
 }).superRefine((input, ctx) => {
   const valid = input.delivery === "intents" ? validIntentsAccount(intentsAccount(input.recipient))
     : !isNearcomAddress(input.recipient) && validIntentsAccount(input.recipient);

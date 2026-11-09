@@ -57,7 +57,7 @@ const find = (key: string) => readOps().find((op) => op.idempotencyKey === key);
  * same `requestId`, it refuses before anything is sent.
  */
 export async function requestPayout(actor: string | undefined, input: { requestId: string; asset: string; delivery: "intents" | { chain: string };
-  recipient: string; amount: string; expectedPolicy: ReviewedPolicy }) {
+  recipient: string; amount: string; expectedPolicy: ReviewedPolicy; allowDuplicateHeld?: true }) {
   const key = requestKey(callerOf(actor), input.requestId);
   // A withdrawal goes only to chain `near`; any other chain is refused before anything is recorded. Which assets and
   // payees are allowed is `authorize`'s decision, recorded like any refusal.
@@ -78,7 +78,8 @@ export async function requestPayout(actor: string | undefined, input: { requestI
   if (recorded()) return answer(input.requestId, recorded());
   try {
     // A request recorded meanwhile can't be recorded again: the journal refuses a second preparation of one key.
-    await withMoneyLock((lock) => dispatch(lock, "payout", terms, undefined, undefined, input.expectedPolicy, key));
+    await withMoneyLock((lock) => dispatch(lock, "payout", terms, undefined, undefined, input.expectedPolicy, key,
+      { allowDuplicateHeld: input.allowDuplicateHeld === true }));
   } catch (error) {
     // Recorded: the journal holds the outcome (a refusal, or none proven). Not recorded: nothing reached the send site,
     // and a refusal made before recording keeps its code, so the same requestId can be asked again.

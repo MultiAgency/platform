@@ -80,7 +80,7 @@ These are catalog targets, not established guarantees. Evidence stages describe 
 | Capability target | A winners list is paid in one auditable batch | — | Not yet | Not built: each award is its own invoice and vote |
 | Capability target | Recurring disbursements run as scheduled, individually budgeted transfers | — | Not yet | Not built |
 | Capability target | Refund waves use the same mechanics | — | Not yet | Not built |
-| Safety target | A duplicate winner or inflated prize can't pay twice | Nothing yet | Not yet | Not built: campaign winner identity and prize validation. Offline tests cover only a manual payout matching the recipient, asset and amount of an existing held payout (test/authorize.test.ts). Provider replay deduplication is unverified. |
+| Safety target | A duplicate winner or inflated prize can't pay twice | Nothing yet | Not yet | Not built: campaign winner identity and prize validation. Offline tests cover only a manual payout matching the recipient, asset and amount of an existing held payout (test/authorize.test.ts), unless the request opts out (allowDuplicateHeld, 0.5.5). Provider replay deduplication is unverified. |
 | Safety target | A payout outside the campaign's list is refused | Nothing yet | Not yet | Not built: payees are the policy's agreed list; there is no campaign list |
 
 <!-- END GENERATED: requirements -->

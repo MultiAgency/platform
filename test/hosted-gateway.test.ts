@@ -126,6 +126,9 @@ for (const sharedHosts of [false, true]) test(`${sharedHosts ? "shared hosts" : 
   const carolEntry = (JSON.parse(readFileSync(join(dir, ".hosted", "apps.json"), "utf8")).entries as { name: string; deployment?: string; organization?: string }[]).find(e => e.name === carolAgent);
   assert.deepEqual([carolEntry?.deployment, carolEntry?.organization], ["staging", "org_1"], "the app's setup reserves an Organization's own agent");
   assert.deepEqual([setupConsentRecord.agentId, setupConsentRecord.scopes], ["unborn", ["owner"]]);
+  const lookup = await dashboard("/apps/v1/agents?organization=org_1&owner=carol.near&area=payables", "fixture.test");
+  assert.deepEqual(await lookup.json(), { agents: [{ agent: carolAgent, organization: "org_1", owner: "carol.near", area: "payables" }] },
+    "a lost setup reply is recovered from the registry, by Organization, owner and area");
   let created: unknown;
   for (let i = 0; i < 150; i++) {
     const identity = await dashboard(`/apps/v1/agents/${carolAgent}`, "fixture.test");

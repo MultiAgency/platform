@@ -102,7 +102,7 @@ export const payoutDouble: PayoutDoubleFactory = (options = {}) => {
   };
 
   function request(input: { requestId: string; asset: string; delivery: "intents" | { chain: string }; recipient: string; amount: string;
-    expectedPolicy: { revision: number; digest: string } }) {
+    expectedPolicy: { revision: number; digest: string }; allowDuplicateHeld?: true }) {
     if (input.delivery !== "intents" && input.delivery.chain !== "near")
       throw refused("chain_not_supported", "Payouts withdraw only to chain near. Nothing was sent.");
     const { recipient, asset, amount } = input;
@@ -131,7 +131,7 @@ export const payoutDouble: PayoutDoubleFactory = (options = {}) => {
     const held = [...journal.values()].filter(isHeld);
     const reserved = held.filter(h => h.request.asset === asset).reduce((sum, h) => sum + BigInt(String(h.request.amount)), 0n);
     const refusal = authorize(action, { purpose: "payout", facts: { now: Date.now(), agentId, view: view() as unknown as Provider["view"], grant: grantHeld as unknown as Provider["grant"],
-      available: (BigInt(balances.get(asset) ?? "0") - reserved).toString(),
+      available: (BigInt(balances.get(asset) ?? "0") - reserved).toString(), allowDuplicateHeld: input.allowDuplicateHeld === true,
       heldPayouts: held.map(({ request: r }) => ({ recipient: String(r.recipient), asset: String(r.asset), amount: String(r.amount) })) } });
     if (refusal) return refuse(refusal.code);
     // The provider: its own destination and action rules, refused under codes the platform can't prove sent nothing.

@@ -121,6 +121,20 @@ test("a payout held for the owner's approval reads as held, then as settled once
   assert.equal(sends.length, 1);
 });
 
+test("two equal payouts may both wait for the owner only when the request opts out of the duplicate check", async () => {
+  status = "PENDING_APPROVAL";
+  assert.equal((await requestPayout(APP, request("r-1"))).state, "held");
+  const repeated = await requestPayout(APP, request("r-2"));
+  assert.deepEqual([repeated.state, repeated.code], ["refused", "duplicate_held_payout"], "the default refuses a repeat of a held payout");
+  const both = await requestPayout(APP, { ...request("r-3"), allowDuplicateHeld: true });
+  assert.equal(both.state, "held", "an opted-out request is held beside the first: each still needs the owner's vote");
+  assert.equal(sends.length, 2);
+  // Through the procedure, the field survives the input schema.
+  assert.equal((await viaProcedure({ ...request("r-4"), allowDuplicateHeld: true })).state, "held");
+  assert.equal(payoutRequestInput.parse({ ...request("r-5"), allowDuplicateHeld: true }).allowDuplicateHeld, true);
+  assert.equal(payoutRequestInput.safeParse({ ...request("r-6"), allowDuplicateHeld: false }).success, false, "only `true` opts out");
+});
+
 test("a request that never reached the send site is not recorded, so its status is not_found and asking again may send", async () => {
   mock.method(api, "getPolicy", async () => { throw new Error("provider unreachable"); });
   await assert.rejects(requestPayout(APP, request("r-1")), /provider unreachable/);

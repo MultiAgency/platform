@@ -80,7 +80,7 @@ export type Sending = { planned: { plan: Plan; leg: PlannedAction } | null; auto
  * status-only reconciliation proves its outcome.
  */
 /** `requestKey`: the operation's identity derived from a caller's request (payout-requests.ts), instead of a new one. */
-export async function dispatch(lock: MoneyLock, kind: string, action: Action, sending?: Sending, preparedKey?: string, expectedPolicy?: ReviewedPolicy, requestKey?: string): Promise<StatusResponse> {
+export async function dispatch(lock: MoneyLock, kind: string, action: Action, sending?: Sending, preparedKey?: string, expectedPolicy?: ReviewedPolicy, requestKey?: string, payout?: { allowDuplicateHeld?: boolean }): Promise<StatusResponse> {
   action = structuredClone(action);
   expectedPolicy = expectedPolicy && { ...expectedPolicy };
   // An approve-only instance never sends: refused before anything is recorded, so nothing is left open.
@@ -181,7 +181,8 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
     : purpose === "treasury"
       ? { purpose, facts: { ...common, plan: sending?.planned ?? null, strategy: loadStrategy(), tokens, cash } }
       : purpose === "payout"
-        ? { purpose, facts: { ...common, available, heldPayouts: held.map(({ request: r }) => ({ recipient: String(r.recipient), asset: String(r.asset), amount: String(r.amount) })) } }
+        ? { purpose, facts: { ...common, available, allowDuplicateHeld: payout?.allowDuplicateHeld === true,
+          heldPayouts: held.map(({ request: r }) => ({ recipient: String(r.recipient), asset: String(r.asset), amount: String(r.amount) })) } }
         : { purpose, facts: { ...common, available } };
   const refusal = authorize(action, judged);
   if (refusal) refuseLocally(refusal.code, refusal.message);

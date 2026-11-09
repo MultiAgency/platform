@@ -81,6 +81,16 @@ ahead, the provider's maximum; `MIN_GRANT_MS`, `MAX_GRANT_MS`). Outside that ran
 before the wallet opens. Per the provider's docs an expired grant authorizes no new sends; not observed on mainnet. A
 new grant leaves earlier ones live until they expire: `grant_revoke` ends one sooner.
 
+A `policy_update` that reads `SUCCESS` says the provider accepted the signed update; whether it is in force is in
+`overview`. Read it until `policy.status` is
+`APPLIED`, `provider_policy_synced` is true and `policy.revision` is above the revision the update was prepared against
+(`expectedPolicy.revision`): checking the revision tells this update's result from an earlier policy still in force.
+Keep reading while it is `SIGNED` or not yet synced (the provider's types list `SIGNED`; a read between signing and
+applying hasn't been observed). Stop on `FAILED`: show the owner the current view and `policyHistory`, and don't
+prepare a new edit by yourself, since a new `policy_update` needs the owner's signature against the current revision.
+While the view reads anything but `APPLIED` and synced, every send is refused `policy_not_in_force`. Whether a failed
+update leaves the view `FAILED` or falls back to the last applied revision is unobserved.
+
 ## Follow a plan execution stream
 
 `executePlan`, `rebalance` and `sweep` are streams. Events are validated one by one; the stream's

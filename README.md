@@ -180,7 +180,9 @@ Each line is a gap; the linked page says how the rest is known. The
   autopilot on again. See [app access](docs/app-access.md).
 - A wallet owner's own stop (no app; `/confirm/wallet/stop`) ends app consents and turns autopilot off for one agent or
   all of the wallet's, offline- and browser-tested with a stand-in wallet, not deployed; signing with a real wallet is untested. It
-  doesn't freeze or revoke the grant: freezing still needs an app to prepare it ([enforcement](docs/enforcement.md)).
+  doesn't revoke the grant. From 0.5.5 it may also freeze the agents, the owner's wallet signing the provider's freeze
+  intent on the page within its 600 s window; no freeze, from this page or any other, is recorded on mainnet, and
+  unfreezing still needs an app or the owner session ([app access](docs/app-access.md)).
 - Agent connections exist only for a contractor's own reports (offline- and stack-tested, not deployed); a token is a
   bearer for at most 24 hours; owner connections aren't built. See
   [agent access](docs/agent-access.md#agent-connections-contractor-reports).
@@ -203,8 +205,8 @@ Each line is a gap; the linked page says how the rest is known. The
   cross-instance lock. Unverified ownership after a cold gateway restart stays denied.
 - Prepared-invoice continuation is offline-tested (`test/invoice-http.test.ts`), not on a deployed host; it refuses
   revised or submission-attempted invoices and doesn't resolve unknown outcomes.
-- The local duplicate check covers only a manual payout matching a held one; provider replay deduplication is
-  unverified.
+- The local duplicate check covers only a manual payout matching a held one, and a payout request may opt out of it
+  (`allowDuplicateHeld`, 0.5.5); provider replay deduplication is unverified.
 - The auto-execute ceiling compares exact decimal sums; raw-amount conversion, valuations and the plan-preview total
   still use floating point. Provider caps and the USD budget are unaffected.
 

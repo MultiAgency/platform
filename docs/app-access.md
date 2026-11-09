@@ -25,6 +25,7 @@ the chain reports removed; exits non-zero if any lookup went unanswered).
 | --- | --- |
 | `GET /apps/v1/agents/<agent>` | `{ agent, owner, agentId, created, host, deployment, signer }`: what the owner's consent must name (`signer` is `wallet` or `dao`; `agentId` null and `created` false before the agent exists) |
 | `POST /apps/v1/setup` with a signed setup text | `201 { agent, consent }`: reserves and starts this owner's hosted agent for the area, and a setup consent (below) |
+| `GET /apps/v1/agents?organization=<org>[&owner=][&area=]` | `{ agents: [{ agent, organization, owner, area }] }`: the hosted agents this deployment's setups reserved for that Organization on this host, from the registry; how an app whose setup reply was lost learns the name (below) |
 | `POST /apps/v1/consent-nonces` | `{ nonce, issuedAt }`: a NEP-413 nonce for the owner to sign the next consent or setup text with (see the wallet stop below) |
 | `POST /apps/v1/consents` with `{ message, nonce, publicKey, signature }` | `201 { consent }`; responses omit the message, nonce and signature, which the record keeps (mode 0600) |
 | `GET /apps/v1/consents[?organization=]` | This deployment's consents on this host |
@@ -51,6 +52,17 @@ the agent exists the setup consent reads `owner/status`, `owner/actions` and `ow
 hour): those cover every owner action of the agent in that time, not only its creation. A setup is refused when the
 owner's agent for that area already exists and is created (409), or when that can't be checked (503); a setup whose
 consent can't be stored (revoked, or the deployment's consent limit reached) reserves nothing.
+**A lost setup reply.** Until the signed setup expires, sending the same body again answers the same agent and the same
+setup consent: the registry returns the existing reservation for that deployment, Organization, owner and area, and a
+consent is stored once per signature (also when the first attempt reserved the agent but stored nothing). Once it has
+expired, `GET /apps/v1/agents?organization=<org>&owner=<owner>&area=<area>` answers the name from the registry. It lists
+only reservations whose recorded scope is the calling deployment and that Organization, which its own setups (or a
+DAO's setup it filed) caused, never another deployment's or an agent no app set up; it makes no chain read and reserves
+or signs nothing. An expired setup text is never accepted again, so nothing new is reserved from it. The same read names
+the agent after an `already_created` refusal. Then read `GET /apps/v1/agents/<agent>` for its identity; a setup consent
+that has expired no longer relays its creation, so the owner signs a new setup (which finds the same reservation) if the
+agent isn't created yet. Offline-tested (`test/app-access.test.ts`) and on a real gateway with a real reservation
+(`test/hosted-gateway.test.ts`); needs a platform on 0.5.5 (an earlier one answers 404).
 The owner then signs an ordinary consent naming the new provider ID. An app's setup reserves that deployment and
 Organization's own agent, per owner and area (`.hosted/apps.json` records the scope), so Organizations sharing an
 owner wallet don't share payees, budget or balance: each policy is signed and provider-enforced. Only that deployment
@@ -241,9 +253,10 @@ Not in production.
 wallet owns.
 - **Signing:** on `/confirm/wallet/stop` (or `/confirm/wallet/stop/<agent>`), part of the confirm build, the owner
   connects the owning wallet (any wallet that signs NEP-413 messages) and signs the canonical text, recipient the host:
-  `{"type":"multiagency.wallet-stop","version":1,"host","owner","agent","expiresAt"}`. `agent` is one agent, or `"*"`
-  for every agent the wallet owns on the host; `expiresAt` is at most an hour away, and the page renews its 10-minute
-  text before it runs out. Anyone may send the signature to `POST /confirm/v1/wallet-stop`
+  `{"type":"multiagency.wallet-stop","version":1,"host","owner","agent","expiresAt"}`, ending `,"freeze":true` when the
+  owner also asks to freeze (below; absent is the only form of not asking, so a stop without it is the text it was
+  before). `agent` is one agent, or `"*"` for every agent the wallet owns on the host; `expiresAt` is at most an hour
+  away, and the page renews its 10-minute text before it runs out. Anyone may send the signature to `POST /confirm/v1/wallet-stop`
   (`{ message, nonce, publicKey, signature }`), so any tool that signs NEP-413 works too; at most 60 sends an hour per
   address.
 - **Checks:** the exact text, this host and the signature; then that the key is a full-access key of the owner now,
@@ -252,9 +265,46 @@ wallet owns.
   revoked, whatever provider ID it names, and each created agent's autopilot is turned off. Sending the same
   stop again only retries an autopilot not yet confirmed off, even after the text's expiry; an agent found replaced or
   owned by someone else by then is reported and not asked.
-- **Limits:** as for a DAO's stop, it only removes authority. The provider grant stands, so an app the owner consents to
-  afterwards may turn autopilot on again, and a tick or forwarded call already running finishes through the guarded
-  send path. A consent the stop revoked can't be sent again (its ID is its signature's hash).
+- **Freeze, signed by the owner's own wallet on this page** (0.5.5): a stop whose text says `"freeze":true` also prepares
+  each created agent's freeze, after the stop has applied. The signed stop is the only authorization: no freeze is
+  prepared for a stop that fails a check above, for an agent the stop didn't name when it first applied, or for one whose
+  server now reports another owner or provider ID (`replaced`, `owner changed`); the freeze can't be added to or taken
+  off a signed text. The gateway asks that agent's own `owner/prepare` for `{ type: "agent_freeze" }` with
+  `signer: "wallet"` (effectless: it only generates the provider's intent, for the agent's own provider ID, and the
+  agent refuses a generated intent of another type), and hands the reply's intent and signer back in the stop's answer
+  unchanged (`freeze: { state: "sign", correlationId, expiresAt, intent, signer }`) only if it is one the owner's wallet
+  signs for that owner: signer the owner's NEAR account, inside its signing window, and, for NEP-366, only
+  `freeze_wallet` calls (the provider's `unfreeze_wallet` checks no more than who signs, so this refuses the swap the
+  confirm page exists for, above). Anything else is logged `wallet-freeze-withheld`, never released, and expires
+  unsigned. Per the provider's docs freeze is NEP-366 (a delegate action); a NEP-413 freeze would be handed back as
+  text the wallet shows. The page asks the owner's wallet to sign exactly that intent (a NEP-366 intent needs a wallet
+  that signs delegate actions; a message-only wallet signs the stop but not the freeze, and the page says so). It
+  posts the signature with the signed stop to `POST /confirm/v1/wallet-stop/freeze` (`{ stop, agent, signedData }`):
+  the gateway re-verifies the stop's signature, finds the freeze that stop prepared for that agent, checks the signature
+  against the held intent and the provider's owner key (`ownerSignatureProblem`, before anything is sent, so a wrong
+  wallet or other bytes reach nothing), records when it first forwarded it, and forwards it to the agent's own
+  `owner/submit` (owner action journal, provider verification, poll-only after an attempt, all unchanged).
+  `POST /confirm/v1/wallet-stop/freeze-status` (`{ stop, agent }`) answers the agent's `owner/status` of it. Sent
+  again, the stop hands back a freeze still within its window, says `submitted` for one sent, and prepares a new one
+  for a lapsed one only while the stop text is unexpired (else `expired`: sign a new stop). Freeze submissions and
+  status reads: at most 600 an hour per address. New state: `.app-access/wallet-freezes/`, one record per stop (named
+  like its stop record), additive inside the preserved `.app-access/`; stop records are unchanged, so a gateway before
+  this change reads them, and refuses a stop text with `"freeze":true` as not canonical.
+  - **What it stops:** a frozen policy isn't in force, so `authorize` refuses every send (`notInForce`, offline-tested),
+    and per OutLayer source the keystore re-checks the freeze on every signature (shared-tee-helpers@f75a74e, deployed
+    version not established, [enforcement](enforcement.md#spending-limits-under-concurrency)). No freeze is recorded in the
+    [mainnet log](mainnet-log.md). Unlike the stop alone, an app the owner consents to later can't send under the grant
+    until the owner unfreezes.
+  - **Window:** the provider's freeze intent is signable for 600 s (provider docs, [enforcement](enforcement.md#dao-owners-through-apps-offline--and-stack-tested)
+    Limits); the page shows its expiry. A freeze signed after it is refused by the agent; the owner sends the same
+    stop again within the stop's hour for a new one.
+  - **Not offered:** unfreezing. The owner unfreezes through an app with `owner` consent (`agent_unfreeze`, on the
+    confirm page) or the owner session; a stop page that also unfroze would hand a stop's signature a power it
+    exists to take away.
+- **Limits:** as for a DAO's stop, the stop itself only removes authority. Without the freeze the provider grant stands,
+  so an app the owner consents to afterwards may turn autopilot on again, and with or without it a tick or forwarded call
+  already running finishes through the guarded send path. A consent the stop revoked can't be sent again (its ID is its
+  signature's hash).
 - **Texts signed before the stop:** after a stop covering an agent (naming it, or every agent), a consent or setup for
   it is stored only if the platform issued its NEP-413 nonce after the stop's cutoff (`POST /apps/v1/consent-nonces`);
   otherwise it is refused `owner_stopped` (409) and nothing is stored (under a stop for every agent, a setup is refused
@@ -267,7 +317,14 @@ wallet owns.
 - **How it's known:** offline-tested (`test/wallet-stop.test.ts`), on a headless gateway process for the route and the
   chain key check (`test/platform-host.test.ts`), and in a browser with a stand-in wallet (`test/browser/wallet-stop.cjs`:
   the shown text is canonical and is what the wallet signs and the page sends; a retry resends it; a page left open
-  renews it; a message-only wallet is offered). Signing with a real wallet is untested. Not deployed.
+  renews it; a message-only wallet is offered; asked to freeze, the text says so, the wallet signs exactly the intent the
+  stop handed back, and the page submits it with the signed stop and reads its status; a message-only wallet can't sign
+  the freeze and nothing is sent). The freeze's gateway routes are offline-tested against agent servers on loopback
+  (`test/wallet-stop.test.ts`: only the owner's full-access key gets one prepared, only `agent_freeze` is asked of each
+  agent's own `owner/prepare`, a reply that isn't the owner's `freeze_wallet` is withheld, a wrong key, an unfreeze or
+  another agent's bytes are refused before `owner/submit`, and the owner's signature reaches `owner/submit` and
+  `owner/status` unchanged). Neither this page's freeze nor any freeze is recorded in the [mainnet log](mainnet-log.md).
+  Signing with a real wallet is untested. Not deployed.
 
 **A payee's own terms, with no app** (`src/gateway/payee-policy.ts`, platform#51): a payee reads the part of the
 agent's policy that concerns them straight from the platform host, so an app (Covenant's contractor Verify page, say)
@@ -349,7 +406,11 @@ asked for doesn't make it another payout. The refusal is recorded, so that `requ
 payment is no longer waiting (approved or rejected), the same terms go through under a new `requestId`. The rule keeps
 one payout from being held, and then approved and paid, twice: it is one of the checks the provider can't make (the
 provider's replay deduplication is unverified; README, "Not done yet"), and the only offline-tested part of the
-[facilitator](facilitator.md)'s "can't pay twice" target. It stays as is (#50). An app keeps at most one open request
+[facilitator](facilitator.md)'s "can't pay twice" target. It stays the default (#50). A payout request may opt out with
+`allowDuplicateHeld: true` (0.5.5), for an app whose `requestId`s already make each payout unique: it is then held beside
+an equal one, and the owner's vote is the only check between them, as after the first settles (see enforcement,
+"A second payout after the first settled"). Every other check still applies, and an older platform ignores the field
+and keeps refusing (`test/authorize.test.ts`, `test/payout-requests.test.ts`, `test/payout-double.test.ts`). An app keeps at most one open request
 per recipient, asset and amount until the owner votes on it, and asks for a repeat payout after the first is approved
 or rejected; it never varies an amount or recipient to get past the rule. Offline-tested (`test/authorize.test.ts`,
 `test/authorization.test.ts`) and stack-tested (`test/e2e/app-access.spec.mjs`).

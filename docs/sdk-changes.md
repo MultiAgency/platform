@@ -14,6 +14,22 @@ platform-only fixes are listed separately.
 
 ## 0.5.5 (unreleased)
 
+- **Docs** (no code change): the owner-workflows skill says how to follow a `policy_update` after `SUCCESS` (read
+  `overview` until `APPLIED`, synced and above the prepared revision; keep reading on `SIGNED`; stop on `FAILED`). The
+  app-server skill says how a Node or Bun server trusts the local stack's self-signed certificate.
+- **Recovering a lost setup reply** (addition; Covenant, MultiAgency/demo#6): `appClient(...).reservations({ organization,
+  owner?, area? })` (`GET /apps/v1/agents?organization=`, `appReservations`) lists the hosted agents this deployment's
+  setups reserved for that Organization, with each one's owner and area. An app whose `setup` reply was lost learns its
+  agent's name this way once the signed setup has expired; before that, sending the same body again already answers the
+  same agent and setup consent (now tested). It lists only the calling deployment's reservations, makes no chain read,
+  and reserves or signs nothing; setup itself is unchanged and an expired setup is still refused. A platform before
+  0.5.5 answers `refused` 404. Offline-tested (`test/app-access.test.ts`, `test/hosted-gateway.test.ts`).
+- **A payout request may opt out of `duplicate_held_payout`** (addition, platform#50): `payouts/request` accepts
+  `allowDuplicateHeld: true`. Such a request skips only the refusal of a payout repeating the recipient, asset and amount
+  of one already held for the owner; every other check applies, and each held payout still needs the owner's vote, which
+  is then the only check between equal ones. For apps whose `requestId`s already make each payout unique. Absent, nothing
+  changes. A platform before 0.5.5 drops the field and keeps refusing. `payoutDouble` honours it. Offline-tested
+  (`test/authorize.test.ts`, `test/payout-requests.test.ts`, `test/payout-double.test.ts`).
 - **A provider refusal while preparing an owner action is `provider`, not `unknown`** (reclassification, platform#54):
   `owner/prepare`'s only provider write is `generate-intent`, which executes nothing until the owner signs and
   `owner/submit` sends it, and nothing is recorded before it. So any provider failure there now reaches the app or owner
@@ -114,6 +130,16 @@ platform-only fixes are listed separately.
   ([app access](app-access.md)). Offline-tested; needs a platform on this version.
 
 Platform changes in this release, outside the package:
+- **A wallet owner's stop may also freeze the agent** (the platform's own page, no app): a stop text ending
+  `,"freeze":true` (absent is not asking; older texts are unchanged) has the platform prepare each created agent's
+  `agent_freeze` through that agent's own `owner/prepare` (signer `wallet`) once the stop applies, and hand back the
+  provider's intent unchanged, only if it is the owner's and, for NEP-366, calls only `freeze_wallet`. The owner's wallet
+  signs it on `/confirm/wallet/stop`; `POST /confirm/v1/wallet-stop/freeze` (`{ stop, agent, signedData }`) checks the
+  signature against the held intent and forwards it to the agent's `owner/submit`, and `/freeze-status` answers its
+  `owner/status`. The signed stop is the only proof of ownership. The freeze is signable for 600 s (provider docs);
+  unfreezing isn't offered there. New state: `.app-access/wallet-freezes/` (additive; stop records unchanged, so rolling
+  back leaves the stop working and refuses only freezing texts). Offline-tested against agent servers on loopback and
+  browser-tested with a stand-in wallet; signing with a real wallet untested; not deployed ([app access](app-access.md)).
 - **The local stack's simulator issues a `payout` grant and refuses what it doesn't model** (platform#54): an agent the
   owner created (an app's hosted payout agent, a work order's) takes a `payout` grant as well as `invoices`, so
   `owner/prepare` of `{ type: "grant_issue", label: "payout" }` through an app is prepared instead of answering
@@ -189,6 +215,16 @@ Platform changes in this release, outside the package:
 No change to the package's API.
 
 Platform changes in this release, outside the package:
+- **A wallet owner's stop may also freeze the agent** (the platform's own page, no app): a stop text ending
+  `,"freeze":true` (absent is not asking; older texts are unchanged) has the platform prepare each created agent's
+  `agent_freeze` through that agent's own `owner/prepare` (signer `wallet`) once the stop applies, and hand back the
+  provider's intent unchanged, only if it is the owner's and, for NEP-366, calls only `freeze_wallet`. The owner's wallet
+  signs it on `/confirm/wallet/stop`; `POST /confirm/v1/wallet-stop/freeze` (`{ stop, agent, signedData }`) checks the
+  signature against the held intent and forwards it to the agent's `owner/submit`, and `/freeze-status` answers its
+  `owner/status`. The signed stop is the only proof of ownership. The freeze is signable for 600 s (provider docs);
+  unfreezing isn't offered there. New state: `.app-access/wallet-freezes/` (additive; stop records unchanged, so rolling
+  back leaves the stop working and refuses only freezing texts). Offline-tested against agent servers on loopback and
+  browser-tested with a stand-in wallet; signing with a real wallet untested; not deployed ([app access](app-access.md)).
 - **A request limit per app credential** (platform#15): the operator sets each credential's hourly limit, 1 to 12,000,
   at issue (`app-credential issue … --per-hour <n>`) or later in place (`app-credential limit <id> <n>`, same token,
   read on the next call); 1,200 stays the default and `list` shows each limit. A credential at the default stores no
