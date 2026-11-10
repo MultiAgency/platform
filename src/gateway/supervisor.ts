@@ -1,10 +1,11 @@
 import type { ChildProcess } from "node:child_process";
-import { Clock, Effect, Exit, Option, Scope } from "effect";
+import { Clock, Effect, Exit, Fiber, Option, Scope } from "effect";
 
 /** Owns only children started by this gateway; closing its scope cancels every restart. */
 export class Supervisor<T extends { name: string }> {
   private scope = Scope.makeUnsafe("parallel");
-  private names = new Set<string>();
+  private names = new Map<string, { fiber: Fiber.Fiber<void>; closing?: Promise<void> }>();
+  private children = new Map<string, { closed: boolean }>();
   private stopping = false;
   private closing?: Promise<boolean>;
   private signal: NodeJS.Signals = "SIGTERM";
@@ -15,9 +16,9 @@ export class Supervisor<T extends { name: string }> {
 
   start(agent: T) {
     if (this.stopping || this.names.has(agent.name)) return;
-    this.names.add(agent.name);
     const run = this.clock ? Effect.provideService(this.run(agent), Clock.Clock, this.clock) : this.run(agent);
-    Effect.runSync(Effect.forkIn(run, this.scope, { startImmediately: true }));
+    const fiber = Effect.runSync(Effect.forkIn(run, this.scope, { startImmediately: true }));
+    this.names.set(agent.name, { fiber });
   }
 
   private run(agent: T) {
@@ -33,6 +34,7 @@ export class Supervisor<T extends { name: string }> {
               const child = self.launch(agent);
               child.on("error", () => {});
               const resource = { child, closed: false, done: Promise.resolve() };
+              self.children.set(agent.name, resource);
               resource.done = new Promise<void>(resolve => child.once("close", () => { resource.closed = true; resolve(); }));
               return resource;
             } catch { return undefined; }
@@ -53,6 +55,17 @@ export class Supervisor<T extends { name: string }> {
         console.error(`Agent server ${agent.name} stopped; restarting in ${delay / 1000} s`);
         yield* Effect.sleep(delay);
       }
+    });
+  }
+
+  /** Interrupts both the child and its backoff; the name remains reserved until cleanup finishes. */
+  stopOne(name: string): Promise<void> {
+    const running = this.names.get(name);
+    if (!running) return Promise.resolve();
+    return running.closing ??= Effect.runPromise(Fiber.interrupt(running.fiber)).then(() => {
+      if (this.children.get(name)?.closed === false) throw new Error("The agent child did not confirm shutdown; release stays unfinished.");
+      this.children.delete(name);
+      if (this.names.get(name) === running) this.names.delete(name);
     });
   }
 

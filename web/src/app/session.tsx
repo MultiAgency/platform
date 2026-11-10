@@ -1,5 +1,5 @@
 import { SignIn as SignInIcon, SignOut } from "@phosphor-icons/react";
-import type { Area } from "../../../src/area.js";
+import type { FrontendArea as Area } from "../../../src/contract/areas.js";
 import { useState } from "react";
 import { errorMessage, gw } from "../shared/lib";
 import { Button, Card, ErrorBox, Spinner } from "../shared/ui";

@@ -69,9 +69,8 @@ owner wallet don't share payees, budget or balance: each policy is signed and pr
 reads its identity, and only that deployment for that Organization stores consents for it and calls it, whatever consent
 is signed, since a consent names the agent by a generated name its owner can't tell apart. The scope names the
 deployment, not the host: give each app deployment a distinct name on every host. One deployment holds at most 16
-Organization agents per host (`PER_DEPLOYMENT`), so it can't take the host's capacity. A hosted agent is never
-released, so that is 16 over the deployment's whole lifetime on the host, including agents whose Organization has
-stopped using them; the 17th setup is refused (#46). Self-service setups
+Organization agents per host (`PER_DEPLOYMENT`), so it can't take the host's capacity. In the 0.5.6 candidate a wallet-owned agent's reservation can be explicitly released after its owner signs archive,
+freeing a slot (offline- and stack-tested, not deployed; [release](agent-release.md)). DAO reservations still have no release path (#46). Self-service setups
 (`/gw/agents`) stay per owner and area. An ownership or key check that goes unanswered (the agent's server, a chain
 read) is 503 on every app route: nothing is stored or forwarded, and the app reads again or resends the same body;
 refusals (400, 403, 404, 409) are answers.
@@ -104,11 +103,19 @@ under the app's `requestId` and namespaced by the actor `app:<deployment>:<organ
 within caps and budget with no owner signature; that bound is the owner-signed policy. `owner/prepare` must name `signer: "wallet"`:
 the owner signs in the app with their own wallet, and `owner/submit` verifies that signature against the prepared
 intent (`src/owner-signature.ts`), so the app can prepare and forward but never complete an owner action alone.
+Market scope (0.5.6, offline-tested; [agent market](market.md)): `market` permits `market/quote` (moves nothing),
+`market/hire`, `market/status`, `market/account` and `deposit`, and nothing else that spends. A hire is paid at most once
+under the app's `requestId` (namespaced by its actor, as a payout request is), only while a fresh quote equals the terms
+the app sends, from the agent's payment key, judged as a `market` send in `authorize`; its outcome is read from the
+chain. `market/account` shows the payment key and, until the owner registers it on USDC, the transaction for the
+owner's wallet (`registrationTransaction`). `market/approve` is not in any scope: only the platform relays a DAO's
+signed approval to it (below).
 **The app chooses what it asks for, never what the owner reads** (`appMayAsk`, `src/contract/app-access.ts`;
 `appMayPrepare` and the reply hold in `src/gateway/app-routes.ts`). The app may prepare `agent_create` without payees (the
 policy is the platform's treasury or payout policy; the owner key must be the one that signed the setup),
-`agent_freeze`, `agent_unfreeze`, `grant_issue`, `grant_revoke`, `policy_update` of any field, and `approval_vote`. The
-gateway reads each prepared reply before releasing it:
+`agent_freeze`, `agent_unfreeze`, `agent_archive` and `agent_restore` (0.5.6; per the provider's docs an archive needs a
+frozen agent, changes nothing on chain and is reversed by a restore once unfrozen), `grant_issue`, `grant_revoke`,
+`policy_update` of any field, and `approval_vote`. The gateway reads each prepared reply before releasing it:
 - NEP-413 goes to the app unchanged: it is a text the owner's wallet can show (which wallets show it is not checked).
   A vote on a held payout is the exception: its text names no terms, so it carries a confirm link too, and the
   operator can withhold its text (below).
@@ -214,12 +221,16 @@ reachable. Each
 consent, call and revocation is appended to `.app-access/access-YYYY-MM.jsonl`, one file per month (UTC; builds before 0.5.3 wrote one `access.jsonl`).
 
 DAO owners: a DAO's consent is signed by its own vote (`POST /apps/v1/dao-consents`, then `GET /apps/v1/dao-consents/<hash>`
-until the DAO's signature is found). It carries only `read`, `treasury` and,
-as the DAO's opt-in, `treasury-execute`, and each call re-reads that the agent is still owned by the DAO's derived
+until the DAO's signature is found). It carries only `read`, `treasury`, `market` and,
+as the DAO's opt-in, `treasury-execute` (`market` added by the user, 2026-11-09), and each call re-reads that the agent is still owned by the DAO's derived
 account. The DAO's grant vote is what authorizes unattended swaps (autopilot, and with `treasury-execute` the app's
 plans), within the strategy it binds and the DAO's signed policy; the grant's proposal says so. The platform authorizes the app, not a member: the app gates its own members with the
 SDK's `accessOf` and `mayCall`, from the DAO's policy. Under it the app asks for the DAO's
-votes: on its Treasury proposals (`POST /apps/v1/dao-votes`, relayed to the agent once the signature is found), and on
+votes: on its Treasury proposals (`POST /apps/v1/dao-votes`, relayed to the agent once the signature is found), on
+each market hire under a consent carrying `market` (`POST /apps/v1/dao-hires` with the terms `market/quote` answered,
+the brief and how long the approval may last; `GET /apps/v1/dao-hires/<hash>` relays the signature once to
+`market/approve`, which checks the text, host and expiry and that the signing key is the agent's DAO owner as the
+provider records it, then pays the hire once; a DAO-owned market agent refuses a plain `market/hire`), and on
 the `treasury` grant, revoking a grant, a policy edit, freeze and unfreeze (`owner/prepare` with `signer: "dao"`, which
 answers the proposal to file; the agent submits the signature). An off-chain edit (`destinations`, `withdrawals`,
 `budget`) is a readable NEP-413 message with about 290 s to pass; an on-chain edit (actions, assets, limits, approval,
@@ -388,6 +399,13 @@ scope only. From 0.5.1 the `treasury` scope reaches it too: offline-tested, and 
 on 2026-11-05, where the DAO funded its agent with the calls `fundingTransaction` builds, filed as one proposal. See
 [enforcement](enforcement.md#dao-owners-through-apps-offline--and-stack-tested).
 
+**0.5.6 market rollback boundary:** downgrading below 0.5.6 is unsupported after writing a market reservation, a consent
+with `market`, a DAO market setup or hire request, or an `x402` operation. Older readers reject the shared market
+reservation/scope/area/request kind; a single reservation can prevent the whole gateway starting, including Treasury
+and Payables (offline mixed-host test with the actual 0.5.5 registry reader). Preserve all state and settings with
+executors stopped and recover on a compatible build. No tested downgrade conversion exists; the historical notes
+below do not authorize deleting or rewriting these records. See [market rollback](market.md#rollback).
+
 Rolling back: records written from 0.5.0 on carry fields that earlier builds refuse to read, and one refused record
 makes every app route answer an error:
 - **DAO consents** in `.app-access/consents/` carry `signer: "dao"`, which 0.4.1 and earlier refuse (0.5.0 and later
@@ -456,7 +474,7 @@ the hour to bring the credential under its limit: the oldest one, unless the lim
 `retryAfterSeconds`, for its own routes and for agent calls alike, so it's never mistaken for a refusal or an unknown
 outcome; the same request may be sent again once it clears. A 429 that isn't the gateway's JSON answer (a proxy page)
 keeps its earlier kind: `refused` on the app routes, `unavailable` or `unknown` on agent calls. A limit per
-Organization, within a deployment's, isn't built (#15). Offline-tested (`test/app-access.test.ts`,
+Organization, within a deployment's, isn't built (#59). Offline-tested (`test/app-access.test.ts`,
 `test/contract-owner.test.ts`).
 
 DAO requests are bounded per deployment: at most 64 waiting for a vote and 256 filed a day. A finished one (completed,
@@ -474,8 +492,7 @@ removal: a key removed and re-added with no call or sweep in between goes unnoti
 NEP-413 can't consent; owner actions are limited to the list above, and NEP-366 ones are signed on the platform's
 confirm page; a withheld or unsigned intent stays open at the provider
 until it expires, and an open policy intent blocks new agent creation until then (provider behavior, recorded in
-`.agents/skills/near-agent-api`; whether it also delays other policy edits is not checked); hosted agents are never released, and
-each is its own process, so setups (like self-service `/gw/agents`) can fill the host's 32-agent registry, each needing an
+`.agents/skills/near-agent-api`; whether it also delays other policy edits is not checked); hosted agents each have their own process (wallet-owned slot release is a 0.5.6 candidate, [release](agent-release.md)), so so setups (like self-service `/gw/agents`) can fill the host's 32-agent registry, each needing an
 owner's signature; many Organizations need more hosts. Offline-tested (`test/app-access.test.ts`). On 2026-10-26 each of those checks (scope, agent identity,
 host, deployment, owner, key permission, revocation, browser credentials) was also removed by hand and the tests failed
 every time; that was a manual check, not part of the suite. Stack-tested with simulated provider, chain and wallet
@@ -487,3 +504,16 @@ platform's own stand-in app: the `read`, `owner` and `payout` scopes on a test a
 ([2026-10-28](mainnet-log.md#app-access-on-platform-staging-2026-10-28-utc)) and payout withdrawals
 ([2026-10-30](mainnet-log.md#payout-withdrawals-on-platform-staging-2026-10-30-utc)). `treasury` and
 `treasury-execute` are offline- and stack-tested only. No production host serves `/apps/v1`.
+
+
+## Releasing an Organization agent (0.5.6 candidate)
+
+After a wallet owner freezes and archives the agent, a live `owner` consent reaches
+`POST /apps/v1/o/<organization>/a/<agent>/release`, exposed as `appClient(...).release(organization, agent, { allowBalance? })`.
+A successful response is `state: "released"`; a checked refusal is `state: "refused"` with a reason and balances.
+Other access failures retain the usual route result kinds. A retry finishes the same durable release, including after
+its consents were revoked. Calls to a released identity or RPC answer 410 `agent_released` (a new `AppGatewayCode`;
+**breaking for exhaustive switches**). Reservations expose the retained entry with `released: true`.
+Restoration needs a fresh owner-signed setup with a platform-issued nonce; consents or setups signed before release
+are refused under the existing `owner_stopped` code. The owner must separately sign fresh consent, unfreeze and restore.
+See [the release contract and its evidence](agent-release.md). Wallet owners only; DAO release is unavailable.

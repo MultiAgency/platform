@@ -2,6 +2,7 @@ import type { Policy } from "@near-intents-agent-api/sdk";
 import type { Action } from "./agent.js";
 
 import { ASSETS } from "./contract/assets.js";
+import type { AGENT_ROLES } from "./contract/inputs.js";
 export { ASSETS };
 
 /**
@@ -77,5 +78,37 @@ export function payoutPolicy(payees: string[]): Policy {
   };
 }
 
-/** What an agent is for: managing the book (swaps, no approval) or paying agreed payees (approved). */
-export type AgentRole = "treasury" | "payout";
+/**
+ * Market policy (docs/market.md): withdrawals to chain `near`, only to the agent's payment key, of USDC (each hire's
+ * price) and of wNEAR (arriving as native NEAR, to open the key's account). The key pays each hire over x402. The
+ * provider caps and budget bound funding withdrawals. The platform also applies the USDC per-transaction cap to each
+ * full hire price, including retained key funds. Daily/monthly limits count withdrawals, not the later key payments;
+ * the owner tightens or widens them by policy update.
+ */
+export function marketPolicy(paymentAccount: string): Policy {
+  return {
+    frozen: false,
+    actions: ["withdraw"],
+    confidential: true,
+    owner_approval: false,
+    assets: [ASSETS.USDC, ASSETS.wNEAR],
+    limits: {
+      per_transaction: { [ASSETS.USDC]: "25000000", [ASSETS.wNEAR]: "50000000000000000000000" }, // 25 USDC, 0.05 wNEAR
+      daily: { [ASSETS.USDC]: "50000000" }, // 50 USDC
+      monthly: { [ASSETS.USDC]: "200000000" }, // 200 USDC
+    },
+    max_actions_per_hour: 10,
+    destinations: { mode: "only", list: [{ action: "withdraw", chain: "near", address: paymentAccount, memo: null }] },
+    budget: { daily_usd: "50", weekly_usd: null, monthly_usd: "200" },
+    timelock_ms: 0,
+  };
+}
+
+/**
+ * What an agent is for: managing the book (swaps, no approval), paying agreed payees (approved), or hiring agents on the
+ * market (withdrawals to its payment key).
+ */
+export type AgentRole = (typeof AGENT_ROLES)[number];
+
+/** The role a hosted agent's area binds it to. */
+export const roleOf = (area: string | undefined): AgentRole => area === "payables" ? "payout" : area === "market" ? "market" : "treasury";

@@ -2,7 +2,8 @@ import { PublicError } from "./public-error.js";
 import type { OwnerWallet, Policy } from "@near-intents-agent-api/sdk";
 import { agentId } from "./env.js";
 import { api } from "./api.js";
-import { type AgentRole, payoutPolicy, treasuryPolicy } from "./policy.js";
+import { type AgentRole, marketPolicy, payoutPolicy, treasuryPolicy } from "./policy.js";
+import { paymentKey } from "./market/payment-key.js";
 import { mandateDigest, type ReviewedPolicy } from "./mandate.js";
 import { currentWorkOrder, workOrderPolicy } from "./work-order-store.js";
 
@@ -17,13 +18,15 @@ export const ownerRequests = {
       throw new PublicError("The work order owner changed. Preserve the original order and review its authority.");
     return {
       type: "agent_create",
-      name: order ? "Work order" : role === "payout" ? "Payouts" : "Agentic Treasury",
+      name: order ? "Work order" : role === "payout" ? "Payouts" : role === "market" ? "Market hires" : "Agentic Treasury",
       owner,
-      policy: order ? workOrderPolicy(order) : role === "payout" ? payoutPolicy(payees) : treasuryPolicy,
+      policy: order ? workOrderPolicy(order) : role === "payout" ? payoutPolicy(payees) : role === "market" ? marketPolicy(paymentKey().account) : treasuryPolicy,
     } as const;
   },
   agent_freeze: () => ({ type: "agent_freeze", agent_id: agentId() }) as const,
   agent_unfreeze: () => ({ type: "agent_unfreeze", agent_id: agentId() }) as const,
+  agent_archive: () => ({ type: "agent_archive", agent_id: agentId() }) as const,
+  agent_restore: () => ({ type: "agent_restore", agent_id: agentId() }) as const,
 };
 
 /** A transfer destination in the policy: the treasury funds may return to, or an agreed payee. */

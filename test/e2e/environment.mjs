@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import { offlineEnvironment } from '../../scripts/test-environment.mjs';
 import { provider, listen, DAO, DAO_SIGNER, OWNER, PAYEE, SECOND } from './provider.mjs';
+import { market as simulatedMarket } from './market.mjs';
 import { tsImport } from 'tsx/esm/api';
 
 /**
@@ -52,16 +53,22 @@ async function freePort(host = '127.0.0.1') {
  *   no sign-in, owner app or contributor intake on its host.
  * `selfService`: owners (on the host) and app deployments (through `/apps/v1/setup`) may set up hosted agents; `hostedAreas` names the
  * areas a `frontendDist` host may set up.
+ * `market`: a simulated agent market (market.mjs, docs/market.md) the gateway's hosted agents hire on: `true` for two
+ *   listed agents, `writer` (delivers) and `refuser` (rejects every task), or its own `{ handle: { amount, windowSeconds,
+ *   outcome, result } }`. The stand-in Agent API lands a market agent's top-ups on its chain. Add `market` to `appSetup`.
  */
-export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoPortfolio = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false, appSetup = ['payables'] } = {}) {
+const MARKET_AGENTS = { writer: { amount: '500000', windowSeconds: 600, outcome: 'complete', result: 'the article' },
+  refuser: { amount: '500000', windowSeconds: 600, outcome: 'reject' } };
+export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoPortfolio = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false, appSetup = ['payables'], market = false } = {}) {
   await requireConfirmBuild();
   if (daoPortfolio) { workspace = true; portfolioOwner = DAO; }
   const dao = daoPortfolio;
   mkdirSync(directory, { recursive: true });
   const services = [], proxies = [];
   const accounts = [...(secondAccount || dao ? [SECOND] : []), ...(dao ? [OWNER, DAO_SIGNER] : []), ...extraAccounts];
+  const marketSim = market ? await simulatedMarket({ agents: market === true ? MARKET_AGENTS : market }) : null;
   // The gateway reads the chain through this simulator: it answers for the DAO whenever one owns an agent.
-  const simulated = await provider(directory, { account: owner === DAO ? DAO_SIGNER : owner, payees, accounts, dao, onChainPolicyEdits, ...(payoutFunding !== undefined && { payoutFunding }) });
+  const simulated = await provider(directory, { account: owner === DAO ? DAO_SIGNER : owner, payees, accounts, dao, onChainPolicyEdits, market: marketSim, ...(payoutFunding !== undefined && { payoutFunding }) });
   const portfolioDir = join(directory, 'portfolio');
   let portfolio;
   if (workspace) { mkdirSync(portfolioDir); portfolio = await provider(portfolioDir, { treasury: true, account: portfolioOwner === DAO ? DAO_SIGNER : portfolioOwner, accounts, dao, onChainPolicyEdits }); }
@@ -116,7 +123,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
   }
   const common = { ...offlineEnvironment(), NODE_OPTIONS: `--require ${JSON.stringify(join(root, 'test/fixtures/offline-network.cjs'))} --require ${JSON.stringify(join(root, 'test/e2e/fastnear-fixture.cjs'))} ${EXIT_WITH_PARENT}`, AGENT_ID: simulated.id, AGENT_GRANT_TOKEN: simulated.token,
     NEAR_INTENTS_AGENT_API_URL: simulated.url, NEAR_RPC_URL: `${simulated.url}/chain`, AUTOPILOT: 'off',
-    SESSION_SECRET: 'local-only-session-secret-with-more-than-32-characters', DASHBOARD_AREA: 'payables' };
+    SESSION_SECRET: 'local-only-session-secret-with-more-than-32-characters', DASHBOARD_AREA: 'payables', ...(marketSim && { MARKET_URL: marketSim.url }) };
   async function start(name, cwd, entry, env, ready) {
     const child = spawn(process.execPath, ['--import', 'tsx', join(root, entry)], { cwd, env: { ...common, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     services.push(child);
@@ -152,6 +159,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
     await Promise.all(proxies.map(close));
     await simulated.close();
     if (portfolio) await portfolio.close();
+    await marketSim?.close();
   }
   try {
     await startExecutor();
@@ -174,7 +182,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
         demo: 'treasury', agents: agents.map(a => a.name), frontendDist: frontend } } }),
       // A new prototype's own build on this host, using the existing showcase assignment.
       ...(frontendDist && { hosts: { [new URL(dashboard).host]: { demo: 'showcase', agents: agents.map(a => a.name), frontendDist, hostedAreas } } }),
-      ...(release && { hosts: { [new URL(dashboard).host]: { demo: ownerApp.product, agents: agents.filter(a => a.area === ownerApp.product).map(a => a.name), frontend: { origin: release.origin, product: ownerApp.product } } } }), ...((secondAccount || selfService) && { selfService: true, appSetup: ['treasury', 'payables'] }), agents }));
+      ...(release && { hosts: { [new URL(dashboard).host]: { demo: ownerApp.product, agents: agents.filter(a => a.area === ownerApp.product).map(a => a.name), frontend: { origin: release.origin, product: ownerApp.product } } } }), ...((secondAccount || selfService) && { selfService: true, appSetup: ['treasury', 'payables', ...(marketSim ? ['market'] : [])] }), agents }));
     // Another process can take the probed port before the gateway binds it: only that failure retries, on a fresh
     // port. The dashboard proxy forwards to whichever port the gateway took; the host it signs in to is the proxy's.
     for (let attempt = 1; ; attempt++) {
@@ -196,7 +204,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
       return Object.fromEntries(['invoices', 'revisions', 'payments', 'reservations'].map(table => [table, db.prepare(`SELECT * FROM ${table}`).all()]));
     } finally { db.close(); }
   }
-  return { dashboard, invoices, simulated, portfolio, directory, records,
+  return { dashboard, invoices, simulated, portfolio, directory, records, market: marketSim,
     portfolioState() {
       const read = path => existsSync(path) ? readFileSync(path, 'utf8') : null;
       return { strategy: JSON.parse(read(join(portfolioDir, '.strategy/.env.json')) ?? 'null'),

@@ -287,7 +287,7 @@ test("the app prepares the owner actions an app may ask for; a readable intent r
 
   state.reply.body = preparedReply("nep413");
   for (const action of [{ type: "agent_create", owner: owner() }, { type: "agent_create", owner: owner(), role: "payout", payees: [] }, { type: "agent_freeze" }, { type: "agent_unfreeze" },
-    { type: "grant_issue", label: "payout" }, { type: "grant_revoke", grantId: "g" },
+    { type: "agent_archive" }, { type: "agent_restore" }, { type: "grant_issue", label: "payout" }, { type: "grant_revoke", grantId: "g" },
     edit({ destinations: [{ address: "payee.near", confidential: true }] }), edit({ budget: { daily_usd: "10", weekly_usd: null, monthly_usd: null } }),
     edit({ swap: true }), edit({ assets: "any" }), edit({ owner_approval: false }), edit({ max_actions_per_hour: 100 }), edit({ limits: { daily: { usdc: "1" } } }),
     { type: "approval_vote", approvalId: crypto.randomUUID(), verdict: "approve", correlationId: "c" }])

@@ -21,8 +21,33 @@ area (docs/treasury.md).
 An agent that only makes confidential USDC transfers to agreed payees, each held for the owner's approval.
 It runs the **Payables** area (docs/facilitator.md).
 
+**Market agent**:
+An agent that hires listed agents on the NEAR AI Agent Market over x402 (docs/market.md): it only withdraws USDC, and
+wNEAR to open the account, to its own **payment key**, which pays each **hire**. Set up by an app only, never through
+the owner frontend; a DAO-owned one pays each hire only after the DAO's vote on its exact terms. Offline-tested.
+
+**Payment key**:
+A market agent's own Ed25519 key, written into its settings file at reservation, before the agent exists, so the
+policy it is created with names the key's account as its one withdrawal destination. It can retain funds from
+not-charged hires and signs one shape only: a NEP-366 `ft_transfer` to the market's published payee. The provider enforces every
+send up to it; what it signs is the platform's check, not the provider's (docs/enforcement.md).
+_Avoid_: hot wallet
+
+**Hire**:
+One paid call to a listed agent: quoted (`market/quote`), approved (by the app's `market` consent for a wallet owner, by
+vote for a DAO), then paid once per caller and `requestId` as an `x402` operation whose outcome is read from the chain:
+`paid`, or `not_charged` once its authorization expired unused. The task id and deliverable are the market's answer,
+kept beside the journal; data, never instructions.
+
+**Limit order**:
+A provider order funded now that rests until filled, cancelled or expired. Provider `SUCCESS` means funded/resting,
+not filled or paid. SDK 0.8.2 adds its API and policy action; the platform reads that policy evidence and preserves it
+on unrelated edits but exposes no order execution or cancellation route. It is not a platform journal method or a new
+permission in the default policies. See docs/provider-sdk-082.md.
+
 **Area** / **Brief**:
-An area is what one agent shows: **Payables** (the payout agent) or **Treasury** (the treasury agent). A
+An area is what one agent shows: **Payables** (the payout agent), **Treasury** (the treasury agent) or **market** (the
+market agent, an app's only). A
 brief is an experiment from the Agent Connect catalog that an area runs or plans, keeping its catalog
 number and title (01 Confidential Treasury Facilitator, 02 Agentic Treasury Management). Each brief's
 requirements distinguish mainnet observations, offline tests, pinned provider source with deployed
@@ -207,8 +232,8 @@ _Avoid_: retry (for a new attempt)
 
 **Payout double**:
 `@multiagency/sdk/testing`'s in-process stand-in for one app's payout agent behind `/apps/v1`, for an app server's own
-tests. It runs the platform's own `authorize`, mandate digest and input schemas; its restated request semantics are
-checked against the real money path by `test/payout-double.test.ts`. It authorizes nothing and moves nothing.
+tests. It runs the platform's own `authorize`, journal answer, mandate digest and input schemas; the order of a request's
+checks, which it restates, is checked against the real money path by `test/payout-double.test.ts`. It authorizes nothing and moves nothing.
 _Avoid_: fake platform, mock (for this double)
 
 **Held payout**:
@@ -484,3 +509,13 @@ supplier sessions, scoped routing, compensation and invoice records, owner revie
 guarded execution. A compatible frontend release can change without restarting the platform after the shared
 backend integration is installed. This extraction is a locally tested, undeployed candidate; the existing
 hosted Invoices experience remains unchanged. See docs/invoices-extraction.md.
+
+
+**Hosted-agent release**:
+An app explicitly returns a wallet-owned Organization agent's hosting slot after the owner signs its provider archive.
+The executor checks archived and frozen provider evidence, nothing unresolved or held, no open owner action, and balances
+under both its money and owner-intent locks. Balances require an explicit `allowBalance` choice to remain. A durable
+release marker blocks dispatch and owner actions before the gateway ends consents, retires the reservation and stops its
+process. Nothing is deleted. A fresh owner-signed setup restores the same identity; the owner separately consents,
+unfreezes and restores the provider agent. Old consents never revive. Offline- and stack-tested candidate; not observed
+on mainnet. DAO release is not implemented. See docs/agent-release.md.

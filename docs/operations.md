@@ -28,7 +28,7 @@ holds agent connections and their access log (see [agent access](agent-access.md
 machine credentials; `.app-access/` holds app service credentials (hashed), owner consents, revocation tombstones (`revoked/`,
 never delete: losing one lets that consent be stored again), held confirm-page actions (`confirm/`, one record per link,
 named by its token's hash, and a `.claim` file once a submission was made; an older build ignores them), DAO requests
-(`dao-requests/`, one record per request a DAO votes on: consent, setup, proposal vote or stop; additive, no migration;
+(`dao-requests/`, one record per request a DAO votes on: consent, setup, proposal vote, market hire or stop; additive, no migration;
 an earlier build can't read some of them and 0.4.1 never looks, see app access, "Rolling back"), wallet stops (`wallet-stops/`, one
 record per signed stop, named by its signature's hash; it fixes the stop's cutoff, so never delete one while its text can
 still be sent) and the freezes those stops prepared (`wallet-freezes/`, from 0.5.5, named the same; additive, an earlier
@@ -45,7 +45,9 @@ delete: a lost final record lets an approved proposal execute again; a build bef
 open proposals wait unexecuted). Builds before 0.5.3 kept every agent's proposals directly in `.proposals/`, shared by
 the hosted agents of one host. From 0.5.3 those stay where they are, never moved: each agent reads its own there (by the
 agent id each records) and writes their approval and final record beside them, and writes new proposals in its own
-directory. Rolling back to a build before 0.5.3 reads the older proposals as before, but not the newer ones: those wait
+directory. A market agent's settings file also holds its payment key, `MARKET_PAYMENT_KEY` ([agent market](market.md)),
+written once at reservation: it may hold USDC or an outstanding payment authorization, so never delete, replace or
+regenerate it, and keep it as secret as the grant token beside it. Rolling back to a build before 0.5.3 reads the older proposals as before, but not the newer ones: those wait
 unexecuted, and a `requestId` an app sends again then makes a new proposal there, which needs the owner's approval
 again. Rolling forward, an agent's own directory wins over such a duplicate. Stop writers before copying state; never start the destination before stopping the
 source. The lease coordinates processes on one host only.
@@ -320,6 +322,15 @@ also for a refused one) is unreadable to a build before it: that build refuses t
 shape"), so it sends nothing for that agent and its reads of that journal (status, held payouts, the dashboard) fail
 too. That fails closed, but rolling an executor back past P3b after its first withdrawal request needs the
 compatibility review first; hosted agents are executors.
+A journal line with method `x402` (a market hire's payment, since 0.5.6, [agent market](market.md)) is unreadable to a
+build before it in the same way. The rollback boundary is earlier than the first payment: a market reservation in
+shared `.hosted/apps.json` makes the 0.5.5 registry reader reject the entire file and prevents gateway startup for
+Treasury and Payables too (`test/market-rollback.test.ts`, actual previous reader, offline-tested). Market consents,
+DAO market setup requests and DAO hire requests also use values earlier shared readers reject. Downgrading below
+0.5.6 is unsupported once any of these records exists. With executors stopped, preserve every state directory in the
+canonical list and every instance settings file, including payment keys, and recover on a compatible 0.5.6-or-later
+build. Do not delete entries, strip new fields/scopes or restore older shared state to force a downgrade. No downgrade
+conversion has been tested; one needs a separate compatibility review and a state-preserving procedure.
 
 **Deploy on Railway** (`Dockerfile.payouts`, selected by `railway.json`, one replica, one executor host per agent):
 
@@ -508,3 +519,23 @@ Effect deadline; each request, including response-body consumption, is also boun
 Failure or cancellation aborts active requests and stops queued lookups. These reads never retry
 automatically. Separate Agent API reads and the ten-second status diagnostic retain their existing
 bounds. Public history still cannot establish confidential settlement or authorize a replay.
+
+
+## Hosted-agent release (0.5.6 candidate)
+
+Preserve `.hosted/released.json`, every `.hosted/<name>.env` including `RELEASED_AT`, `RELEASED_ARCHIVE`, grant tokens
+and market payment keys, and both `registry.json` and `apps.json`, alongside every state directory listed above.
+Release adds optional records and needs no conversion of existing state. Back up with executors stopped; never delete
+or recreate settings to reclaim a slot. The release marker is written before retirement, released history before removing
+an active reservation, and process shutdown before marking release complete. Retried release finishes its durable state.
+After a completed release, the 0.5.5 registry reader leaves the agent down and refuses replacement over retained settings
+(offline compatibility test). Complete interrupted releases/restorations before rollback or review them separately:
+earlier dispatchers ignore release markers. A completed release does not remove the separate shared market-state
+rollback boundary above; market records can make the entire older gateway unavailable, even without an x402 payment. Restoration
+re-reserves the same provider ID and key, subject to capacity; the owner signs a new setup with a platform nonce and a
+new ordinary consent, then separately unfreezes and restores. See [agent release](agent-release.md).
+
+During re-reservation `RESTORE_REQUIRED=<provider agent ID>` replaces the release marker in the same atomic settings
+write. Dispatch remains refused until this executor records a successful owner-signed `agent_restore`; a host slot alone
+never authorizes a send, including the market key's locally signed last leg. Preserve this key with the release keys.
+A provider restore performed outside this executor needs operator recovery; it does not silently clear this marker.

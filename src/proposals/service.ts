@@ -6,7 +6,7 @@ import { notInForce } from "../authorize.js";
 import { agentId, executes } from "../env.js";
 import { liveGrant } from "../grants.js";
 import { mandateDigest } from "../mandate.js";
-import { nep413Hash, signatureBytes, verifyEd25519 } from "../nep413.js";
+import { signsText } from "../nep413.js";
 import { executePlan, type Observed, type PlanEvent } from "../planning/execution.js";
 import { quoteChosen, type ChosenSwap } from "../planning/external.js";
 import type { Plan } from "../planning/model.js";
@@ -167,12 +167,7 @@ export function listProposals(context: CallContext) {
 }
 
 /** Whether the owner's NEP-413 signature covers exactly this text for this host. The gateway checked the key is the owner's. */
-function signs(signed: z.infer<typeof proposalSignature>, host: string, text: string) {
-  if (signed.message !== text) return false;
-  const nonce = Buffer.from(signed.nonce, "base64");
-  if (nonce.length !== 32) return false;
-  try { return verifyEd25519(signed.publicKey, nep413Hash(signed.message, nonce, host), signatureBytes(signed.signature)); } catch { return false; }
-}
+const signs = (signed: z.infer<typeof proposalSignature>, host: string, text: string) => signsText(signed, host, text);
 
 /** Stores the expiry a read only derives, so a proposal past its validity ends as expired whatever is asked of it next. */
 function settleExpiry(id: string, record: ProposalRecord, now: Date) {

@@ -78,3 +78,37 @@ test("overview retains revoked and expired grants without making them executable
   assert.deepEqual(await client.pay(request), { outcome: "refused", code: "grant_missing" });
   assert.equal(sends.length, 0);
 });
+
+
+test("SDK 0.8.2 limit-order policy evidence survives overview and unrelated owner edits", async () => {
+  const upstream: import("@near-intents-agent-api/sdk").Policy = {
+    ...policy, actions: [...policy.actions, "limit_order"], limit_order: {max_deviation_bps: 75},
+  };
+  mock.method(api, "getPolicy", async () => policyView(upstream));
+  const overview = await client.overview();
+  assert.deepEqual(overview.policy.policy!.actions, upstream.actions);
+  assert.deepEqual(overview.policy.policy!.limit_order, {max_deviation_bps: 75});
+  const { policyChange } = await import("../src/owner-requests.js");
+  const prepared = await policyChange({max_actions_per_hour: 3}, {revision: 1, digest: mandateDigest(upstream)});
+  assert.ok(prepared.request.policy.actions.includes("limit_order"));
+  assert.deepEqual(prepared.request.policy.limit_order, upstream.limit_order);
+  assert.equal(prepared.request.policy.max_actions_per_hour, 3);
+  assert.deepEqual(sends, [], "reading and preparing do not place or cancel an order");
+});
+
+test("upgrading the provider SDK enables no new platform spending route or default policy permission", async () => {
+  const { treasuryPolicy, marketPolicy } = await import("../src/policy.js");
+  const { appScopesCover } = await import("../src/contract/app-access.js");
+  const { AppScope } = await import("../src/contract/app-consent.js");
+  const { mayCall } = await import("../src/contract/permissions.js");
+  for (const p of [treasuryPolicy, policy, marketPolicy("b".repeat(64))]) {
+    assert.equal(p.actions.includes("limit_order"), false);
+    assert.equal(p.native, undefined);
+  }
+  for (const path of ["limitOrders/place", "limitOrders/cancel", "native/evm/signIntent", "native/solana/signIntent"]) {
+    assert.equal(appScopesCover(AppScope.options, path), false);
+    assert.equal(mayCall({canSign:true,canPropose:true,canVote:true,canExecute:true,canManage:true}, path), false);
+  }
+  assert.equal("limitOrders" in router, false);
+  assert.equal("native" in router, false);
+});

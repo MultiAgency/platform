@@ -1,6 +1,9 @@
+import { appReleaseOutput } from "./agent-release.js";
 import type { z } from "zod";
+import type { Area } from "./areas.js";
+import type { hireTerms } from "./inputs.js";
 import { retryAfterSeconds } from "./retry-after.js";
-import { appAgent, appConsentList, appConsentNonce, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appReservations, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
+import { appAgent, appConsentList, appConsentNonce, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoHireFiled, appDaoHireState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appReservations, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
 import type { appConsentSubmission } from "./app-consent.js";
 import { ownerClient, type OwnerCallOptions, type OwnerFailure, type OwnerOutput, type OwnerProcedure, type OwnerResult } from "./owner-client.js";
 import type { ownerStreams } from "./owner-outputs.js";
@@ -104,8 +107,11 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
      * setup again answers the same agent and consent). Nothing is reserved or signed. Gateways before 0.5.5 answer
      * `refused` 404.
      */
-    reservations: (query: { organization: string; owner?: string; area?: "treasury" | "payables" }, options?: AppRouteOptions) =>
+    reservations: (query: { organization: string; owner?: string; area?: Area }, options?: AppRouteOptions) =>
       route(`/agents?${new URLSearchParams(Object.entries(query).filter((e): e is [string, string] => e[1] !== undefined))}`, appReservations, {}, options),
+    /** Explicit hosting release, after the owner archived the agent. A refused result names remaining balances/work. */
+    release: (organization: string, agent: string, input: { allowBalance?: boolean } = {}, options?: AppRouteOptions) =>
+      route(`/o/${encodeURIComponent(organization)}/a/${encodeURIComponent(agent)}/release`, appReleaseOutput, post(input), options),
     /** A wallet owner's signed setup text: reserves the hosted agent and returns its setup consent. */
     setup: (submission: AppConsentSubmission, options?: AppRouteOptions) => route("/setup", appSetupStored, post(submission), options),
     consents: {
@@ -149,6 +155,17 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
       file: (input: { organization: string; agent: string; proposal: string; verdict: "approve" | "reject" }, options?: AppRouteOptions) =>
         route("/dao-votes", appDaoVoteFiled, post(input), options),
       state: (id: string, options?: AppRouteOptions) => route(`/dao-votes/${encodeURIComponent(id)}`, appDaoVoteState, {}, options),
+    },
+    /**
+     * A DAO's approval of one market hire under its DAO consent carrying `market` (docs/market.md): `file` takes the terms
+     * a `market/quote` answered, the brief and how long the approval may last, and answers the proposal a member files;
+     * `state` reads it until the DAO's signature is found and relayed, when the agent pays the hire once. Follow it with
+     * `market/status` under the same `requestId`. Gateways before 0.5.6 answer `refused` 404.
+     */
+    daoHires: {
+      file: (input: { organization: string; agent: string; requestId: string; brief: string; approved: z.input<typeof hireTerms>; validUntil: string }, options?: AppRouteOptions) =>
+        route("/dao-hires", appDaoHireFiled, post(input), options),
+      state: (id: string, options?: AppRouteOptions) => route(`/dao-hires/${encodeURIComponent(id)}`, appDaoHireState, {}, options),
     },
     /** One Organization's agent: reads, owner actions and Treasury procedures its live consents cover. */
     agent(organization: string, agent: string) {

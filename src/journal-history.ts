@@ -2,17 +2,19 @@ import { closeSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { id, iso, type Gap, type JournalHistory, type JournalRecord } from "./run-log-schema.js";
+import { OPERATION_METHODS } from "./contract/owner-outputs.js";
 
 const MAX_BYTES = 8_000_000;
 const MAX_LINES = 20_000;
 /** As `JournalHistorySchema` allows: a legacy line can project two records, so lines alone don't bound them. */
 const MAX_RECORDS = 20_000;
 const safeAgent = z.string().regex(/^[a-zA-Z0-9_-]{1,200}$/, "Invalid agent ID");
-// `withdraw` is folded by readOps but isn't in the published record's method enum: such a request projects without its
-// method, with a `method_not_exported` gap so it can't pass for a legacy line that recorded none.
-const request = z.object({ request: z.record(z.string(), z.unknown()), kind: id,
-  method: z.enum(["swap", "transfer", "shield", "unshield", "withdraw"]).optional(), planId: id.optional() });
-const projectable = (method: string | undefined): JournalRecord["method"] => method === "withdraw" ? undefined : method as JournalRecord["method"];
+// `withdraw` and `x402` (a market hire's payment) are folded by readOps but aren't in the published record's method enum:
+// such a request projects without its method, with a `method_not_exported` gap so it can't pass for a legacy line that
+// recorded none.
+const request = z.object({ request: z.record(z.string(), z.unknown()), kind: id, method: z.enum(OPERATION_METHODS).optional(), planId: id.optional() });
+const UNEXPORTED = new Set<string>(["withdraw", "x402"]);
+const projectable = (method: string | undefined): JournalRecord["method"] => method && UNEXPORTED.has(method) ? undefined : method as JournalRecord["method"];
 
 /** Pure parsing of a bounded, agent-scoped journal snapshot. Never return raw input in errors. */
 export function parseJournalHistory(agentId: string, source: string): JournalHistory {

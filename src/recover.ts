@@ -2,6 +2,9 @@ import { isMoving, readStatus, StatusMismatch } from "./api.js";
 import { markInvoiceUnknown } from "./invoice-store.js";
 import { acquireMoneyLock } from "./lock.js";
 import { blocksDispatch, isResolved, isTerminal, type Method, type Op, readOps, record } from "./ops.js";
+import { contractOf } from "./chain.js";
+import { paymentOutcome, readChainView } from "./market/resolution.js";
+import { paymentId, type X402Request } from "./market/x402.js";
 
 /**
  * Resolves money actions left without a proven outcome (a crash, a lost response, an UNCERTAIN
@@ -62,7 +65,31 @@ export async function recover(): Promise<Recovery[]> {
   }
 }
 
+/**
+ * A market hire's payment, from the chain only (docs/market.md): paid once the key's nonce reached the payment's and
+ * its balance dropped by exactly the amount; not charged once the payment expired with the nonce unused, recorded as
+ * a refusal (proven never executed). Anything else stays open while the payment could still be relayed, then unknown.
+ */
+async function recoverPayment(op: Op): Promise<Recovery> {
+  const request = op.request as unknown as X402Request;
+  const view = await readChainView(request.payer, request.publicKey, contractOf(request.asset));
+  const outcome = paymentOutcome({ nonce: BigInt(request.nonce), maxBlockHeight: BigInt(request.maxBlockHeight),
+    amount: BigInt(request.amount), balanceAtSigning: BigInt(request.balanceAtSigning) }, view);
+  if (outcome === "paid") {
+    record({ idempotencyKey: op.idempotencyKey, correlation_id: paymentId(request), status: "SUCCESS" });
+    return { op, outcome: "settled", status: "SUCCESS" };
+  }
+  if (outcome === "not_charged") {
+    record({ idempotencyKey: op.idempotencyKey, refused: "x402_not_charged" });
+    return { op, outcome: "refused", detail: "x402_not_charged" };
+  }
+  return view.height <= BigInt(request.maxBlockHeight)
+    ? { op, outcome: "open", detail: `the payment can still settle until block ${request.maxBlockHeight}` }
+    : { op, outcome: "unknown", detail: "the payment's nonce or the key's balance moved otherwise than this payment would: review required" };
+}
+
 async function recoverOne(op: Op): Promise<Recovery> {
+  if (op.method === "x402" && op.submissionState === "SUBMISSION_ATTEMPTED") return recoverPayment(op);
   const correlationId = op.correlationId;
   if (!correlationId) {
     if (op.submissionState === "PREPARED") return { op, outcome: "open", status: "PREPARED", detail: "Never submitted. Resubmit the original invoice to continue with its existing key." };
@@ -71,6 +98,13 @@ async function recoverOne(op: Op): Promise<Recovery> {
   const { status } = await readStatus(correlationId);
   if (status !== op.status) record({ idempotencyKey: op.idempotencyKey, correlation_id: correlationId, status });
   return { op, outcome: isTerminal(status) ? "settled" : status === "UNCERTAIN" || status === "NEEDS_REVIEW" ? "unknown" : "open", status, ...(isMoving(status) && { detail: "still moving" }) };
+}
+
+/** Reads one operation's outcome now, as `recover` would, under the same lock. Sends nothing. */
+export async function refreshOperation(op: Op): Promise<Recovery> {
+  const lock = await acquireMoneyLock({ reconcile: true });
+  try { return await recoverOne(op); }
+  finally { await lock.release(); }
 }
 
 /** Status-only maintenance, independent of strategy execution. */

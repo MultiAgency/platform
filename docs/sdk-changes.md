@@ -12,9 +12,69 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
-## 0.5.6 (unreleased)
+## 0.5.6 (2026-11-10)
+
+- **Provider SDK 0.8.2** (was 0.8.0), pinned exactly with a version-scoped release-age exception. Reviewed against
+  official SDK source `416597b0c63a426b225b98b6d175c03bfb6a7947` and Agent API skills `0b81bba6` (2026-11-10).
+  **Breaking for exhaustive switches:** policy reads and owner previews may carry `actions: ["limit_order", ...]`
+  and optional `limit_order.max_deviation_bps`. The platform preserves this evidence and retains it during unrelated
+  policy edits. This does not add order placement/cancellation, native EVM/Solana signing, app scopes or default policy
+  permissions. New upstream error descriptions do not change our proven-refusal classification. See
+  [provider SDK upgrade](provider-sdk-082.md) for source review, coverage and limits.
+
+- **Hosted-agent release** (addition, #46): wallet owners may relay `agent_archive` and `agent_restore` under `owner`
+  consent. After owner-signed freeze/archive, `appClient(...).release(organization, agent, { allowBalance? })` returns a
+  hosting slot after executor checks and a durable send refusal, ends its consents and stops its process. The same
+  owner-signed setup restores its retained provider identity with a new platform nonce and fresh consent; the owner
+  separately unfreezes/restores. `reservations` may include `released: true`; released identity/RPC calls answer
+  410 `agent_released`, a new `AppGatewayCode` (**breaking for exhaustive switches**). Balances refuse unless explicitly
+  retained, including the market payment key's native NEAR and USDC. No state is deleted. Additive state/rollback notes
+  and evidence are in `docs/agent-release.md`. Offline- and stack-tested; provider archive/restore semantics are per
+  pinned docs, with no platform mainnet release observation. DAO release and agent deletion remain unavailable.
+
+- **`agent_archive` and `agent_restore` are owner actions** (addition, platform#46): `owner/prepare` accepts both, and an
+  app may relay them under `owner` consent like a freeze. They are the provider's reversible retirement: per its docs
+  (Agent API skills at `ce381df`, `references/owner-intents.md`) an archive needs a frozen agent, changes nothing on
+  chain and makes the provider refuse the agent's operations; a restore reverses it once the agent is unfrozen. Both are
+  NEP-413, signed in the app. `agent_delete` stays out. Offline-tested (`test/agent-archive.test.ts`,
+  `test/app-access.test.ts`); no archive is recorded on mainnet. Wallet owners only; a DAO's archive comes later.
+
+- **Market hires** (addition; docs/market.md; offline-tested, not yet observed through the platform): a `market` area
+  (`AREAS`; set up by an app only, `FRONTEND_AREAS` are the owner frontend's), role (`AGENT_ROLES`) and grant label
+  (`GRANT_LABELS`), and a `market` app scope (`APP_MARKET`): `market/quote` (`marketQuoteInput` → `hireTerms`),
+  `market/hire` (`marketHireInput`: a `requestId`, the brief, and the quoted terms it pays only while a fresh quote
+  equals them), `market/status` and `market/account` (`marketAccountOutput`, with `registrationTransaction`, the
+  owner's one-time registration of the agent's payment key on USDC), plus `deposit`. A DAO's consent may carry `market`
+  (`DAO_CONSENT_SCOPES`), a DAO may set up a market agent (`DAO_SETUP_AREAS`), and it approves each hire by vote:
+  `appClient(...).daoHires.file` and `.state` (`/apps/v1/dao-hires`, `appDaoHireFiled`, `appDaoHireState`) file the
+  DAO's proposal from `hireText` and relay its signature once to `market/approve` (`marketApproveInput`), which no app
+  scope reaches. New refusal code `brief_mismatch`. Capability `market-hire-v1`.
+- **A journal operation may be `x402`** (`OPERATION_METHODS`): a market hire's payment. An SDK before 0.5.6 refuses a
+  market agent's journal reads (`activity`, `unresolved`) and owner outputs naming `area: "market"`; no other agent's.
+- **`payoutDouble` answers with the platform's own code** (no API change): the journal's answer to a payout request
+  (`state`, `code`, `failureCode`, `neverExecuted`) is one pure function, `src/payout-answer.ts`, that the agent and
+  `@multiagency/sdk/testing`'s double both run, where the double had a copy. `test/payout-double.test.ts` still runs
+  every scenario against both.
+- **The packed SDK is checked under Bun:** `pnpm sdk:bun` installs the release tarball in a scratch consumer and, under
+  Bun (1.4.2 in CI), runs the skills' examples, loads every entry but the Node-only release server and runs a
+  `payoutDouble` payout through `appClient` with an app's own `fetch`. It passed with no SDK change. Offline only
+  (docs/testing.md).
 
 Platform changes in this release, outside the package:
+- **Full hire ceiling:** the policy's USDC per-transaction limit now applies to the full approved hire price, including
+  retained payment-key funds. An over-cap hire is refused before opening or funding the key; every dispatch rechecks
+  it before signing, including after a cap change during top-up. Funding already completed remains recorded and
+  retained. Offline-tested; no new mainnet claim. Cumulative caps and budgets still count provider withdrawals,
+  not later payments from retained funds.
+- **Market agents** (docs/market.md): a market agent's settings file holds its payment key, written once at reservation
+  (`docs/operations.md`); self-service setup and the owner frontend's discovery leave market agents out. A hire's
+  payment goes through `dispatch` → `send` as an `x402` operation, judged by `authorize`'s `market` purpose (the user's
+  decision, 2026-11-09), and resolved from the chain by reconciliation. A build before 0.5.6 can't read a journal
+  holding an `x402` line. Downgrade below 0.5.6 is unsupported after the first market reservation or other shared market
+  record: an older registry reader rejects the shared file and prevents the entire gateway from starting, not only
+  market agents (`docs/operations.md`, mixed-host compatibility regression). Hosted agents
+  receive `MARKET_URL` and `MARKET_MAX_WINDOW_SECONDS` from the gateway. The NEP-413 text check Treasury proposals use
+  moved to `nep413.ts`, shared with hire approvals; unchanged in behaviour.
 - **A held payout the provider names no approval for counts toward the waiting limit:** filing an invoice answers
   `busy` at 10 payouts waiting for the owner. That count left out a payout held (`PENDING_APPROVAL`) without an
   `approval_id`, which `held` can't list for a vote but dispatch still reserves funds for. It now counts every payout
@@ -144,6 +204,11 @@ Platform changes in this release, outside the package:
   ([app access](app-access.md)). Offline-tested; needs a platform on this version.
 
 Platform changes in this release, outside the package:
+- **Full hire ceiling:** the policy's USDC per-transaction limit now applies to the full approved hire price, including
+  retained payment-key funds. An over-cap hire is refused before opening or funding the key; every dispatch rechecks
+  it before signing, including after a cap change during top-up. Funding already completed remains recorded and
+  retained. Offline-tested; no new mainnet claim. Cumulative caps and budgets still count provider withdrawals,
+  not later payments from retained funds.
 - **A wallet owner's stop may also freeze the agent** (the platform's own page, no app): a stop text ending
   `,"freeze":true` (absent is not asking; older texts are unchanged) has the platform prepare each created agent's
   `agent_freeze` through that agent's own `owner/prepare` (signer `wallet`) once the stop applies, and hand back the
@@ -229,6 +294,11 @@ Platform changes in this release, outside the package:
 No change to the package's API.
 
 Platform changes in this release, outside the package:
+- **Full hire ceiling:** the policy's USDC per-transaction limit now applies to the full approved hire price, including
+  retained payment-key funds. An over-cap hire is refused before opening or funding the key; every dispatch rechecks
+  it before signing, including after a cap change during top-up. Funding already completed remains recorded and
+  retained. Offline-tested; no new mainnet claim. Cumulative caps and budgets still count provider withdrawals,
+  not later payments from retained funds.
 - **A wallet owner's stop may also freeze the agent** (the platform's own page, no app): a stop text ending
   `,"freeze":true` (absent is not asking; older texts are unchanged) has the platform prepare each created agent's
   `agent_freeze` through that agent's own `owner/prepare` (signer `wallet`) once the stop applies, and hand back the

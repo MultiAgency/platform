@@ -9,6 +9,13 @@ const call = (methodName: string, args: object, deposit: string) => ({
 const contractOf = (asset: string) => asset.replace(/^nep141:/, "");
 
 /**
+ * The owner's one-time registration of a market agent's payment key on USDC (docs/market.md): a USDC withdrawal to an
+ * unregistered account fails, and the provider's withdrawal can't pay for registration. Either signer sends it.
+ */
+export const registrationTransaction = (account: string) =>
+  ({ receiverId: contractOf(ASSETS.USDC), actions: [call("storage_deposit", { account_id: account, registration_only: true }, STORAGE_DEPOSIT)] });
+
+/**
  * One transaction that pays `amount` (raw units) into an agent deposit address, ready for either signer: a NEAR
  * account's wallet sends it, a DAO files the same calls as one proposal. Deposit addresses start unregistered on the
  * token, so the transfer registers them first; NEAR is wrapped. With `deposit` (an app's `treasury` or `payout` scope)

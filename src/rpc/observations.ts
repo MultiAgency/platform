@@ -1,3 +1,5 @@
+import { prepareRelease } from "../agent-release.js";
+import { releaseCheckOutput } from "../contract/agent-release.js";
 import { configuredArea } from "../area.js";
 import { DIAGNOSTIC_ONLY, readSubmissionEvidence } from "../submission-evidence.js";
 import { z } from "zod";
@@ -47,6 +49,9 @@ async function linkedDao() {
 }
 
 export const observationsRoutes = {
+  /** Internal: no owner, app, browser or machine permission reaches this procedure. */
+  releaseCheck: os.input(z.strictObject({ agentId: z.string().min(1), owner: z.string().min(1), allowBalance: z.boolean().optional() }))
+    .output(releaseCheckOutput).handler(({ input }) => prepareRelease(input)),
 
   /** Local configuration only: no provider calls or state changes. */
   instance: os.use(readOutput("instance")).handler(() => ({ agentId: process.env.AGENT_ID ?? null, executor: executes() })),

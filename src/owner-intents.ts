@@ -1,3 +1,4 @@
+import { assertNotReleased } from "./release-state.js";
 import { PublicError } from "./public-error.js";
 import lockfile from "proper-lockfile";
 import { z } from "zod";
@@ -38,6 +39,9 @@ export type OwnerAction =
   | { type: "grant_revoke"; grantId: string }
   | { type: "agent_freeze" }
   | { type: "agent_unfreeze" }
+  /** The provider's reversible retirement: it needs a frozen agent and changes nothing on chain (`agent_restore` reverses it). */
+  | { type: "agent_archive" }
+  | { type: "agent_restore" }
   | { type: "policy_update"; changes: PolicyChanges; expectedPolicy: ReviewedPolicy }
   /** Releases (or rejects) one held money action: `correlationId` is that execution's. */
   | { type: "approval_vote"; approvalId: string; verdict: "approve" | "reject"; correlationId: string };
@@ -164,7 +168,7 @@ async function withDelegateLock<T>(owner: string, run: (assertHeld: () => void) 
 /** Serialize the full read/modify/write lifecycle, including async status/signature checks.
  * Reload only after acquiring the cross-process lock. Atomic rename alone cannot merge stale maps.
  * Like the money lock this is single-host coordination, not distributed fencing. */
-function withOwnerLock<T>(run: () => Promise<T>): Promise<T> {
+export function withOwnerLock<T>(run: (assertCurrent: () => void) => Promise<T>): Promise<T> {
   const next = ownerQueue.then(async () => {
     mkdirSync(dirname(PENDING_FILE), { recursive: true, mode: 0o700 });
     let held = true;
@@ -177,7 +181,7 @@ function withOwnerLock<T>(run: () => Promise<T>): Promise<T> {
     try {
       pending = readPending();
       if (expire() || [...pending.values()].some((p) => p.grantToken && (p.ownerSucceeded || p.stage === "settled"))) savePending();
-      return await run();
+      return await run(assertOwnerLock);
     } finally {
       const owned = held;
       held = false;
@@ -276,6 +280,8 @@ export function prepare(action: OwnerAction, signer: Signer = "wallet") {
 }
 
 async function prepareLocked(action: OwnerAction, signer: Signer) {
+  assertNotReleased();
+  if (signer === "dao" && (action.type === "agent_archive" || action.type === "agent_restore")) throw new PublicError("Archive and restore through apps currently support wallet owners only.");
   if (process.env.HOSTED_OWNER && action.type === "agent_create" && [...pending.values()].some(p => p.type === "agent_create" && p.stage !== "settled"))
     throw new PublicError("Agent creation already has an open owner action. Follow its existing record before preparing another.");
   const vote = action.type === "approval_vote" ? await checkPaymentApproval(action) : undefined;
@@ -437,6 +443,7 @@ async function reconcileOne(correlationId: string, prepared: Prepared) {
       await configureCreatedAgent(owner.agent_id);
     }
     if (prepared.grantToken) promoteGrantToken(prepared.grantToken);
+    if (prepared.type === "agent_restore" && process.env.RESTORE_REQUIRED === agentId()) saveEnv({ RESTORE_REQUIRED: "" });
     prepared.ownerSucceeded = true;
     savePending();
   }
@@ -456,6 +463,7 @@ async function reconcileOne(correlationId: string, prepared: Prepared) {
 }
 
 const sendSignature = async (correlationId: string, prepared: Prepared, signedData: Record<string, unknown>) => {
+  assertNotReleased();
   assertOwnerLock();
   if (prepared.type !== "approval_vote") return api.submitIntent({ type: prepared.type, correlation_id: correlationId, signed_data: signedData } as SubmitIntentRequest);
   if (!prepared.paymentApproval) throw new Error("Legacy approval has no exact payment binding; prepare a new vote");
@@ -486,6 +494,7 @@ export function submit(correlationId: string, signedData: Record<string, unknown
  * was prepared; a DAO's is found on chain, already verified against the prepared hash (`findSignature`).
  */
 async function submitLocked(correlationId: string, signedData: Record<string, unknown>, from: "wallet" | "dao") {
+  assertNotReleased();
   assertOwnerLock();
   const prepared = pending.get(correlationId);
   if (!prepared) throw new PublicError("Unknown intent");

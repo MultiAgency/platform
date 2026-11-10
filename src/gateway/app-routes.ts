@@ -1,6 +1,9 @@
+import { releaseInput, appReleaseOutput } from "../contract/agent-release.js";
+import type { HostedAgents } from "./hosted-agents.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { daoPolicy } from "../chain.js";
 import { z } from "zod";
+import type { Area } from "../contract/areas.js";
 import { readJson, sendJson as json } from "../http.js";
 import { chainKeyState, hourlyLimit, type KeyLookup, type KeyStateLookup } from "../signin.js";
 import { appendSynced } from "../synced.js";
@@ -14,9 +17,13 @@ import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import { proposalText, proposalView } from "../contract/treasury-proposals.js";
+import { hireTerms, marketBrief, payoutRequestId } from "../contract/inputs.js";
+import { hireText, marketApproveInput, MAX_HIRE_APPROVAL_MS } from "../contract/market.js";
+import { marketHireOutput } from "../contract/owner-outputs.js";
+import { createHash } from "node:crypto";
 import type { Router } from "../router.js";
 import { agentOrigin } from "./agent-origin.js";
-import { chainDaoVotes, daoConsent, type DaoConsentRequest, type DaoFiled, type DaoRequest, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
+import { chainDaoVotes, daoConsent, type DaoConsentRequest, type DaoFiled, type DaoRequest, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoHire, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
 import { AuthorityUnanswered, chainDaoOwner, type DaoOwnerReads, resolveDaoAuthority, resolveWalletAuthority } from "./machine-authority.js";
 import { forwardRpc } from "./rpc-proxy.js";
 import { issueNonce, nonceIssuedAt } from "./consent-nonce.js";
@@ -36,6 +43,9 @@ const FOLLOW_CREATION = new Set(["owner/status", "owner/actions", "owner/pending
 const reservationQuery = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
   owner: setupRequest.shape.owner.optional(), area: setupRequest.shape.area.optional() });
 const daoConsentFiling = z.strictObject({ message: z.string().min(1).max(2_048) });
+/** A DAO's approval of one market hire, as an app asks for it: the terms it quoted, the brief, and how long the approval may last. */
+const daoHireFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), agent: z.string().regex(/^[a-z0-9-]{1,32}$/),
+  requestId: payoutRequestId, brief: marketBrief, approved: hireTerms, validUntil: z.iso.datetime() });
 const daoVoteFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), agent: z.string().regex(/^[a-z0-9-]{1,32}$/),
   proposal: z.string().min(1).max(128), verdict: z.enum(["approve", "reject"]) });
 /** The gateway's own call to an agent, as this app under one of its consents: the agent applies its usual checks. */
@@ -51,7 +61,7 @@ export const appSetupAreas = (appSetup: readonly string[], site?: { hostedAreas?
   appSetup.filter(area => !site || (site.hostedAreas ?? []).includes(area));
 
 /** Reserves (or finds) and starts the hosted agent for an owner (a wallet, or a DAO by its vote), area, app deployment and Organization; throws to refuse. */
-export type HostedSetup = (input: { owner: string; kind: "wallet" | "dao"; area: "treasury" | "payables"; deployment: string; organization: string }) => Promise<AgentEntry>;
+export type HostedSetup = (input: { owner: string; kind: "wallet" | "dao"; area: Area; deployment: string; organization: string }) => Promise<AgentEntry>;
 /**
  * An agent an app set up belongs to that deployment and Organization: no other deployment or Organization reaches it,
  * whatever consent is signed, since a consent names the agent by a generated name its owner can't tell apart.
@@ -71,7 +81,7 @@ export type AppRouteOptions = { keyState?: KeyStateLookup; setup?: HostedSetup; 
   /** The areas `setup` reserves agents for on this host: a DAO's setup for any other is refused before its vote is filed. */
   setupAreas?: readonly string[];
   /** The gateway's secret, from which consent nonces are signed (`consent-nonce.ts`). Without it none is issued or recognised. */
-  nonceSecret?: string };
+  nonceSecret?: string; hosted?: HostedAgents; stopHosted?: (name: string) => Promise<void> };
 
 export async function appRoutes(req: IncomingMessage, res: ServerResponse, pathname: string, host: string,
   selected: AgentEntry[], stopping: () => boolean, options: AppRouteOptions = {}): Promise<boolean> {
@@ -140,23 +150,26 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
    * stored (and ends it) or is found here.
    */
   const signedBeforeStop = (owner: string, agent: string | undefined, nonce: string) => {
-    const cutoff = walletStopCutoff(ROOT, { host, owner, agent });
-    if (cutoff === null) return false;
+    const stoppedAt = walletStopCutoff(ROOT, { host, owner, agent });
+    const releasedAt = agent === undefined ? [] : (options.hosted?.releases() ?? []).filter(r => r.name === agent && r.owner === owner).map(r => Date.parse(r.at));
+    const cutoff = Math.max(stoppedAt ?? -Infinity, ...releasedAt);
+    if (cutoff === -Infinity) return false;
     const issued = options.nonceSecret ? nonceIssuedAt(options.nonceSecret, { host, deployment: credential.deployment }, nonce) : null;
     return issued === null || issued <= cutoff;
   };
-  const ownerStopped = () => json(res, 409, { code: "owner_stopped", error: "The owner stopped this agent's app access, and this text may have been signed before that. Nothing was stored; ask the platform for a consent nonce and ask the owner to sign the text with it." });
+  const ownerStopped = () => json(res, 409, { code: "owner_stopped", error: "The owner stopped or released this agent, and this text may have been signed before that. Nothing was stored; ask the platform for a consent nonce and ask the owner to sign the text with it." });
   const stoppedAnswer = () => json(res, 409, { code: "dao_stopped", error: "The DAO stopped this agent after this consent was filed. Nothing was stored; file a new consent for the DAO's vote." });
   /** A DAO-owned agent this app reaches under a live DAO consent with `treasury`, as it is now; or why not. */
-  const daoTreasury = async (name: string, organization: string) => {
+  /** A DAO's agent for this app and Organization, and its live DAO consents carrying `scope`: `treasury` for votes, `market` for hires. */
+  const daoAgent = async (name: string, organization: string, scope: "treasury" | "market" = "treasury") => {
     const agent = selected.find(a => a.name === name && reachable(a, credential.deployment, organization));
     if (!agent) return { code: "no_consent", error: "This host has no such agent for this app and Organization" };
     const authority = await resolveDaoAuthority(agent, daoOwner);
     if (!authority) return { code: "owner_changed", error: "This agent isn't owned by a DAO's derived account now" };
     if (authority.agentId === null) return { code: "not_created", error: "This DAO's agent isn't created yet" };
     const covering = consents.live({ deployment: credential.deployment, host, organization, agent: name })
-      .filter(c => c.signer === "dao" && c.owner === agent.owner && c.agentId === authority.agentId && c.scopes.includes("treasury"));
-    if (!covering.length) return { code: "no_consent", error: "No live DAO consent with treasury covers this Organization and agent" };
+      .filter(c => c.signer === "dao" && c.owner === agent.owner && c.agentId === authority.agentId && c.scopes.includes(scope));
+    if (!covering.length) return { code: "no_consent", error: `No live DAO consent with ${scope} covers this Organization and agent` };
     // The longest-lived one, so a vote filed under it has the most time to pass.
     const consent = covering.reduce((best, c) => c.expiresAt > best.expiresAt ? c : best);
     return { agent, authority, consent, live: covering.map(c => c.id) };
@@ -175,7 +188,20 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
         && (owner === undefined || a.owner === owner) && (area === undefined || a.area === area)
         ? [{ agent: a.name, organization, owner: a.owner, area: a.area }] : [];
     });
+    for (const r of options.hosted?.releases() ?? []) {
+      if (r.state === "restored" || r.deployment !== credential.deployment || r.organization !== organization ||
+        (owner !== undefined && r.owner !== owner) || (area !== undefined && r.area !== area)) continue;
+      const existing = agents.findIndex(a => a.agent === r.name);
+      if (existing >= 0) agents.splice(existing, 1);
+      agents.push({ agent: r.name, organization, owner: r.owner, area: r.area, released: true } as typeof agents[number]);
+    }
     json(res, 200, { agents }); return true;
+  }
+
+  const target = pathname.match(/^\/apps\/v1\/(?:agents\/([a-z0-9-]{1,32})|o\/([A-Za-z0-9_-]{1,128})\/a\/([a-z0-9-]{1,32})\/rpc\/)/);
+  const gone = target && options.hosted?.released(target[1] ?? target[3]!);
+  if (gone && gone.deployment === credential.deployment && (target[2] === undefined || gone.organization === target[2])) {
+    json(res, 410, { code: "agent_released", error: "This agent's hosted reservation was released. Its owner must sign a fresh setup with a platform-issued nonce to restore it." }); return true;
   }
 
   // What the owner signs names the agent's current provider ID, so the app reads it here first.
@@ -204,7 +230,13 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     // Whether its consent can be stored, before reserving anything for it: a stop for every agent covers one not reserved yet.
     consents.admit(setupConsent(verified, "pending"));
     if (signedBeforeStop(verified.setup.owner, undefined, verified.signed.nonce)) { ownerStopped(); return true; }
-    const known = new Set(selected.map(a => a.name));
+    const lastRelease = options.hosted?.releases().findLast(r => r.deployment === credential.deployment && r.organization === verified.setup.organization &&
+      r.owner === verified.setup.owner && r.area === verified.setup.area);
+    if (lastRelease) {
+      const issued = options.nonceSecret ? nonceIssuedAt(options.nonceSecret, { host, deployment: credential.deployment }, verified.signed.nonce) : null;
+      if (issued === null || issued <= Date.parse(lastRelease.at)) { ownerStopped(); return true; }
+    }
+    const known = new Set(selected.filter(a => !options.hosted?.released(a.name)).map(a => a.name));
     let agent: AgentEntry;
     try { agent = await options.setup({ owner: verified.setup.owner, kind: "wallet", area: verified.setup.area, deployment: credential.deployment, organization: verified.setup.organization }); }
     catch (error) { json(res, 409, { code: "setup_failed", error: error instanceof Error ? error.message : "The agent couldn't be set up" }); return true; }
@@ -246,6 +278,7 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was stored." }); return true; }
     if (!stillAuthorized()) { json(res, 403, { code: "access_ended", error: "Access ended before storing. Nothing was stored." }); return true; }
     if (signedBeforeStop(verified.owner, agent.name, verified.nonce)) { ownerStopped(); return true; }
+    if (options.hosted?.released(agent.name)) { json(res, 410, { code: "agent_released", error: "This agent was released while the consent was checked. Nothing was stored." }); return true; }
     const record = consents.store(verified);
     appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
       event: "consent", consent: record.id, organization: record.organization, owner: record.owner, agent: record.agent, scopes: record.scopes });
@@ -372,7 +405,7 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     const body = daoVoteFiling.safeParse(await readJson(req));
     if (!body.success) { json(res, 400, { code: "invalid_request", error: "Send organization, agent, proposal and verdict (approve or reject)." }); return true; }
     const { organization, agent: name, proposal: id, verdict } = body.data;
-    const found = await daoTreasury(name, organization);
+    const found = await daoAgent(name, organization);
     if ("error" in found) { json(res, 403, found); return true; }
     const { agent, authority, consent, live } = found;
     let proposal: z.infer<typeof proposalView>;
@@ -399,7 +432,7 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     const signature = await daoSignature(record, () => ({ state: "pending", request: publicDaoVote(record) }));
     if (!signature) return true;
     // The consent it was filed under must still be live, and the agent still the DAO's with that identity.
-    const found = await daoTreasury(record.agent, record.organization);
+    const found = await daoAgent(record.agent, record.organization);
     if ("error" in found || !found.live.includes(record.under)) {
       json(res, 409, { code: "consent_ended", error: "The DAO signed, but its consent for this app ended or the agent changed. Nothing was relayed." }); return true;
     }
@@ -431,12 +464,122 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     json(res, 200, { state: "relayed", request: publicDaoVote(relayed), proposalState: relayed.relayed!.state }); return true;
   }
 
+  // A DAO's approval of one market hire (docs/market.md): the platform files it from its own text of the hire's terms, and
+  // relays the DAO's signature to the agent, which checks the key is its DAO owner's and then pays the hire once.
+  if (pathname === "/apps/v1/dao-hires") {
+    if (req.method !== "POST") { json(res, 405, { code: "invalid_request", error: "Use POST" }); return true; }
+    const body = daoHireFiling.safeParse(await readJson(req));
+    if (!body.success) { json(res, 400, { code: "invalid_request", error: "Send organization, agent, requestId, brief, approved (a market/quote answer) and validUntil." }); return true; }
+    const { organization, agent: name, requestId, brief, approved, validUntil } = body.data;
+    if (createHash("sha256").update(brief).digest("hex") !== approved.brief) { json(res, 400, { code: "brief_mismatch", error: "The brief isn't the one these terms were quoted for. Nothing was filed." }); return true; }
+    const found = await daoAgent(name, organization, "market");
+    if ("error" in found) { json(res, 403, found); return true; }
+    const { agent, authority, consent } = found;
+    // The approval ends when the app asks, within the consent it is relayed under and Sputnik's default proposal period.
+    const until = Math.min(Date.parse(validUntil), consent.expiresAt, Date.now() + MAX_HIRE_APPROVAL_MS);
+    if (!Number.isFinite(until) || until <= Date.now() + 60_000) { json(res, 409, { code: "expires_too_soon", error: "This approval, or the consent it would be relayed under, ends too soon for a vote. Nothing was filed." }); return true; }
+    const ends = new Date(until).toISOString();
+    const filed = daoFiled(await daoRequests.file({ kind: "hire", deployment: credential.deployment, host: host.toLowerCase(), organization, dao: agent.owner,
+      agent: name, agentId: consent.agentId, requestId, approved, brief, validUntil: ends, under: consent.id, expiresAt: until,
+      message: hireText({ requestId, agentId: consent.agentId, deployment: credential.deployment, organization, approved, validUntil: ends }),
+      signer: { account_id: authority.signer.account_id, public_key: authority.signer.public_key } }, { bond: authority.policy.proposal_bond, stopping,
+      log: record => ({ deployment: credential.deployment, credential: credential.id, event: "dao-hire-filed", request: record.id,
+        consent: consent.id, organization, owner: agent.owner, agent: name, requestId }) }));
+    if (!filed) return true;
+    json(res, 201, { request: publicDaoHire(filed.record), transactions: filed.transactions }); return true;
+  }
+  const hireState = pathname.match(/^\/apps\/v1\/dao-hires\/([a-f0-9]{64})$/);
+  if (hireState) {
+    if (req.method !== "GET") { json(res, 405, { code: "invalid_request", error: "Use GET" }); return true; }
+    const record = daoRequests.read(hireState[1]!);
+    if (record?.kind !== "hire" || record.deployment !== credential.deployment || record.host !== host.toLowerCase()) { json(res, 404, { code: "not_found", error: "No such DAO hire approval" }); return true; }
+    if (record.relayed) { json(res, 200, { state: "relayed", request: publicDaoHire(record), hireState: record.relayed.state }); return true; }
+    const signature = await daoSignature(record, () => ({ state: "pending", request: publicDaoHire(record) }));
+    if (!signature) return true;
+    const found = await daoAgent(record.agent, record.organization, "market");
+    if ("error" in found || !found.live.includes(record.under)) {
+      json(res, 409, { code: "consent_ended", error: "The DAO signed, but its market consent for this app ended or the agent changed. Nothing was relayed." }); return true;
+    }
+    if (found.authority.signer.public_key !== record.signer.public_key || found.authority.agentId !== record.agentId) {
+      json(res, 409, { code: "agent_changed", error: "The DAO signed, but the agent is no longer that DAO's agent with that identity. Nothing was relayed." }); return true;
+    }
+    if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was relayed; read again." }); return true; }
+    if (!stillAuthorized() || !consents.live({ deployment: credential.deployment, host, organization: record.organization, agent: record.agent }).some(c => c.id === record.under)) {
+      json(res, 403, { code: "access_ended", error: "Access ended before relaying. Nothing was relayed." }); return true;
+    }
+    const approval = marketApproveInput.parse({ requestId: record.requestId, brief: record.brief, approved: record.approved, validUntil: record.validUntil,
+      signed: { message: record.message, nonce: record.nonce, publicKey: record.signer.public_key, signature: signature.toString("base64") } });
+    let answer: unknown;
+    // Relaying again is answered from the agent's journal: a hire is paid at most once per requestId.
+    try { answer = await agentCall(found.agent, credential.deployment, host, record.organization, record.under, found.live).market.approve(approval); }
+    catch (error) {
+      json(res, 409, { code: "agent_refused", error: `The agent refused the DAO's approval: ${error instanceof Error ? error.message : "refused"}. Reading again relays the same signature.` }); return true;
+    }
+    const relayed = daoRequests.hireRelayed(record.id, marketHireOutput.safeParse(answer).data?.state ?? "unknown");
+    appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
+      event: "dao-hire-relayed", request: record.id, consent: record.under, organization: record.organization, owner: record.dao, agent: record.agent,
+      requestId: record.requestId });
+    json(res, 200, { state: "relayed", request: publicDaoHire(relayed), hireState: relayed.relayed!.state }); return true;
+  }
+
   const revoke = pathname.match(/^\/apps\/v1\/consents\/([a-f0-9]{64})$/);
   if (revoke) {
     if (req.method !== "DELETE") { json(res, 405, { code: "invalid_request", error: "Use DELETE" }); return true; }
     if (!consents.revoke(revoke[1]!, { deployment: credential.deployment, host })) { json(res, 404, { code: "not_found", error: "No such consent" }); return true; }
     appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id, event: "revoke", consent: revoke[1] });
     json(res, 200, { revoked: true }); return true;
+  }
+
+  const releaseRoute = pathname.match(/^\/apps\/v1\/o\/([A-Za-z0-9_-]{1,128})\/a\/([a-z0-9-]{1,32})\/release$/);
+  if (releaseRoute) {
+    if (req.method !== "POST") { json(res, 405, { code: "invalid_request", error: "Use POST" }); return true; }
+    const parsed = releaseInput.safeParse(await readJson(req));
+    if (!parsed.success) { json(res, 400, { code: "invalid_request", error: "Send only allowBalance, if needed." }); return true; }
+    const registry = options.hosted;
+    if (!registry || !options.stopHosted) { json(res, 403, { code: "not_allowed", error: "Hosted release isn't available here." }); return true; }
+    const [, organization, name] = releaseRoute as [string, string, string];
+    const agent = selected.find(a => a.name === name && reachable(a, credential.deployment, organization));
+    const previous = registry.released(name);
+    if ((!agent || !(agent as { deployment?: string }).deployment) && (!previous || previous.deployment !== credential.deployment || previous.organization !== organization)) {
+      json(res, 403, { code: "no_consent", error: "No hosted reservation for this app and Organization." }); return true;
+    }
+    await registry.withLifecycle(name, async assertCurrent => {
+      // A durable release record proves this hosting-only transition was already authorized. Complete it after a crash
+      // even when its consents have been revoked; the service credential still binds the deployment and Organization.
+      let record = registry.released(name);
+      if (!record) {
+        const authority = agent && await resolveWalletAuthority(agent.owner, agent);
+        if (!agent || !authority?.agentId) { json(res, 403, { code: "not_owner", error: "Release needs a created wallet-owned agent." }); return; }
+        const covering = consents.live({ deployment: credential.deployment, host, organization, agent: name })
+          .filter(c => c.signer !== "dao" && c.owner === agent.owner && c.agentId === authority.agentId && c.scopes.includes("owner"));
+        const consent = covering[0];
+        if (!consent) { json(res, 403, { code: "scope", error: "A live owner consent is required to release this agent." }); return; }
+        if (!await consentKeyHolds(consents, consent, keyState)) { json(res, 403, { code: "consent_revoked", error: "The consent's signing key was removed." }); return; }
+        if (stopping() || !stillAuthorized() || !consents.live({ deployment: credential.deployment, host, organization, agent: name }).some(c => c.id === consent.id)) {
+          json(res, 503, { error: "Access changed while release was checked. Nothing further was applied." }); return;
+        }
+        const checked = await agentCall(agent, credential.deployment, host, organization, consent.id, covering.map(c => c.id)).releaseCheck({ ...parsed.data, owner: agent.owner, agentId: authority.agentId }, { signal: AbortSignal.timeout(60_000) });
+        if (checked.state === "refused") { json(res, 200, appReleaseOutput.parse(checked)); return; }
+        assertCurrent();
+        // The marker is already durable. If authority ends here, leave it blocked; recovery may finish only after a new consent.
+        if (!stillAuthorized() || !consents.live({ deployment: credential.deployment, host, organization, agent: name }).some(c => c.id === consent.id)) {
+          json(res, 503, { error: "Access ended after the executor was marked. It remains blocked; restore consent before completing release." }); return;
+        }
+        record = registry.release(name, checked);
+      }
+      if (record.deployment !== credential.deployment || record.organization !== organization) {
+        json(res, 403, { code: "no_consent", error: "No reservation for this app and Organization." }); return;
+      }
+      assertCurrent();
+      const releasing = record;
+      for (const c of consents.list({}).filter(c => c.agent === name && c.owner === releasing.owner))
+        consents.revoke(c.id, null, Date.now(), "agent-release");
+      await options.stopHosted!(name);
+      assertCurrent();
+      record = registry.completeRelease(name);
+      json(res, 200, appReleaseOutput.parse({ state: "released", agent: name, agentId: record.agentId, at: record.at, archiveCorrelationId: record.archiveCorrelationId }));
+    });
+    return true;
   }
 
   const call = pathname.match(/^\/apps\/v1\/o\/([A-Za-z0-9_-]{1,128})\/a\/([a-z0-9-]{1,32})\/rpc\/([A-Za-z][A-Za-z0-9]*(?:\/[A-Za-z][A-Za-z0-9]*)*)$/);

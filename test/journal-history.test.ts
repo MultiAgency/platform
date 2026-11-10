@@ -52,15 +52,18 @@ test("every line shape the journal reader folds projects as a record, never a ma
     { at, idempotencyKey: "l", kind: "swap", request: {}, correlation_id: "op-l", status: "SENT" },
     { at, idempotencyKey: "n", correlation_id: "op-n" },
     { at, idempotencyKey: "a", authorization: { version: 1 } },
+    { at, idempotencyKey: "x", kind: "market-hire", request: {}, method: "x402", journalVersion: 2 },
   ].map((line) => JSON.stringify(line)).join("\n");
   const h = parseJournalHistory("agent", source);
-  // A withdrawal's method isn't in the published record, so the export says it was dropped, not that none was recorded.
-  assert.deepEqual(h.gaps, [{ code: "method_not_exported", line: 1 }]);
+  // A withdrawal's or a market payment's method isn't in the published record, so the export says it was dropped, not
+  // that none was recorded.
+  assert.deepEqual(h.gaps, [{ code: "method_not_exported", line: 1 }, { code: "method_not_exported", line: 5 }]);
   assert.deepEqual(h.records.map(({ line, idempotencyKey, type, correlationId, status, method }) => ({ line, idempotencyKey, type, correlationId, status, method })), [
     { line: 1, idempotencyKey: "w", type: "request", correlationId: undefined, status: undefined, method: undefined },
     { line: 2, idempotencyKey: "l", type: "request", correlationId: undefined, status: undefined, method: undefined },
     { line: 2, idempotencyKey: "l", type: "status", correlationId: "op-l", status: "SENT", method: undefined },
     { line: 3, idempotencyKey: "n", type: "status", correlationId: "op-n", status: undefined, method: undefined },
+    { line: 5, idempotencyKey: "x", type: "request", correlationId: undefined, status: undefined, method: undefined },
   ]);
 });
 

@@ -154,7 +154,7 @@ Each line is a gap; the linked page says how the rest is known. The
   ([platform production](docs/platform-production.md)). Mainnet-observed on staging: confidential USDC payouts (2026-10-28) and
   withdrawals of wNEAR or USDC to agreed NEAR accounts (2026-10-30), and DAO-owned agents (below) ([mainnet log](docs/mainnet-log.md)).
   Approving a held withdrawal is offline- and stack-tested, not mainnet-observed, and its signature doesn't bind
-  `destination_asset` ([enforcement](docs/enforcement.md)); at most 32 hosted agents per host, and at most 16 Organization agents per app deployment on a host, over its whole lifetime: a hosted agent is never released (#46). A dishonest app can still get a blind NEP-366 signature
+  `destination_asset` ([enforcement](docs/enforcement.md)); at most 32 reserved hosted agents per host, and at most 16 Organization agents per app deployment on a host. Wallet-owned reservations can be explicitly released in the 0.5.6 candidate after owner-signed archive (offline- and stack-tested, not deployed; [release](docs/agent-release.md)); DAO release remains unimplemented (#46). A dishonest app can still get a blind NEP-366 signature
   by having the owner sign the confirm link's text on its own page; a held payout's vote text names no payee or amount,
   so the app's display is the only place the owner sees them; an owner who signs the platform's sign-in text on an
   app's page gives it a full session; a service credential is a bearer. See [app access](docs/app-access.md).

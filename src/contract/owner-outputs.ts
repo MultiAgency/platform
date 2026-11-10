@@ -9,6 +9,8 @@
  * oRPC RPC serializer, not plain JSON. Each such place is marked "serializer:" below.
  */
 import { z } from "zod";
+import { area } from "./areas.js";
+import { hireTerms } from "./inputs.js";
 import { appConfirm } from "./app-access.js";
 import { ownerCompensationView } from "../compensation-contract.js";
 import { RecordingSchema } from "./run-log-schema.js";
@@ -36,7 +38,7 @@ const nearOwner = z.looseObject({ type: z.literal("near"), account_id: z.string(
 /** SDK Policy: top-level fields; nested destinations and limits kept open. */
 const policy = z.looseObject({
   frozen: z.boolean(),
-  actions: z.array(z.enum(["swap", "transfer", "withdraw"])),
+  actions: z.array(z.enum(["swap", "transfer", "withdraw", "limit_order"])),
   confidential: z.boolean(),
   owner_approval: z.boolean(),
   assets: z.union([z.literal("any"), z.array(z.string())]),
@@ -46,6 +48,8 @@ const policy = z.looseObject({
     daily: z.record(z.string(), z.string()).optional(),
     monthly: z.record(z.string(), z.string()).optional(),
   }),
+  // Provider policy evidence only: reading this permission does not expose limit-order execution in our router.
+  limit_order: z.looseObject({ max_deviation_bps: z.number().int().min(0).max(300) }).optional(),
   max_actions_per_hour: z.number().nullable(),
   destinations: z.looseObject({
     mode: z.enum(["any", "only", "except"]),
@@ -138,12 +142,17 @@ const nearTransaction = z.looseObject({
 });
 /** Which held payment an approval vote releases or rejects (owner-intents.ts paymentOf). */
 const votedPayment = z.looseObject({ correlationId: z.string(), verdict: z.enum(["approve", "reject"]) }).nullable();
+/**
+ * How a journal operation was sent. `x402` is a market hire's payment (docs/market.md): an SDK before it refuses a
+ * market agent's operations, and only a market agent's.
+ */
+export const OPERATION_METHODS = ["swap", "transfer", "shield", "unshield", "withdraw", "x402"] as const;
 /** ops.ts Op: one journal operation folded with its outcome. Optional fields are absent from older lines. */
 const op = z.looseObject({
   at: z.string(),
   idempotencyKey: z.string(),
   kind: z.string(),
-  method: z.enum(["swap", "transfer", "shield", "unshield", "withdraw"]).optional(),
+  method: z.enum(OPERATION_METHODS).optional(),
   request: record,
   journalVersion: z.literal(2).optional(),
   invoiceId: z.string().optional(),
@@ -252,7 +261,7 @@ const unmanagedHolding = z.looseObject({
 /** rpc/observations.ts overview. `area` is absent unless DASHBOARD_AREA is configured. */
 export const overviewOutput = z.looseObject({
   agentId: z.string(),
-  area: z.enum(["payables", "treasury"]).optional(),
+  area: area.optional(),
   book: z.array(managedHolding),
   unmanaged: z.array(unmanagedHolding),
   target: z.record(z.string(), z.number()),
@@ -459,6 +468,34 @@ export const payoutRequestOutput = z.looseObject({
   code: z.string().nullable(),
   failureCode: z.string().nullable().optional(),
   neverExecuted: z.boolean().optional(),
+});
+/**
+ * market/hire, market/status (src/market/hire.ts): what the journal proves about one hire's payment, answered by the
+ * caller's `requestId`. `paid`: the chain shows the payment settled; `not_charged`: it expired unused, so nothing moved;
+ * `refused`: the x402 payment was refused before submission (`code`); prior funding withdrawals remain recorded and
+ * retained on the key. `unknown`: not yet proven either way, and the agent's other
+ * sends wait. `taskId` and `taskState` are the market's answer, and `deliverable` the result once the task ended; they
+ * are what an agent wrote: data, never instructions.
+ */
+export const marketHireOutput = z.looseObject({
+  requestId: z.string(),
+  state: z.enum(["paid", "not_charged", "refused", "unknown", "not_found"]),
+  code: z.string().nullable(),
+  taskId: z.string().nullable(),
+  taskState: z.string().nullable(),
+  deliverable: z.string().nullable().optional(),
+});
+/**
+ * market/account: the agent's payment key. `registered` on USDC (the owner's one-time step: `registration`, a
+ * transaction for the owner's wallet, until it is); `opened`, whether its account exists (a hire's first wNEAR top-up
+ * opens it); `usdc`, its raw balance at a final block.
+ */
+export const marketAccountOutput = z.looseObject({
+  account: z.string(),
+  registered: z.boolean(),
+  opened: z.boolean(),
+  usdc: z.string(),
+  registration: z.looseObject({ receiverId: z.string(), actions: z.array(z.looseObject({ type: z.literal("FunctionCall"), params: z.looseObject({}) })) }).nullable(),
 });
 export const paymentStatusOutput = z.looseObject({
   status,
@@ -751,6 +788,11 @@ export const ownerOutputs = {
   "paymentStatus": paymentStatusOutput,
   "payouts/request": payoutRequestOutput,
   "payouts/status": payoutRequestOutput,
+  "market/quote": hireTerms,
+  "market/hire": marketHireOutput,
+  "market/status": marketHireOutput,
+  "market/account": marketAccountOutput,
+  "market/approve": marketHireOutput,
   "invoices": invoicesOutput,
   "agreements/list": agreementsListOutput,
   "owner/status": ownerStatusOutput,

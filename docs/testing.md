@@ -56,8 +56,8 @@ repair missing identity, synchronization, freshness or authorization evidence be
 
 `test/payout-double.test.ts` runs each payout scenario through the SDK's `appClient` twice, against
 `@multiagency/sdk/testing`'s payout double and against the agent's real procedures (journal, money lock, `dispatch`,
-`authorize`) behind a provider stand-in, and requires the same answers: the double's restated request semantics fail
-there before they can drift.
+`authorize`) behind a provider stand-in, and requires the same answers. The double runs the platform's own `authorize` and journal answer (`src/payout-answer.ts`);
+what it still restates (the order of a request's checks, the gateway's refusals, the provider) fails there before it can drift.
 
 Source-boundary checks parse TypeScript/TSX, including runtime re-exports and literal dynamic imports.
 They reject non-literal module loading in inspected dependency graphs and constrain grant-factory
@@ -229,8 +229,13 @@ A rejected held payout ending `FAILED` with no movement is an assumption, not ob
 SDK guidance (`pnpm contract:skills`, after `pnpm contract:pack`): installs the packed `@multiagency/sdk` tarball in an
 isolated npm consumer, typechecks every `ts` fence of the shipped `skills/*/SKILL.md` (strict NodeNext, no Node types),
 runs each example against stand-in servers (an oRPC owner agent and a payee entry) asserting what is sent and how often
-(a lost read is read again once; a lost submit, stream or report is read by its kept identity, never resent), then runs
+(a lost read is read again once; a lost submit, stream or report is read by its kept identity, never resent), loads the
+contract, testing and JSON Schema entries, runs a `payoutDouble` payout through an app's own `fetch`, then runs
 `intent validate` with the unpublished `_artifacts`, `intent list` and `intent load`. It needs the npm registry.
+`pnpm sdk:bun` (in CI, after `pnpm contract:pack`) runs that runner under Bun (1.4.2 in CI) in the same consumer: the
+examples, the entries (not the Node-only release server) and the payout (request, held, vote, settle, status). It doesn't
+typecheck, run Intent, reach a gateway or exercise Bun's `tls.ca` against the stack; without `bun` it prints SKIPPED and
+checks nothing.
 
 The runner sanitizes its environment and installs the offline Node network guard in application
 children; browser routing blocks unexpected external requests and WebSockets. Unknown simulator
@@ -262,6 +267,9 @@ instead of `--treasury` for the same agent owned by the simulated DAO (apps reac
 owner signatures are DAO votes the `daoVote` control passes; it needs `--app`),
 `--app <deployment>` for an app deployment's server on `/apps/v1` (a service credential issued at startup into
 `stack/app-credential`, mode 0600, never into `state.json`; self-service setup of the deployment's own Payables agents),
+`--market` with `--app` for a simulated agent market ([agent market](market.md); `test/e2e/market.mjs`: listed agents `writer`,
+which delivers, and `refuser`, which rejects every task; `state.json` gives its `market.url`) and app setup of market agents,
+whose top-ups land on its chain,
 `--on-chain-policy-edits` for the simulator to answer freeze, unfreeze and a policy edit that changes a
 provider-enforced field as NEP-366, for the Payables and Treasury agents alike (the app then receives only a confirm link),
 `--headed` or `--no-browser`) builds the same isolated stack for app-owned workflow
@@ -293,8 +301,10 @@ delegate action of function calls, as the platform's confirm page asks the walle
 `{ accountId, signedDelegate }`, base64), `daoVote` (`hash`: the DAO passes the proposal that signs that 64-hex hash, as a member's
 transaction names it in its `v1.signer` call), `daoConfidentialSetup` (the DAO is set up for confidential intents: its key on
 Trezu's path, the DAO's own name, is registered on `intents.near`, as Trezu's `add_public_key` does, and `treasury/get` reads it
-`confidential` from then on; with `--dao-treasury`) or `machineCredential` (`scopes`, optional `label` and `ttlSeconds`: the owner
-signs in with the fixture key and issues a `portfolio` credential); its result appears as `<name>.result.json`,
+`confidential` from then on; with `--dao-treasury`), `marketRegister` (`account`: the owner's one-time registration of a market
+agent's payment key on USDC, the transaction `market/account` hands the app; with `--market`), `marketAdvance` (`blocks`,
+default 1300: the market chain moves on, so a hire's unused payment expires and reads `not_charged`) or `machineCredential`
+(`scopes`, optional `label` and `ttlSeconds`: the owner signs in with the fixture key and issues a `portfolio` credential); its result appears as `<name>.result.json`,
 `{ ok, value }` or `{ ok: false, error }`. Create `stack/stop` to stop. Every service the stack starts (gateway, agent
 servers, hosted agents, release servers) also ends on its own when the process that started it dies without stopping it,
 such as a killed stack, a failed start or a test abandoned at its timeout (`test/e2e/exit-with-parent.cjs`;

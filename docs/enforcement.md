@@ -228,7 +228,17 @@ are covered in the Treasury app's `test/browser/strategy.cjs`; they are not depl
 
 ## Recovery limitation
 
-**Provider SDK 0.8.0 (locked in `pnpm-lock.yaml` 2026-11-06; 0.7.3 from 2026-10-30, 0.7.2 from 2026-10-28, 0.7.1 from
+**Provider SDK 0.8.2 (0.5.6 candidate, 2026-11-10).** The dependency and lockfile pin 0.8.2 exactly. Official SDK source
+`416597b0c63a426b225b98b6d175c03bfb6a7947` adds limit-order methods and signed 1Click quote inputs for native EVM/Solana
+sign-intent; the platform exposes neither feature. Policy reads/previews accept the provider's `limit_order` action
+and price-deviation setting without changing its signed policy or dropping that evidence during unrelated edits.
+The transport and existing money methods remain compatible in offline tests. A lost reply still makes one transport
+attempt with the original idempotency key. New documented errors, including `invalid_address` at 409 and limit-order
+price errors, do not become proven non-execution automatically: attempted sends remain unresolved under the existing
+classification. This upgrade does not establish a deployed provider version or new mainnet observations. See
+[the source review and compatibility checks](provider-sdk-082.md).
+
+**Earlier provider SDK 0.8.0 (locked in `pnpm-lock.yaml` 2026-11-06; 0.7.3 from 2026-10-30, 0.7.2 from 2026-10-28, 0.7.1 from
 2026-10-26): documented refusals not adopted.** No upgrade changes a classification rule. 0.8.0 accepts any non-empty
 API key (0.7.3 refused at startup any key that isn't `naa_` and 43 characters), for the partner portal's keys: the
 provider retires keys created before the portal with `api_key_retired` (401), and answers `key_verification_unavailable`
@@ -959,6 +969,31 @@ Limits:
   proposals are invalidated. The owner's own plans run without the floor. Read from the code, not tested.
 - A DAO's proposals are public, so a DAO's floor is public once its grant proposal is filed.
 
+### Market hires: the payment key (0.5.6, offline-tested)
+
+A market agent hires listed agents on the NEAR AI Agent Market over x402 ([agent market](market.md)). The provider
+enforces every send up to the agent's payment key: the market policy lets the agent `withdraw` only USDC and wNEAR,
+only to chain `near`, only to that key's account, within its caps and budget, and `authorize` refuses a top-up beyond
+what the hire still needs. The platform also checks the full approved USDC hire price against the current policy's
+USDC per-transaction ceiling, including a partly or fully funded key: before any funding and again for each dispatch.
+If the cap tightens after a top-up, the funding is retained and the payment refused. These are platform checks,
+offline-tested in `test/market-hire.test.ts` and `test/authorize.test.ts`, not observed on mainnet. Daily/monthly caps and
+USD budgets still count provider withdrawals, not the timing or sum of later payments from retained funds.
+The last leg, the key's signed `ft_transfer` to the market, is not the provider's: its
+payee, asset, amount and window are the platform's checks (the market's published payee, the exact terms approved,
+`authorize`'s `market` purpose), and a payment's outcome is read from the chain, never from the market's answer. What
+this exposes: whatever the key holds, at most one hire's price plus anything not charged and left on it, to whoever
+can read the agent's settings file on its host, as the grant token beside it already is. A DAO's hire is paid only on
+its signed approval, whose key the agent checks against its owner on the provider. Not yet observed through the
+platform on mainnet; the market's x402 behaviour it relies on was observed from a local prototype (2026-11-09, docs/market.md).
+A wNEAR top-up is capped at what opens the key's account (0.02 NEAR), whatever the policy's cap. A payment reads paid
+only when the key's balance dropped by exactly its amount: anyone sending USDC to the payment key meanwhile turns a
+paid hire `unknown`, which blocks the agent's sends until a person reviews it. That fails safe; it can stall the agent,
+never pay twice.
+Two gaps: a paid call whose answer is lost after the market took it loses the task id, so the deliverable can't be
+fetched though the payment may settle (the payment itself still resolves from the chain); and the gateway can't tell
+a DAO's setup's area when it forwards `agent_create`, so a role the area doesn't bind is refused by the agent, not the gateway.
+
 ### DAO owners through apps (offline- and stack-tested)
 
 A DAO-owned agent reaches an app under a consent the DAO signs by its own vote: a passed proposal calling `v1.signer`,
@@ -1120,3 +1155,15 @@ it does not establish:
   the policy changed, not what.
 - **DAO owners and revocation.** Wallet owners only; nothing is stored, so a disclosure ends only at its expiry, when
   the agent is replaced, or while the owner's signing key is absent or not full-access on chain.
+
+
+### Hosted-agent release (0.5.6 candidate, offline- and stack-tested)
+
+The owner's provider archive is the authority to retire hosting; a separate explicit call under owner consent releases
+the slot. The executor rechecks archived/frozen provider evidence and every unresolved, held and open owner action under
+its locks, reads balances and durably blocks dispatch before registry changes. Read failures refuse, including with
+`allowBalance: true`. This balance override also covers a market payment key's native NEAR and USDC; unsolicited other
+assets on the key are not enumerated. All settings, records and keys remain recoverable. Fresh owner setup/consent is
+required for restoration, and old consents stay ended. Lifecycle and money locks coordinate one host, not distributed
+fencing. Provider archive/restore refusal semantics remain per pinned docs (`ce381df`), with no mainnet observation;
+DAO release and incomplete-transition rollback are not covered. See [agent release](agent-release.md) for tests and limits.

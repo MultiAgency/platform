@@ -362,3 +362,14 @@ autopilot off and a $0 per-run ceiling. Amounts were small; they are in the priv
 
 Not checked here: the proposal's ID and the chain transactions (read from the app's activity, not from the provider's
 records); a rebalance by autopilot (off, $0 ceiling).
+
+
+## Market earnings return, local prototype (2026-11-10 UTC)
+
+User-reported mainnet observation from the local `~/agencies/market` prototype, using its own Agent API agent; no
+platform gateway deployment was involved. The market refused withdrawal to an unregistered USDC deposit address.
+After the owner registered that address and retried, the prototype's deposit status read `SUCCESS` at 02:10:31 UTC.
+This records the supplied run transcript, not an independent re-observation in this session and not hosted platform
+acceptance. Amounts, deposit and operation identities and transaction hashes remain in the private release record.
+The assignment's acceptance text mentioned a marketplace fee, but ledger entries were not supplied, so fee deduction
+remains unresolved (market spike S3). No archive, provider restore or hosted-agent release was performed by this run.

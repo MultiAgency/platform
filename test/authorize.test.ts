@@ -5,7 +5,8 @@ import type { Action } from "../src/agent.js";
 import { agreedPayees, authorize, type Facts, notInForce, type Purpose } from "../src/authorize.js";
 import { mandateDigest } from "../src/mandate.js";
 import type { Plan } from "../src/plans.js";
-import { ASSETS, payoutPolicy, treasuryPolicy } from "../src/policy.js";
+import { ASSETS, marketPolicy, payoutPolicy, treasuryPolicy } from "../src/policy.js";
+import { termsOf, type X402Request } from "../src/market/x402.js";
 import { DEFAULT_STRATEGY, strategyDigest, strategyLabelSuffix } from "../src/strategy-digest.js";
 import { fixtureGrant, policyView, timedPrices } from "./fixtures/authority.js";
 
@@ -22,6 +23,17 @@ const NEAR = (whole: number) => (BigInt(whole) * 10n ** 24n).toString();
 const treasury: Policy = { ...treasuryPolicy, actions: ["swap", "transfer"],
   limits: { ...treasuryPolicy.limits, per_transaction: { [ASSETS.USDC]: USDC(50) } } };
 const payout = payoutPolicy(["payee.near"]);
+/** A market agent's payment key, the market's published payee, and one hire's payment (docs/market.md). */
+const KEY = "b".repeat(64), MARKET_PAYEE = "c".repeat(64), USDC_CONTRACT = ASSETS.USDC.slice("nep141:".length);
+const market = marketPolicy(KEY);
+const x402 = (change: Partial<X402Request> = {}, row: Partial<X402Request["row"]> = {}): Action => {
+  const r = { scheme: "exact", network: "near:mainnet", asset: USDC_CONTRACT, amount: USDC(1), payTo: MARKET_PAYEE, maxTimeoutSeconds: 1_200, ...row };
+  return { method: "x402", request: { handle: "writer", brief: "An article", messageId: "m1", row: r, asset: `nep141:${r.asset}`, amount: r.amount,
+    payer: KEY, publicKey: "ed25519:key", nonce: "2", maxBlockHeight: "1000", balanceAtSigning: USDC(1), ...change } };
+};
+const hire = termsOf((x402() as Extract<Action, { method: "x402" }>).request);
+const topUp = (change: Record<string, unknown> = {}): Action =>
+  ({ method: "withdraw", request: { asset: ASSETS.USDC, amount: USDC(1), chain: "near", recipient: KEY, confidential: true, ...change } as never });
 
 const grant = (label: string, change: Partial<ReturnType<typeof fixtureGrant>> = {}) =>
   ({ ...fixtureGrant(label), expires_at: new Date(NOW + 86_400_000).toISOString(), ...change });
@@ -46,13 +58,14 @@ function facts(purpose: Purpose, change: Record<string, unknown> = {}): never {
     payout: { ...common(payout, "payout"), available: USDC(100), heldPayouts: [] },
     invoice: { ...common(payout, "invoices"), available: USDC(100) },
     approval: common(payout, null),
+    market: { ...common(market, "market"), hire, paymentAccount: KEY, payee: { asset: USDC_CONTRACT, payTo: MARKET_PAYEE }, keyBalance: "0" },
   }[purpose];
   return { ...base, ...change } as never;
 }
 const actionFor = (purpose: Purpose): Action => purpose === "autopilot"
   ? { method: "shield", request: { asset: ASSETS.wNEAR, amount: NEAR(1) } }
-  : purpose === "treasury" ? swap() : pay();
-const PURPOSES: Purpose[] = ["treasury", "autopilot", "payout", "invoice", "approval"];
+  : purpose === "treasury" ? swap() : purpose === "market" ? x402() : pay();
+const PURPOSES: Purpose[] = ["treasury", "autopilot", "payout", "invoice", "approval", "market"];
 const code = (purpose: Purpose, action: Action, change: Record<string, unknown> = {}) => authorize(action, { purpose, facts: facts(purpose, change) })?.code ?? "ok";
 
 test("each purpose's baseline is authorized", () => {
@@ -77,7 +90,7 @@ test("the dashboard reads why a policy isn't in force from the same predicate au
 });
 
 test("sends need a live grant whose label allows the purpose; approval votes need none", () => {
-  for (const purpose of ["treasury", "autopilot", "payout", "invoice"] as const) {
+  for (const purpose of ["treasury", "autopilot", "payout", "invoice", "market"] as const) {
     assert.equal(code(purpose, actionFor(purpose), { grant: undefined }), "grant_missing", purpose);
     const live = (facts(purpose) as { grant: ReturnType<typeof grant> }).grant;
     assert.equal(code(purpose, actionFor(purpose), { grant: { ...live, revoked_at: new Date(NOW).toISOString() } }), "grant_missing", purpose);
@@ -92,6 +105,9 @@ test("sends need a live grant whose label allows the purpose; approval votes nee
   assert.equal(code("payout", pay(), { grant: grant("invoices") }), "ok");
   assert.equal(code("payout", pay(), { grant: grant("treasury") }), "grant_purpose_denied");
   assert.equal(code("invoice", pay(), { grant: grant("treasury:anything") }), "grant_purpose_denied");
+  // Hires take only `market`, and a market grant nothing else.
+  assert.equal(code("market", x402(), { grant: grant("payout") }), "grant_purpose_denied");
+  assert.equal(code("payout", pay(), { grant: grant("market") }), "grant_purpose_denied");
 });
 
 // The provider's refusal of an amount over the cap (`policy_transaction_limit_exceeded`, per its docs) is not a proven
@@ -304,4 +320,54 @@ test("a cash floor refuses a swap that lowers cash and leaves it under the floor
   assert.equal(code("treasury", swap(), { strategy: floored(usdcFloor) }), "valuation_unavailable");
   assert.equal(code("treasury", swap()), "ok");
   assert.equal(code("treasury", shield, { strategy: floored(usdcFloor) }), "ok", "a sweep's shield doesn't move cash");
+});
+
+// A market hire (docs/market.md; user decision, 2026-11-09): paid only to the market's published payee, in its asset,
+// from this agent's payment key, for exactly the hire approved; topped up only to that key, by no more than it lacks.
+test("a market payment pays only the published payee, from the agent's own key, exactly the hire approved", () => {
+  assert.equal(code("market", x402()), "ok");
+  assert.equal(code("market", x402({}, { payTo: "attacker.near" })), "payee_not_published");
+  assert.equal(code("market", x402({}, { asset: "usdt.tether-token.near" })), "payee_not_published");
+  assert.equal(code("market", x402(), { payee: null }), "payee_not_published", "an unread payee list pays no one");
+  assert.equal(code("market", x402({}, { scheme: "upto" })), "scheme_not_supported");
+  assert.equal(code("market", x402({ payer: "d".repeat(64) })), "payer_not_payment_key");
+  assert.equal(code("market", x402({ amount: USDC(2) })), "payment_terms_mismatch");
+  assert.equal(code("market", x402({ asset: ASSETS.wNEAR })), "payment_terms_mismatch");
+  assert.equal(code("market", x402({ brief: "Another brief" })), "hire_not_approved");
+  assert.equal(code("market", x402({ handle: "other-agent" })), "hire_not_approved");
+  assert.equal(code("market", x402({ amount: USDC(1) }, { amount: USDC(2) })), "payment_terms_mismatch", "the row and its journal terms disagree");
+  assert.equal(code("market", x402({ amount: USDC(2) }, { amount: USDC(2) })), "hire_not_approved", "a higher price than approved");
+  assert.equal(code("market", x402(), { hire: null }), "market_hire_missing");
+  assert.equal(code("market", x402(), { paymentAccount: null }), "payment_key_missing");
+});
+
+test("a market top-up goes only to the agent's payment key, within the policy, and never beyond what the hire needs", () => {
+  assert.equal(code("market", topUp()), "ok");
+  assert.equal(code("market", topUp({ amount: USDC(1) }), { keyBalance: String(500_000) }), "top_up_exceeds_hire");
+  assert.equal(code("market", topUp({ amount: String(500_000) }), { keyBalance: String(500_000) }), "ok", "only the shortfall");
+  assert.equal(code("market", topUp(), { keyBalance: USDC(1) }), "top_up_exceeds_hire", "the key already holds the price");
+  assert.equal(code("market", topUp(), { keyBalance: null }), "payment_key_unread");
+  assert.equal(code("market", topUp({ recipient: "payee.near" })), "payee_not_agreed");
+  assert.equal(code("market", topUp(), { view: policyView(marketPolicy("e".repeat(64)), 11) }), "payee_not_agreed", "the policy must name the key");
+  assert.equal(code("market", topUp({ chain: "eth" })), "withdraw_not_allowed");
+  assert.equal(code("market", topUp({ confidential: false })), "withdraw_not_allowed");
+  assert.equal(code("market", topUp({ memo: "x" })), "withdraw_not_allowed");
+  assert.equal(code("market", topUp({ asset: ASSETS.wNEAR, amount: "20000000000000000000000" })), "ok", "wNEAR opens the key's account");
+  assert.equal(code("market", topUp({ asset: ASSETS.wNEAR, amount: "20000000000000000000001" })), "top_up_exceeds_opening", "and no more, though the policy allows 0.05");
+  assert.equal(code("market", topUp({ asset: ASSETS.wNEAR, amount: "60000000000000000000000" })), "per_transaction_exceeded");
+  assert.equal(code("market", pay(KEY)), "market_action_not_allowed");
+  assert.equal(code("market", swap()), "market_action_not_allowed");
+});
+
+
+test("the full market hire ceiling applies to a payment and every top-up, including prefunded keys", () => {
+  const payment = x402({amount: USDC(50), balanceAtSigning: USDC(50)}, {amount: USDC(50)}) as Extract<Action, {method: "x402"}>;
+  const terms = termsOf(payment.request);
+  for (const keyBalance of [USDC(0), USDC(25), USDC(50)]) {
+    assert.equal(code("market", payment, {hire: terms, keyBalance}), "per_transaction_exceeded");
+    assert.equal(code("market", topUp({amount: USDC(25)}), {hire: terms, keyBalance}), "per_transaction_exceeded");
+    assert.equal(code("market", topUp({asset: ASSETS.wNEAR, amount: "20000000000000000000000"}), {hire: terms, keyBalance}), "per_transaction_exceeded");
+  }
+  const exact = x402({amount: USDC(25), balanceAtSigning: USDC(25)}, {amount: USDC(25)}) as Extract<Action, {method: "x402"}>;
+  assert.equal(code("market", exact, {hire: termsOf(exact.request), keyBalance: USDC(25)}), "ok");
 });

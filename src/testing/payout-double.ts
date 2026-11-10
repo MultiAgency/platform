@@ -9,8 +9,8 @@ import type { AppScope } from "../contract/app-consent.js";
 import { ASSETS } from "../contract/assets.js";
 import { payoutRequestInput, payoutStatusInput } from "../contract/inputs.js";
 import { mandateDigest } from "../mandate.js";
-import { isTerminal, isUnknownOutcome } from "../operation-status.js";
-import { payoutFailure } from "../payout-failure.js";
+import { isTerminal } from "../operation-status.js";
+import { payoutAnswer, readsProvider } from "../payout-answer.js";
 import { payoutPolicy } from "../policy.js";
 import type { DoubleGrant, DoubleOutcome, DoublePolicy, DoublePolicyState, DoubleRequest, PayoutDouble, PayoutDoubleFactory } from "./types.js";
 
@@ -19,10 +19,10 @@ import type { DoubleGrant, DoubleOutcome, DoublePolicy, DoublePolicyState, Doubl
  * The app passes its `fetch` to `appClient` and calls `payouts/request`, `payouts/status`, `held` and `overview` as it
  * would on the platform, through the SDK's own client and the same oRPC wire.
  *
- * What it runs from the platform, unchanged: `authorize` (the one authorization rule, src/authorize.ts), the mandate
- * digest a request's `expectedPolicy` binds, the payout policy template, and the procedures' input schemas. What it
- * restates from the platform, pinned against the real money path by test/payout-double.test.ts: the order of a
- * request's checks and the journal's answers (src/payout-requests.ts, `dispatch` in src/agent.ts), the gateway's consent
+ * What it runs from the platform, unchanged: `authorize` (the one authorization rule, src/authorize.ts), the journal's
+ * answer to a request (`payoutAnswer`, src/payout-answer.ts), the mandate digest a request's `expectedPolicy` binds, the
+ * payout policy template, and the procedures' input schemas. What it restates from the platform, pinned against the real
+ * money path by test/payout-double.test.ts: the order of a request's checks (`dispatch` in src/agent.ts), the gateway's consent
  * and scope denials, and the provider: it holds every payment for the owner when the policy says so, refuses a transfer
  * outside the agreed payees or an action the policy doesn't list under a code the platform can't prove was a refusal
  * (so the request reads `unknown`), and models no budget, hourly or monthly limit, approval expiry or provider outage.
@@ -66,18 +66,10 @@ export const payoutDouble: PayoutDoubleFactory = (options = {}) => {
   const isHeld = (op: Op) => op.status === "PENDING_APPROVAL";
   const blocks = (op: Op) => op.refused === null && !(op.status && isTerminal(op.status)) && !isHeld(op);
 
-  /** The journal's answer (src/payout-requests.ts `answer`). */
+  /** The journal's answer: the platform's own `payoutAnswer`, given the provider's status when it reads one. */
   const answer = (requestId: string) => {
     const op = journal.get(requestId);
-    const known = { requestId, status: op?.status ?? null, correlationId: op?.correlationId ?? null, code: op?.refused ?? null,
-      failureCode: null as string | null, neverExecuted: false };
-    if (!op) return { ...known, state: "not_found" as const };
-    if (op.refused !== null) return { ...known, state: "refused" as const };
-    if (op.status === "SUCCESS") return { ...known, state: "succeeded" as const };
-    if (op.status && isTerminal(op.status)) return { ...known, ...payoutFailure(op.status, outcome(op)), state: "failed" as const };
-    if (isHeld(op)) return { ...known, state: "held" as const };
-    if (op.correlationId && op.status && !isUnknownOutcome(op.status)) return { ...known, state: "processing" as const };
-    return { ...known, state: "unknown" as const };
+    return payoutAnswer(requestId, op, readsProvider(op) ? outcome(op!) : undefined);
   };
   /** The provider's status of a request's payment, as the agent reads it when answering a `failed` request. */
   const outcome = (op: Op) => {

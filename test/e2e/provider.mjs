@@ -93,7 +93,11 @@ const PROVIDER_FIELDS = ['frozen', 'actions', 'confidential', 'owner_approval', 
  * delegates to `outlayer.near` (`freeze_wallet`, `unfreeze_wallet`; `store_wallet_policy` with an opaque payload), per
  * the provider's docs (the call arguments are not observed here); by default every owner intent is NEP-413.
  */
-export async function provider(directory, { treasury = false, account = OWNER, payees = [PAYEE], accounts = [], dao = false, payoutFunding = 100000000n, onChainPolicyEdits = false } = {}) {
+/**
+ * `market`: a simulated agent market (market.mjs). A market agent's withdrawals to its payment key land on that market's
+ * chain, and reads of accounts only that chain knows (payment keys) are answered from it.
+ */
+export async function provider(directory, { treasury = false, account = OWNER, payees = [PAYEE], accounts = [], dao = false, payoutFunding = 100000000n, onChainPolicyEdits = false, market = null } = {}) {
   const id = randomBytes(32).toString('hex');
   const credential = createGrantCredential();
   const owner = { type: 'near', account_id: account, public_key: PUBLIC_KEY };
@@ -124,7 +128,9 @@ export async function provider(directory, { treasury = false, account = OWNER, p
   /** A delegate to `outlayer.near` calling `methodName` once, as the provider's NEP-366 owner intents are shaped. */
   const delegate = (methodName, args) => ({ standard: 'nep366', payload: { receiverId: 'outlayer.near', actions: [{ type: 'FunctionCall', params: { methodName,
     args, gas: '30000000000000', deposit: '0' } }] } });
-  const spent = agent => transfers.filter(p => p.agent === agent.id && p.status === 'SUCCESS').reduce((sum, p) => sum + BigInt(p.body.amount), 0n);
+  const spent = agent => transfers.filter(p => p.agent === agent.id && p.status === 'SUCCESS' && p.body.asset === USDC).reduce((sum, p) => sum + BigInt(p.body.amount), 0n);
+  /** A market agent (docs/market.md): it only withdraws, to its payment key, with no owner approval. */
+  const isMarket = agent => agent.policy.actions.length === 1 && agent.policy.actions[0] === 'withdraw' && !agent.policy.owner_approval;
   const liveGrant = (agent, token) => typeof token === 'string' && agent.grants.some(g => !g.revoked_at && Date.parse(g.expires_at) > Date.now() && g.owner_message.credential === grantCommitment(token));
   if (treasury) { grant.label = 'treasury'; grant.owner_message.label = 'treasury'; }
   let unavailable = false, outageRefusals = 0;
@@ -201,6 +207,9 @@ export async function provider(directory, { treasury = false, account = OWNER, p
           return json(res, { jsonrpc: '2.0', id: requestId, error: { name: 'HANDLER_ERROR', cause: { name: 'UNKNOWN_ACCOUNT', info: { requested_account_id: params.account_id } }, code: -32000, message: 'Server error' } });
         // Account existence and balances for the owner's linked account (treasury/link, treasury/get).
         const known = [account, ...payees, ...accounts, ...(dao ? [DAO] : [])];
+        // A payment key's account, its USDC and its registration: the market's chain, where its payments land.
+        const fromMarket = market?.chainRequest(body, accountId => known.includes(accountId) || accountId === DAO_SIGNER);
+        if (fromMarket) return json(res, fromMarket);
         if (params.request_type === 'view_account')
           return json(res, known.includes(params.account_id)
             ? { jsonrpc: '2.0', id: requestId, result: { amount: '1000000000000000000000000', locked: '0', code_hash: '11111111111111111111111111111111', storage_usage: 100, storage_paid_at: 0, block_height: 1, block_hash: '11111111111111111111111111111111' } }
@@ -222,7 +231,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
       if (scoped && !agent) return json(res, { error: 'agent_not_found' }, 404);
       if (req.method === 'GET') {
         const base = `/v1/agents/${id}`;
-        if (agent && route === '') return json(res, { id: agent.id, status: 'ACTIVE', archived: false, deleted: false, owner: agent.owner, wallet: agent.wallet });
+        if (agent && route === '') return json(res, { id: agent.id, status: agent.archived ? 'ARCHIVED' : 'ACTIVE', archived: Boolean(agent.archived), deleted: false, owner: agent.owner, wallet: agent.wallet });
         if (agent && route === '/wallet') return json(res, agent.wallet);
         if (agent && route === '/grants') return json(res, { data: agent.grants });
         if (agent && route === '/policy') return json(res, { policy: agent.policy, revision: agent.revision ?? 1, status: 'APPLIED', provider_policy_synced: true, wallet_id: agent.wallet.wallet_id, policy_hash: null, applied_at: null, transaction_hash: null,
@@ -305,8 +314,16 @@ export async function provider(directory, { treasury = false, account = OWNER, p
       if (agent && req.method === 'POST' && route === '/withdraw') {
         if (!liveGrant(agent, req.headers['x-grant-token']) || !entry.key) throw new Error('Missing grant or operation identity');
         const allowed = agent.policy.actions.includes('withdraw') && agent.policy.destinations.list.some(d => d.action === 'withdraw' && d.chain === 'near' && d.address === body.recipient && d.memo === null);
-        if (!allowed || body.asset !== USDC || body.chain !== 'near' || body.confidential !== true || body.memo !== undefined) throw new Error('Unexpected withdrawal terms');
-        if (BigInt(body.amount) > BigInt(agent.policy.limits.per_transaction[USDC]) || BigInt(body.amount) > agent.funded - spent(agent)) throw new Error('Withdrawal exceeds policy limit or funded balance');
+        const asset = isMarket(agent) ? agent.policy.assets.includes(body.asset) : body.asset === USDC;
+        if (!allowed || !asset || body.chain !== 'near' || body.confidential !== true || body.memo !== undefined) throw new Error('Unexpected withdrawal terms');
+        if (BigInt(body.amount) > BigInt(agent.policy.limits.per_transaction[body.asset]) || (body.asset === USDC && BigInt(body.amount) > agent.funded - spent(agent))) throw new Error('Withdrawal exceeds policy limit or funded balance');
+        // A market agent's top-up isn't held: it lands on its payment key at once (wNEAR opens the key's account).
+        if (isMarket(agent)) {
+          const payment = { type: 'withdraw', agent: agent.id, body, key: entry.key, correlation: randomUUID(), approval: null, status: 'SUCCESS', at: new Date().toISOString() };
+          transfers.push(payment);
+          market?.fund(body.recipient, body.asset === USDC ? body.amount : '0');
+          return json(res, { correlation_id: payment.correlation });
+        }
         if (nextPayoutRefusal) { const { code, status: refused } = nextPayoutRefusal; nextPayoutRefusal = null; return refusal(res, refused, code, PAYOUT_REFUSALS[code], 'Refused by the simulated provider'); }
         const payment = { type: 'withdraw', agent: agent.id, body, key: entry.key, correlation: randomUUID(), approval: randomUUID(), status: 'PENDING_APPROVAL', at: new Date().toISOString() };
         transfers.push(payment);
@@ -331,10 +348,12 @@ export async function provider(directory, { treasury = false, account = OWNER, p
           const generated = { correlation_id: randomUUID(), type: 'agent_create', signer: body.owner, expires_at: expires, intent: nep413(), preview: { summary: `Create the local agent "${body.name}"` } };
           intents.push({ ...generated, createRequest: body }); return json(res, generated);
         }
-        if (body.type === 'agent_freeze' || body.type === 'agent_unfreeze') {
+        if (['agent_freeze', 'agent_unfreeze', 'agent_archive', 'agent_restore'].includes(body.type)) {
           const target = agents.get(body.agent_id);
           if (!target) throw new Error('Unexpected agent control');
-          const intent = onChainPolicyEdits ? delegate(body.type === 'agent_freeze' ? 'freeze_wallet' : 'unfreeze_wallet', { wallet_pubkey: PUBLIC_KEY }) : nep413();
+          if (body.type === 'agent_archive' && !target.policy.frozen) return unsupported(res, 'archive requires frozen agent');
+          if (body.type === 'agent_restore' && target.policy.frozen) return unsupported(res, 'restore requires unfrozen agent');
+          const intent = onChainPolicyEdits && ['agent_freeze', 'agent_unfreeze'].includes(body.type) ? delegate(body.type === 'agent_freeze' ? 'freeze_wallet' : 'unfreeze_wallet', { wallet_pubkey: PUBLIC_KEY }) : nep413();
           const generated = { correlation_id: randomUUID(), type: body.type, signer: target.owner, expires_at: expires, intent,
             preview: { summary: `${body.type === 'agent_freeze' ? 'Freeze' : 'Unfreeze'} the local agent` } };
           intents.push({ ...generated, agent: target, control: body.type }); return json(res, generated);
@@ -362,7 +381,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
           const target = agents.get(body.agent_id);
           if (!target || !body.credential || !body.expires_at) throw new Error('Unexpected payout grant');
           if (target.id === id) return unsupported(res, 'another grant for the configured agent, which already holds its own');
-          if (!['invoices', 'payout'].includes(body.label)) return unsupported(res, `a "${body.label}" grant for a payout agent`);
+          if (!(isMarket(target) ? ['market'] : ['invoices', 'payout']).includes(body.label)) return unsupported(res, `a "${body.label}" grant for ${isMarket(target) ? 'a market' : 'a payout'} agent`);
           const generated = { correlation_id: randomUUID(), type: 'grant_issue', signer: target.owner, expires_at: expires, intent: nep413(),
             preview: { summary: body.label === 'payout' ? 'Authorize the local payouts' : 'Authorize the local work order payout' } };
           intents.push({ ...generated, agent: target, grantRequest: body }); return json(res, generated);
@@ -377,7 +396,11 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         const intent = intents.find(i => i.correlation_id === body.correlation_id);
         if (!intent || intent.submitted) throw new Error('Unknown or repeated owner submission');
         intent.submitted = true;
-        if (intent.control) intent.agent.policy.frozen = intent.control === 'agent_freeze';
+        if (intent.control) {
+          if (intent.control === 'agent_archive') intent.agent.archived = true;
+          else if (intent.control === 'agent_restore') intent.agent.archived = false;
+          else intent.agent.policy.frozen = intent.control === 'agent_freeze';
+        }
         else if (intent.policyUpdate) {
           if (intent.policyUpdate.expected_revision !== (intent.agent.revision ?? 1)) throw new Error('Policy update against a stale revision');
           intent.agent.policy = intent.policyUpdate.policy; intent.agent.revision = (intent.agent.revision ?? 1) + 1;
