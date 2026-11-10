@@ -198,7 +198,13 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 - what the provider answers for a DAO-owned hosted agent
 
 **Before starting**
-- **Staging runs 0.5.5's `platform` package (commit `2e7b1e6`, #57).** Since 2026-11-10 (checked at 00:36Z): candidate
+- **Staging runs 0.5.6's `platform` package (commit `f7caad4`, #61).** Since 2026-11-10 (checked at 22:38Z): candidate
+  `36a66cb4`, Railway deployment `ffcb4120`, image `sha256:d5201b74…` (base `node:24.22.0-slim`), with
+  `deploy/platform-staging.json`. It brings the 0.5.6 changes listed in [SDK changes](sdk-changes.md), among them market
+  hires, recoverable hosted-agent release and the provider SDK 0.8.2. The platform smoke checks passed (18 of 18), and its
+  confirm page's 6 assets were each fetched and byte-equal to the package's. Nothing on it has been exercised yet beyond
+  those read-only checks.
+- **Before that, 0.5.5's `platform` package (commit `2e7b1e6`, #57).** Since 2026-11-10 (checked at 00:36Z): candidate
   `d6ecd354`, Railway deployment `2328b6ad`, image `sha256:4013ff00…` (base `node:24.22.0-slim`), with
   `deploy/platform-staging.json`. It brings the 0.5.5 changes listed in [SDK changes](sdk-changes.md), among them
   consent nonces and the wallet-stop freeze, `payee_not_agreed`, the steward's removal and `phase` on owner actions. The
