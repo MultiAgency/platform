@@ -263,3 +263,16 @@ test("an invoice payment follows the journal's transitions: no provider outcome 
   record({ idempotencyKey: key, correlation_id: "claimed", status: "SUCCESS" });
   assert.equal(getInvoice(prepared.id)!.operation.submissionState, "RESOLVED");
 });
+
+test("a held payout the provider names no approval for still counts toward the waiting limit", async () => {
+  for (let n = 0; n < 10; n++) {
+    record({ at: new Date().toISOString(), idempotencyKey: `held-${n}`, kind: "payout", method: "transfer",
+      request: { asset: ASSETS.USDC, amount: "1", recipient: `payee-${n}.near`, confidential: true } });
+    record({ idempotencyKey: `held-${n}`, correlation_id: `held-op-${n}`, status: "PENDING_APPROVAL" });
+  }
+  // Nine carry an approval to vote on; the provider names none for the tenth yet.
+  Object.assign(api, { getStatus: async (correlation_id: string) => ({ correlation_id, status: "PENDING_APPROVAL",
+    details: correlation_id === "held-op-9" ? {} : { approval_id: `approval-${correlation_id}` } }) });
+  assert.deepEqual(await file(invoice, invoice.payee), { id: invoiceId(invoice), status: "busy" });
+  assert.deepEqual(sends, []);
+});

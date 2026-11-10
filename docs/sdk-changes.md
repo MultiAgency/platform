@@ -12,7 +12,21 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
-## 0.5.5 (unreleased)
+## 0.5.6 (unreleased)
+
+Platform changes in this release, outside the package:
+- **A held payout the provider names no approval for counts toward the waiting limit:** filing an invoice answers
+  `busy` at 10 payouts waiting for the owner. That count left out a payout held (`PENDING_APPROVAL`) without an
+  `approval_id`, which `held` can't list for a vote but dispatch still reserves funds for. It now counts every payout
+  this agent holds. Offline-tested (`test/invoice-durability.test.ts`).
+- **Two proposals created at once can't both pass the open-proposal limit:** the count of open proposals is taken again
+  after the quote and the proposal saved with no wait between, so concurrent creations in one agent process store at
+  most 32 open. Offline-tested (`test/treasury-proposals.test.ts`).
+- **The autopilot reads what blocks after recovery from the journal:** when recovery marks an invoice `UNKNOWN` (its
+  status read answered for another operation), the tick now skips as unresolved, as for any blocking operation, where
+  it went on and failed at the money lock. Nothing was sent either way. Offline-tested (`test/autopilot.test.ts`).
+
+## 0.5.5 (2026-11-10)
 
 - **Docs** (no code change): the owner-workflows skill says how to follow a `policy_update` after `SUCCESS` (read
   `overview` until `APPLIED`, synced and above the prepared revision; keep reading on `SIGNED`; stop on `FAILED`). The

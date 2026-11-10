@@ -6,7 +6,7 @@ import { agentId, saveEnv } from "./env.js";
 import { post, readInbox } from "./inbox.js";
 import { liveGrant } from "./grants.js";
 import { MoneyLockBusy, Stopping } from "./lock.js";
-import { blocksDispatch, provenRefusal } from "./ops.js";
+import { blocksDispatch, provenRefusal, readOps } from "./ops.js";
 import { executePlan } from "./plans.js";
 import { context, newTickId, observe, recordEnd, recordStart, type TickEnd, type TickStart } from "./evidence.js";
 import { ageMinutes, recover } from "./recover.js";
@@ -126,9 +126,12 @@ async function run(found: Found, progress: (event: ProgressEvent) => void): Prom
     if (!policy) return done("Skipped: the agent's policy is not applied yet.");
     if (policy.frozen) return done("Skipped: the agent is frozen.");
     // Reads the status of each action without a proven outcome; resends nothing, which is a person's call.
-    // What still blocks is exactly what blocks the money lock (`blocksDispatch`).
+    // What still blocks is exactly what blocks the money lock (`blocksDispatch`), read from the journal after recovery:
+    // recovery may have changed an operation since its snapshot (an invoice it marked unknown, say).
     progress({ type: "STEP_STARTED", stepName: "recovery" });
-    const unresolved = (await recover()).filter((r) => blocksDispatch({ ...r.op, status: r.status ?? r.op.status }));
+    const recovered = await recover();
+    const blocking = new Set(readOps().filter(blocksDispatch).map((op) => op.idempotencyKey));
+    const unresolved = recovered.filter((r) => blocking.has(r.op.idempotencyKey));
     progress({ type: "STEP_FINISHED", stepName: "recovery" });
     if (unresolved.length > 0) {
       const list = unresolved.map((r) => `${r.op.idempotencyKey} (${r.outcome}, ${ageMinutes(r.op)} min old)`).join(", ");
