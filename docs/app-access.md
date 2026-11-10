@@ -399,6 +399,13 @@ scope only. From 0.5.1 the `treasury` scope reaches it too: offline-tested, and 
 on 2026-11-05, where the DAO funded its agent with the calls `fundingTransaction` builds, filed as one proposal. See
 [enforcement](enforcement.md#dao-owners-through-apps-offline--and-stack-tested).
 
+**0.5.6 market rollback boundary:** downgrading below 0.5.6 is unsupported after writing a market reservation, a consent
+with `market`, a DAO market setup or hire request, or an `x402` operation. Older readers reject the shared market
+reservation/scope/area/request kind; a single reservation can prevent the whole gateway starting, including Treasury
+and Payables (offline mixed-host test with the actual 0.5.5 registry reader). Preserve all state and settings with
+executors stopped and recover on a compatible build. No tested downgrade conversion exists; the historical notes
+below do not authorize deleting or rewriting these records. See [market rollback](market.md#rollback).
+
 Rolling back: records written from 0.5.0 on carry fields that earlier builds refuse to read, and one refused record
 makes every app route answer an error:
 - **DAO consents** in `.app-access/consents/` carry `signer: "dao"`, which 0.4.1 and earlier refuse (0.5.0 and later

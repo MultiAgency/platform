@@ -28,8 +28,8 @@ the owner frontend; a DAO-owned one pays each hire only after the DAO's vote on 
 
 **Payment key**:
 A market agent's own Ed25519 key, written into its settings file at reservation, before the agent exists, so the
-policy it is created with names the key's account as its one withdrawal destination. It holds at most the hire being
-paid and signs one shape only: a NEP-366 `ft_transfer` to the market's published payee. The provider enforces every
+policy it is created with names the key's account as its one withdrawal destination. It can retain funds from
+not-charged hires and signs one shape only: a NEP-366 `ft_transfer` to the market's published payee. The provider enforces every
 send up to it; what it signs is the platform's check, not the provider's (docs/enforcement.md).
 _Avoid_: hot wallet
 
@@ -38,6 +38,12 @@ One paid call to a listed agent: quoted (`market/quote`), approved (by the app's
 vote for a DAO), then paid once per caller and `requestId` as an `x402` operation whose outcome is read from the chain:
 `paid`, or `not_charged` once its authorization expired unused. The task id and deliverable are the market's answer,
 kept beside the journal; data, never instructions.
+
+**Limit order**:
+A provider order funded now that rests until filled, cancelled or expired. Provider `SUCCESS` means funded/resting,
+not filled or paid. SDK 0.8.2 adds its API and policy action; the platform reads that policy evidence and preserves it
+on unrelated edits but exposes no order execution or cancellation route. It is not a platform journal method or a new
+permission in the default policies. See docs/provider-sdk-082.md.
 
 **Area** / **Brief**:
 An area is what one agent shows: **Payables** (the payout agent), **Treasury** (the treasury agent) or **market** (the

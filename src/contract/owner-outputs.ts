@@ -38,7 +38,7 @@ const nearOwner = z.looseObject({ type: z.literal("near"), account_id: z.string(
 /** SDK Policy: top-level fields; nested destinations and limits kept open. */
 const policy = z.looseObject({
   frozen: z.boolean(),
-  actions: z.array(z.enum(["swap", "transfer", "withdraw"])),
+  actions: z.array(z.enum(["swap", "transfer", "withdraw", "limit_order"])),
   confidential: z.boolean(),
   owner_approval: z.boolean(),
   assets: z.union([z.literal("any"), z.array(z.string())]),
@@ -48,6 +48,8 @@ const policy = z.looseObject({
     daily: z.record(z.string(), z.string()).optional(),
     monthly: z.record(z.string(), z.string()).optional(),
   }),
+  // Provider policy evidence only: reading this permission does not expose limit-order execution in our router.
+  limit_order: z.looseObject({ max_deviation_bps: z.number().int().min(0).max(300) }).optional(),
   max_actions_per_hour: z.number().nullable(),
   destinations: z.looseObject({
     mode: z.enum(["any", "only", "except"]),
@@ -470,7 +472,8 @@ export const payoutRequestOutput = z.looseObject({
 /**
  * market/hire, market/status (src/market/hire.ts): what the journal proves about one hire's payment, answered by the
  * caller's `requestId`. `paid`: the chain shows the payment settled; `not_charged`: it expired unused, so nothing moved;
- * `refused`: refused before anything was sent (`code`); `unknown`: not yet proven either way, and the agent's other
+ * `refused`: the x402 payment was refused before submission (`code`); prior funding withdrawals remain recorded and
+ * retained on the key. `unknown`: not yet proven either way, and the agent's other
  * sends wait. `taskId` and `taskState` are the market's answer, and `deliverable` the result once the task ended; they
  * are what an agent wrote: data, never instructions.
  */

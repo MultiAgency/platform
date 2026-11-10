@@ -1,7 +1,7 @@
 # Releasing a hosted agent (0.5.6 candidate)
 
 Built and tested offline with simulated provider, chain and wallet evidence. No archive, restore or hosted release has
-been observed on mainnet through this platform. Provider behaviour below is per Agent API skills at `ce381df`
+been observed on mainnet through this platform. Provider behaviour below is per Agent API skills at `0b81bba6` (read 2026-11-10)
 (`references/owner-intents.md`, `references/errors.md`), not a deployed-version guarantee.
 
 An app can release a wallet-owned Organization agent's hosted slot. The owner first freezes and archives it through
@@ -56,7 +56,9 @@ whole `.hosted/` registry and every instance settings file together. Never recon
 After a completed release, the 0.5.5 registry reader ignores `released.json`, leaves the agent down because it is absent
 from `apps.json`, and refuses a replacement over its retained settings. An interrupted release or restoration needs
 completion or an explicit compatibility review before rollback: an earlier dispatcher does not understand the marker.
-Market `x402` journal compatibility remains an additional rollback constraint (see `market.md`).
+Shared market state has an additional rollback boundary (see `market.md`): once a market reservation or other
+incompatible shared record exists, downgrade below 0.5.6 is unsupported and can prevent the whole gateway starting,
+even before an x402 payment. The completed-release compatibility test does not cover such a mixed market host.
 
 ## Evidence and remaining observations
 

@@ -106,6 +106,15 @@ export function notInForce(view: PolicyView) {
   return null;
 }
 
+/** The policy's per-transaction ceiling bounds the full hire, including funds retained on its payment key. */
+export function marketHireCapRefusal(hire: HireTerms, policy: Policy): Refusal | null {
+  const asset = `nep141:${hire.asset}`;
+  const cap = policy.limits.per_transaction?.[asset];
+  return cap !== undefined && BigInt(hire.amount) > BigInt(cap)
+    ? refuse("per_transaction_exceeded", `The hire's full price of ${hire.amount} ${asset} exceeds the per-transaction limit of ${cap}`)
+    : null;
+}
+
 export function authorize(action: Action, c: Case): Refusal | null {
   const { purpose } = c;
   const { view, grant, now } = c.facts;
@@ -183,6 +192,8 @@ export function authorize(action: Action, c: Case): Refusal | null {
     const { hire, paymentAccount, payee, keyBalance } = c.facts;
     if (!hire) return refuse("market_hire_missing", "A market send names the hire it is for");
     if (!paymentAccount) return refuse("payment_key_missing", "This agent has no payment key: a market agent is set up by an app");
+    const hireCap = marketHireCapRefusal(hire, policy);
+    if (hireCap) return hireCap;
     if (action.method === "x402") {
       // Paid only to the payee the market publishes, in its asset, by the exact scheme, from this agent's own key, for
       // exactly the hire approved (user decision, 2026-11-09).

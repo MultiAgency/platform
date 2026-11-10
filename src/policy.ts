@@ -81,7 +81,9 @@ export function payoutPolicy(payees: string[]): Policy {
 /**
  * Market policy (docs/market.md): withdrawals to chain `near`, only to the agent's payment key, of USDC (each hire's
  * price) and of wNEAR (arriving as native NEAR, to open the key's account). The key pays each hire over x402. The
- * caps bound what one hire, a day and a month can move; the owner tightens or widens them by policy update.
+ * provider caps and budget bound funding withdrawals. The platform also applies the USDC per-transaction cap to each
+ * full hire price, including retained key funds. Daily/monthly limits count withdrawals, not the later key payments;
+ * the owner tightens or widens them by policy update.
  */
 export function marketPolicy(paymentAccount: string): Policy {
   return {

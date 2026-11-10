@@ -358,3 +358,16 @@ test("a market top-up goes only to the agent's payment key, within the policy, a
   assert.equal(code("market", pay(KEY)), "market_action_not_allowed");
   assert.equal(code("market", swap()), "market_action_not_allowed");
 });
+
+
+test("the full market hire ceiling applies to a payment and every top-up, including prefunded keys", () => {
+  const payment = x402({amount: USDC(50), balanceAtSigning: USDC(50)}, {amount: USDC(50)}) as Extract<Action, {method: "x402"}>;
+  const terms = termsOf(payment.request);
+  for (const keyBalance of [USDC(0), USDC(25), USDC(50)]) {
+    assert.equal(code("market", payment, {hire: terms, keyBalance}), "per_transaction_exceeded");
+    assert.equal(code("market", topUp({amount: USDC(25)}), {hire: terms, keyBalance}), "per_transaction_exceeded");
+    assert.equal(code("market", topUp({asset: ASSETS.wNEAR, amount: "20000000000000000000000"}), {hire: terms, keyBalance}), "per_transaction_exceeded");
+  }
+  const exact = x402({amount: USDC(25), balanceAtSigning: USDC(25)}, {amount: USDC(25)}) as Extract<Action, {method: "x402"}>;
+  assert.equal(code("market", exact, {hire: termsOf(exact.request), keyBalance: USDC(25)}), "ok");
+});

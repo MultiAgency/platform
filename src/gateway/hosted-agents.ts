@@ -29,8 +29,9 @@ type Reservation = SetupRequest & Partial<OrganizationScope>;
 const entry = setupRequest.extend({ name: z.string(), port: z.number().int().min(9000).max(9999) });
 /**
  * Self-service reservations stay in `registry.json`, in exactly the format earlier releases read, so a rollback still
- * starts. An app's Organization reservations live in `apps.json`, which earlier releases don't read: after a rollback
- * those agents stay down, and nothing else does.
+ * starts while those records remain readable. Organization reservations live in shared `apps.json`: 0.5.5 reads it
+ * but rejects a market area's entry, preventing the whole gateway from starting. After shared market records exist,
+ * downgrade below 0.5.6 is unsupported (docs/market.md); preserving only x402 journals is not sufficient.
  */
 const registry = z.strictObject({ version: z.literal(1), entries: z.array(entry).max(1000) });
 const appRegistry = z.strictObject({ version: z.literal(1), entries: z.array(entry.extend(organizationScope)).max(1000) });

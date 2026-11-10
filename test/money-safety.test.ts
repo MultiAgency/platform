@@ -200,3 +200,22 @@ test("the unresolved refusal says what reconcile can poll and what it cannot res
   assert.match(lost, /docs\/enforcement\.md/);
   assert.doesNotMatch(new UnresolvedOperations([op("payout:b")]).message, /reconcile --poll/);
 });
+
+
+test("provider SDK 0.8.2 preserves the submitted key and makes one transport attempt after a lost reply", async () => {
+  const attempted: RequestInit[] = [];
+  const sdk = new AgentApi({apiKey: "opaque-portal-fixture", baseUrl: "https://provider.invalid", fetch: async (_url, init) => {
+    attempted.push(init!); throw new TypeError("reply lost");
+  }}).forGrant("ngt_" + "x".repeat(43));
+  await assert.rejects(sdk.transfer("fixture-agent", {asset: ASSETS.USDC, amount: "1", recipient: "fixture.near", confidential: true}, {idempotencyKey: "retained-upgrade-key"}),
+    (error: unknown) => error instanceof Error && "idempotencyKey" in error && error.idempotencyKey === "retained-upgrade-key");
+  assert.equal(attempted.length, 1, "the upgraded SDK must not open a second transport attempt");
+  assert.equal(new Headers(attempted[0]!.headers).get("Idempotency-Key"), "retained-upgrade-key");
+});
+
+test("new provider SDK error documentation does not turn unfamiliar responses into proven non-execution", () => {
+  for (const [status, code] of [[403,"policy_price_deviation_exceeded"],[503,"market_price_unavailable"],[409,"limit_orders_open"],[409,"invalid_address"]] as const) {
+    const error = new AgentApiError(status, {errors:[{status:String(status),code,layer:"policy",title:code,meta:{retryable:false}}],meta:{}});
+    assert.equal(provenRefusal(error), undefined, code);
+  }
+});

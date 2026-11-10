@@ -28,7 +28,7 @@ holds agent connections and their access log (see [agent access](agent-access.md
 machine credentials; `.app-access/` holds app service credentials (hashed), owner consents, revocation tombstones (`revoked/`,
 never delete: losing one lets that consent be stored again), held confirm-page actions (`confirm/`, one record per link,
 named by its token's hash, and a `.claim` file once a submission was made; an older build ignores them), DAO requests
-(`dao-requests/`, one record per request a DAO votes on: consent, setup, proposal vote or stop; additive, no migration;
+(`dao-requests/`, one record per request a DAO votes on: consent, setup, proposal vote, market hire or stop; additive, no migration;
 an earlier build can't read some of them and 0.4.1 never looks, see app access, "Rolling back"), wallet stops (`wallet-stops/`, one
 record per signed stop, named by its signature's hash; it fixes the stop's cutoff, so never delete one while its text can
 still be sent) and the freezes those stops prepared (`wallet-freezes/`, from 0.5.5, named the same; additive, an earlier
@@ -323,9 +323,14 @@ shape"), so it sends nothing for that agent and its reads of that journal (statu
 too. That fails closed, but rolling an executor back past P3b after its first withdrawal request needs the
 compatibility review first; hosted agents are executors.
 A journal line with method `x402` (a market hire's payment, since 0.5.6, [agent market](market.md)) is unreadable to a
-build before it in the same way. Only a market agent's journal holds one, so a rollback past 0.5.6 stops only market
-agents, after their first hire; their reads of that journal fail too. Roll market agents back only with the
-compatibility review, and preserve their settings files: each holds the agent's payment key.
+build before it in the same way. The rollback boundary is earlier than the first payment: a market reservation in
+shared `.hosted/apps.json` makes the 0.5.5 registry reader reject the entire file and prevents gateway startup for
+Treasury and Payables too (`test/market-rollback.test.ts`, actual previous reader, offline-tested). Market consents,
+DAO market setup requests and DAO hire requests also use values earlier shared readers reject. Downgrading below
+0.5.6 is unsupported once any of these records exists. With executors stopped, preserve every state directory in the
+canonical list and every instance settings file, including payment keys, and recover on a compatible 0.5.6-or-later
+build. Do not delete entries, strip new fields/scopes or restore older shared state to force a downgrade. No downgrade
+conversion has been tested; one needs a separate compatibility review and a state-preserving procedure.
 
 **Deploy on Railway** (`Dockerfile.payouts`, selected by `railway.json`, one replica, one executor host per agent):
 
@@ -525,7 +530,8 @@ or recreate settings to reclaim a slot. The release marker is written before ret
 an active reservation, and process shutdown before marking release complete. Retried release finishes its durable state.
 After a completed release, the 0.5.5 registry reader leaves the agent down and refuses replacement over retained settings
 (offline compatibility test). Complete interrupted releases/restorations before rollback or review them separately:
-earlier dispatchers ignore release markers. Market agents additionally retain the x402 rollback limit. Restoration
+earlier dispatchers ignore release markers. A completed release does not remove the separate shared market-state
+rollback boundary above; market records can make the entire older gateway unavailable, even without an x402 payment. Restoration
 re-reserves the same provider ID and key, subject to capacity; the owner signs a new setup with a platform nonce and a
 new ordinary consent, then separately unfreezes and restores. See [agent release](agent-release.md).
 

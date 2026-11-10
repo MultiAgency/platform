@@ -21,6 +21,13 @@ Sources read on 2026-11-09: the market's docs (`docs.market.near.ai/llms-full.tx
 *per the market's docs* (and its x402-caller skill 0.2.0, `market.near.ai/skill/x402-caller/SKILL.md`) unless marked
 otherwise; none of it has been observed by this project.
 
+**2026-11-10 dependency follow-up:** 0.5.6 now pins Agent API SDK 0.8.2, reviewed at
+`416597b0c63a426b225b98b6d175c03bfb6a7947`, with official skills at `0b81bba6`. Its signed 1Click quote inputs are for
+EVM/Solana Intents signatures, not NEP-366 delegate signing: they do not replace this market payment key. The market's
+x402-caller skill remains 0.2.0. The documented validity rule still differs from the prototype observation below;
+this dependency upgrade does not resolve that discrepancy or establish deployed behaviour. See
+[provider SDK upgrade](provider-sdk-082.md).
+
 ## The market, as documented
 
 - **Jobs.** `instant` (the buyer picks an agent), `standard` (agents bid, the buyer awards) or `competition` (a prize
@@ -57,8 +64,10 @@ otherwise; none of it has been observed by this project.
 
 The market has jobs, held payments and disputes, and no buyer-side policy: the buyer's MCP client prompt is its only
 spending gate. The platform has the owner-signed policy, DAO votes, the one send site and the journal. Hiring through
-the platform puts each market payment under the same guarantees as a payout: a signed budget, agreed payees, a
-write-ahead record, unknown outcomes that block, and a DAO vote where the owner is a DAO.
+the platform gives each hire a write-ahead record, unknown outcomes that block, and a DAO vote where the owner is a
+DAO. The provider's signed caps and budget limit funding withdrawals to the payment key. The platform additionally
+checks each full hire price against the policy's USDC per-transaction ceiling, including funds retained on the key.
+The locally signed payment remains outside provider enforcement, as detailed below.
 
 ## Agency as client: hiring over x402
 
@@ -70,8 +79,8 @@ one of the [upstream asks](#upstream-asks) lands, the platform signs with its ow
 port (`sign(delegate terms) → SignedDelegateAction`): the payment key now, the Agent API's delegate signing if ask 1
 lands. Quoting, the payee check, the journal, approval and resolution don't change with it.
 
-Each market agent gets one **payment key**: an Ed25519 key whose implicit NEAR account holds, at most, the USDC of the
-hire being paid and a little NEAR for its account. The platform writes it into the agent's settings file at reservation
+Each market agent gets one **payment key**: an Ed25519 key whose implicit NEAR account holds the current hire's USDC,
+any funds retained from earlier not-charged hires, and a little NEAR for its account. The platform writes it into the agent's settings file at reservation
 (`MARKET_PAYMENT_KEY`, mode 0600), before the agent exists, so the policy the agent is created with can name its
 account; it is never replaced, never returned by any route, and signs exactly one shape: `ft_transfer` on the market's published USDC
 contract to the market's published `payTo`, of the approved amount. The provider still enforces everything up to that
@@ -130,7 +139,15 @@ key's account and balances, the approved terms and, for a DAO, the passed vote.
   an agreed withdrawal destination of the policy; USDC no more than the approved amount less what the key holds.
 - *Payment:* `x402` to the published `payTo`, in the published asset, of exactly the approved amount, for the approved
   handle and brief hash; for a DAO, only with a passed vote on those terms.
-- Every case: the policy in force and a live `market` grant, as for any purpose.
+- Every case: the policy in force and a live `market` grant, as for any purpose. The full approved USDC price must
+  fit the policy's USDC per-transaction ceiling, even if the key already holds part or all of the price. The hire
+  preflight refuses before opening or funding the key; `authorize` rechecks for every top-up and the payment before
+  signing. If the ceiling tightens after a completed top-up, that funding stays recorded and retained, but the payment
+  is refused. No automatic replacement is sent. Offline regressions in `test/market-hire.test.ts` and
+  `test/authorize.test.ts` cover these cases and an exact-ceiling hire.
+
+Daily/monthly caps and USD budgets account for provider withdrawals when they occur, not later payments from retained
+key funds. This change does not add payment-time cumulative accounting or make the last leg provider-enforced.
 
 ### State
 
@@ -141,10 +158,23 @@ the key's balance at signing (what resolution needs) and the task id. Executor o
 
 ### Rollback
 
-A build before 0.5.6 can't read a journal holding an `x402` line (as with `withdraw` since P3b); only a
-market agent's journal holds one, so only market agents stay down after such a rollback. An SDK before it refuses a
-market agent's operations in `activity`, `unresolved` and other journal reads (`OPERATION_METHODS`), and a market
-agent's `area` in owner outputs; no other agent's.
+Downgrading a host below 0.5.6 is unsupported once it has written a market reservation, a consent carrying `market`,
+a DAO market setup or hire request, or an `x402` journal record. These are not isolated to a market executor:
+0.5.5 rejects `area: "market"` in the shared `.hosted/apps.json`, so one reservation prevents the entire gateway from
+starting, including Treasury and Payables. Shared consent/request readers also reject the new scope, area or hire kind.
+The mixed-host regression in `test/market-rollback.test.ts` uses the actual 0.5.5 registry reader and reproduces the
+startup refusal before any hire; it verifies all reservations and settings remain intact and the current reader can
+resume all three areas.
+
+Before upgrading, stop executors and back up every state directory and instance settings file listed in
+[operations](operations.md). If a release fails after writing these records, keep executors stopped and recover on a
+compatible 0.5.6-or-later build. There is no tested downgrade conversion. Do not delete market entries, strip scopes or
+request fields, or restore older shared directories: that can discard identity, revocation or payment evidence.
+A downgrade requires a separate compatibility review and a tested state-preserving procedure.
+
+An older executor additionally refuses a journal holding `x402`, and an SDK before 0.5.6 rejects market operations in
+`activity`, `unresolved` and other journal reads (`OPERATION_METHODS`) and owner outputs naming `area: "market"`.
+That client limitation does not establish host rollback compatibility.
 
 ## Agency as worker
 

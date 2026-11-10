@@ -228,7 +228,17 @@ are covered in the Treasury app's `test/browser/strategy.cjs`; they are not depl
 
 ## Recovery limitation
 
-**Provider SDK 0.8.0 (locked in `pnpm-lock.yaml` 2026-11-06; 0.7.3 from 2026-10-30, 0.7.2 from 2026-10-28, 0.7.1 from
+**Provider SDK 0.8.2 (0.5.6 candidate, 2026-11-10).** The dependency and lockfile pin 0.8.2 exactly. Official SDK source
+`416597b0c63a426b225b98b6d175c03bfb6a7947` adds limit-order methods and signed 1Click quote inputs for native EVM/Solana
+sign-intent; the platform exposes neither feature. Policy reads/previews accept the provider's `limit_order` action
+and price-deviation setting without changing its signed policy or dropping that evidence during unrelated edits.
+The transport and existing money methods remain compatible in offline tests. A lost reply still makes one transport
+attempt with the original idempotency key. New documented errors, including `invalid_address` at 409 and limit-order
+price errors, do not become proven non-execution automatically: attempted sends remain unresolved under the existing
+classification. This upgrade does not establish a deployed provider version or new mainnet observations. See
+[the source review and compatibility checks](provider-sdk-082.md).
+
+**Earlier provider SDK 0.8.0 (locked in `pnpm-lock.yaml` 2026-11-06; 0.7.3 from 2026-10-30, 0.7.2 from 2026-10-28, 0.7.1 from
 2026-10-26): documented refusals not adopted.** No upgrade changes a classification rule. 0.8.0 accepts any non-empty
 API key (0.7.3 refused at startup any key that isn't `naa_` and 43 characters), for the partner portal's keys: the
 provider retires keys created before the portal with `api_key_retired` (401), and answers `key_verification_unavailable`
@@ -964,7 +974,12 @@ Limits:
 A market agent hires listed agents on the NEAR AI Agent Market over x402 ([agent market](market.md)). The provider
 enforces every send up to the agent's payment key: the market policy lets the agent `withdraw` only USDC and wNEAR,
 only to chain `near`, only to that key's account, within its caps and budget, and `authorize` refuses a top-up beyond
-what the hire still needs. The last leg, the key's signed `ft_transfer` to the market, is not the provider's: its
+what the hire still needs. The platform also checks the full approved USDC hire price against the current policy's
+USDC per-transaction ceiling, including a partly or fully funded key: before any funding and again for each dispatch.
+If the cap tightens after a top-up, the funding is retained and the payment refused. These are platform checks,
+offline-tested in `test/market-hire.test.ts` and `test/authorize.test.ts`, not observed on mainnet. Daily/monthly caps and
+USD budgets still count provider withdrawals, not the timing or sum of later payments from retained funds.
+The last leg, the key's signed `ft_transfer` to the market, is not the provider's: its
 payee, asset, amount and window are the platform's checks (the market's published payee, the exact terms approved,
 `authorize`'s `market` purpose), and a payment's outcome is read from the chain, never from the market's answer. What
 this exposes: whatever the key holds, at most one hire's price plus anything not charged and left on it, to whoever

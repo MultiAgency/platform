@@ -200,3 +200,47 @@ test("a wallet-owned agent's hires need no vote, and it refuses a DAO approval",
   const { approveHire } = await import("../src/market/hire.js");
   await assert.rejects(approveHire({ actor: "app:covenant:acme", host: "api.test" }, await daoApproval()), /isn't a DAO's/);
 });
+
+// The full hire, not just a shortfall withdrawal, must fit the owner's per-transaction ceiling.
+for (const funding of ["unopened", "empty", "partial", "full"] as const) test(`an over-cap hire moves nothing with an ${funding} payment key`, async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY);
+  if (funding !== "unopened") sim.fund(KEY, funding === "partial" ? "250000" : funding === "full" ? "500000" : "0");
+  const policy = marketPolicy(KEY);
+  policy.limits.per_transaction![ASSETS.USDC] = "250000";
+  mock.method(api, "getPolicy", async () => policyView(policy));
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  await assert.rejects(hire(APP, { requestId: `cap-${funding}`, brief: BRIEF, approved }), /per.transaction|hire.*(cap|limit|ceiling)/i);
+  assert.deepEqual(withdrawals, [], "refuse before even opening or topping up the key");
+  assert.equal(readOps().length, 0, "preflight refusal records no money attempt");
+  assert.equal(sim.chain.accounts.get(KEY)?.transfers.length ?? 0, 0);
+});
+
+test("the full hire ceiling is rechecked after a top-up before the payment is signed", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
+  let ceiling = "500000";
+  mock.method(api, "getPolicy", async () => {
+    const policy = marketPolicy(KEY); policy.limits.per_transaction![ASSETS.USDC] = ceiling; return policyView(policy);
+  });
+  mock.method(api, "forGrant", () => ({ withdraw: async (_id: string, request: {asset: string; amount: string; recipient: string}, {idempotencyKey}: {idempotencyKey: string}) => {
+    withdrawals.push({...request, key: idempotencyKey}); sim.fund(request.recipient, request.amount); ceiling = "250000";
+    return {correlation_id: "topup-before-cap-change"};
+  }}));
+  const approved = await quoteHire({handle: "writer", brief: BRIEF});
+  const result = await hire(APP, {requestId: "cap-tightened", brief: BRIEF, approved});
+  assert.equal(result.state, "refused"); assert.equal(result.code, "per_transaction_exceeded");
+  assert.equal(withdrawals.length, 1);
+  assert.equal(sim.chain.accounts.get(KEY)!.balance, 500000n, "the completed top-up is retained");
+  assert.equal(sim.chain.accounts.get(KEY)!.transfers.length, 0);
+  assert.equal(readOps().find(op => op.idempotencyKey === requestKey(APP, "cap-tightened"))!.submissionState, "PREPARED");
+});
+
+test("a hire exactly at the full ceiling can use retained funds plus a shortfall", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "250000");
+  const policy = marketPolicy(KEY); policy.limits.per_transaction![ASSETS.USDC] = "500000";
+  mock.method(api, "getPolicy", async () => policyView(policy));
+  const approved = await quoteHire({handle: "writer", brief: BRIEF});
+  await hire(APP, {requestId: "cap-equal", brief: BRIEF, approved});
+  assert.equal((await hireStatus(APP, "cap-equal")).state, "paid");
+  assert.deepEqual(withdrawals.map(w => w.amount), ["250000"]);
+  assert.equal(sim.chain.accounts.get(KEY)!.transfers.length, 1);
+});

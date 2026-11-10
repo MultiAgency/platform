@@ -1,5 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { dispatch, sendRefusal } from "../agent.js";
+import { marketHireCapRefusal, notInForce } from "../authorize.js";
 import { contractOf, storageRegistered } from "../chain.js";
 import { registrationTransaction } from "../contract/funding.js";
 import { withMoneyLock, type MoneyLock } from "../lock.js";
@@ -101,6 +102,13 @@ export async function hire(actor: string | undefined, input: { requestId: string
   if (`nep141:${input.approved.asset}` !== usdc) throw refused("asset_not_supported", "Market hires are paid in USDC. Nothing was sent.");
   try {
     await withMoneyLock(async (lock) => {
+      // Refuse the full quote before opening or funding the key, even when retained funds cover its shortfall.
+      // Dispatch reads the policy again for every top-up and for the locally signed payment.
+      const policy = await api.getPolicy(agentId());
+      const unavailable = notInForce(policy);
+      if (unavailable) throw refused("policy_not_in_force", `The policy is not in force: ${unavailable}. Nothing was sent.`);
+      const cap = marketHireCapRefusal(input.approved, policy.policy!);
+      if (cap) throw refused(cap.code, `${cap.message}. Nothing was sent.`);
       // The quote as it stands now: a price, payee or window that changed since approval is refused before anything moves.
       const messageId = crypto.randomUUID();
       const quote = quoteTerms({ handle: input.approved.handle, brief: input.brief, maxWindowSeconds: MAX_WINDOW_SECONDS,
