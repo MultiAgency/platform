@@ -311,3 +311,63 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 - **In the private release record only:** op ids, transaction hashes, amounts and payees.
 - **Then update the docs:** the inventory and the docs' "offline- and stack-tested" for the DAO path change only for
   what this run observed.
+
+## A market hire on staging (prepared, not run)
+
+User-run, on mainnet, with small amounts of the user's own USDC and NEAR; never scheduled. It shows the market path
+through the platform end to end ([agent market](market.md)): a market agent set up and created through an app, the
+owner's consent and grant, its payment key registered and funded, one x402 hire paid on delivery, and the payment's
+outcome read from the chain. The hire is of the user's own listed agent `multi` on market.near.ai, so the user also does
+the worker's step; the market's own behaviour was observed from the local prototype first (Spikes in market.md).
+
+**Before starting**
+- Staging runs a `platform` package whose `deploy/platform-staging.json` lists `market` in `appSetup` (0.5.6 brings the
+  market code; this file brings the area).
+- A credential for the platform's test deployment `staging` (step 5 above, with `staging` as the deployment name).
+- An owner wallet whose key is a full-access key of the owner account, signing NEP-413 and, on the confirm page, NEP-366.
+- `multi` priced low with a short window on market.near.ai (it was $0.10 and 10 minutes for the spikes), and its agent
+  token in the prototype's `~/agencies/market/.env` (`MARKET_AGENT_TOKEN`).
+- Funds for the agent: USDC at least the price, and wNEAR of at least 0.02 NEAR plus margin (the first hire opens the
+  payment key's account with a 0.02 NEAR top-up).
+- No other staging run in progress.
+
+**Steps.** Record each step's UTC time and outcome.
+1. Start the stand-in: `PLATFORM_URL=https://api.dev.multiagency.ai PLATFORM_APP_CREDENTIAL=tap_… PLATFORM_DEPLOYMENT=staging
+   ORGANIZATION=org_market pnpm exec tsx scripts/staging-app.ts`, open `http://127.0.0.1:4318/` and connect the wallet.
+2. Area `market`: "Sign setup text", then "Create the agent". Creation opens the confirm page: check it shows the market
+   policy (`actions` withdraw only; assets USDC and wNEAR; one withdrawal destination, the payment key's account) and sign
+   twice. Read the owner status until `SUCCESS`.
+3. Scopes `owner`, `read` and `market` (not `payout`): "Sign consent". Expect it stored.
+4. "Issue payout grant" with the area still `market`: it issues a `market` grant. Read the owner status until `SUCCESS`.
+5. Call `market/account` (input `{}`). Expect `registered: false`, `opened: false`, and a `registration` transaction.
+   Register the key from the owner's wallet:
+   `near contract call-function as-transaction 17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1 storage_deposit
+   json-args '{"account_id":"<account>","registration_only":true}' prepaid-gas '30 Tgas' attached-deposit '0.00125 NEAR'
+   sign-as <owner> network-config mainnet sign-with-keychain send`. Call `market/account` again: `registered: true`.
+6. Fund: call `deposit` with `{"asset":"nep141:wrap.near"}` and with `{}` (USDC), and send to each address (with its memo,
+   above its minimum, before it expires). "Refresh view" until both show in the agent's balances.
+7. Call `market/quote` with `{"handle":"multi","brief":"Staging hire\nReply with OK."}`. Copy the answer: these are the
+   terms the owner approves (price, the market's payee, the window).
+8. Call `market/hire` with `{"requestId":"s-1","brief":"Staging hire\nReply with OK.","approved":<the quote>}`. Expect
+   `state: "unknown"` with a `taskId`: the market took the payment. Its two top-ups (wNEAR to open the key's account, USDC
+   of exactly the price) settle first.
+9. As `multi`'s worker, in another terminal:
+   `cd ~/agencies/market && T=$(grep '^MARKET_AGENT_TOKEN=' .env | cut -d= -f2-)`, then
+   `curl -sS "https://market.near.ai/v1/agents/me/assignments?status=all&limit=5" -H "authorization: Bearer $T" | jq '.assignments[] | {id: .assignment.assignmentId, status: .assignment.status, title: .job.title}'`;
+   for the `in_progress` one titled "Staging hire",
+   `curl -sS -X POST "https://market.near.ai/v1/assignments/<id>/submit" -H "authorization: Bearer $T" -H 'content-type: application/json' -d '{"deliverableMarkdown":"OK: staging hire delivered."}'`,
+   then `unset T`. Its id should equal the `taskId` from step 8.
+10. Call `market/status` with `{"requestId":"s-1"}` until `state: "paid"`, with the deliverable. `market/account` then
+    shows `opened: true` and the key's USDC back at what it held before the top-up.
+
+**Stop rules**
+- Stop at anything step 2's confirm page shows that isn't the market policy.
+- While `market/status` reads `unknown`, never hire the same thing under a new `requestId`. If the worker doesn't deliver,
+  the payment expires unused after the window: `market/status` then reads `not_charged`.
+- A refusal (`state: "refused"`, or a `refused` result) sent nothing: read its `code` before anything else.
+
+**Record**
+- **In `docs/mainnet-log.md`:** each step with the UTC date and the deployment id.
+- **In the private release record only:** op ids, transaction hashes, amounts, the payment key's account and the payee.
+- **Then update the docs:** market.md's status and enforcement's "not yet observed through the platform" change only
+  for what this run observed.

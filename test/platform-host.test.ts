@@ -165,7 +165,7 @@ test("a headless config refuses every sign-in or owner-app feature, and each dep
     const config = ["dashboard.json", "multiagency.json"].includes(name) ? loadConfig(join("deploy", name)) : JSON.parse(readFileSync(join("deploy", name), "utf8"));
     assert.deepEqual([config.headless ?? false, config.selfService, config.appSetup], [false, true, ["treasury", "payables"]], name);
   }
-  for (const [name, host, areas] of [["platform-staging.json", "api.dev.multiagency.ai", ["treasury", "payables"]], ["platform.json", "api.multiagency.ai", ["payables"]]] as const) {
+  for (const [name, host, areas] of [["platform-staging.json", "api.dev.multiagency.ai", ["treasury", "payables", "market"]], ["platform.json", "api.multiagency.ai", ["payables"]]] as const) {
     const config = loadConfig(join("deploy", name));
     assert.deepEqual([config.host, config.headless, config.selfService, config.appSetup, config.agents], [host, true, false, areas, []], name);
   }

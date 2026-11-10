@@ -3,7 +3,8 @@
   "headless": true,
   "appSetup": [
     "treasury",
-    "payables"
+    "payables",
+    "market"
   ],
   "agents": []
 }
