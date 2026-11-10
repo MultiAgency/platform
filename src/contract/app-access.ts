@@ -24,6 +24,13 @@ export const APP_OWNER = ["owner/prepare", "owner/submit", "owner/status", "owne
  */
 export const APP_PAYOUT = ["payouts/request", "payouts/status", "held", "deposit"] as const;
 /**
+ * Market hires with `market` consent (docs/market.md): a quote moves nothing; a hire pays one listed agent over x402 at
+ * most once under the app's `requestId`, only while a fresh quote equals the terms the app asks for, from the agent's
+ * payment key, within the owner-signed policy; `market/status` follows it; `market/account` shows the payment key and
+ * the owner's one-time registration; `deposit` funds the agent. For a DAO, each hire is paid only after its vote.
+ */
+export const APP_MARKET = ["market/quote", "market/hire", "market/status", "market/account", "deposit"] as const;
+/**
  * Treasury with `treasury` consent (docs/enforcement.md, "Treasury proposals"): reads; strategy settings, which an
  * app's plans, a machine credential's plans and the autopilot use only under a grant binding their digest; autopilot on
  * (under such a grant) and off; sweeping public balances into the confidential one; `deposit`, a one-time address that
@@ -42,14 +49,15 @@ export const APP_TREASURY = ["strategy/get", "autopilot/get", "autopilot/evidenc
  */
 export const APP_TREASURY_EXECUTE = ["rebalance", "externalPlan", "executePlan"] as const;
 export type AppProcedure = (typeof APP_READS)[number] | (typeof APP_OWNER)[number] | (typeof APP_PAYOUT)[number]
-  | (typeof APP_TREASURY)[number] | (typeof APP_TREASURY_EXECUTE)[number];
+  | (typeof APP_TREASURY)[number] | (typeof APP_TREASURY_EXECUTE)[number] | (typeof APP_MARKET)[number];
 const READS = new Set<string>(APP_READS), OWNER = new Set<string>(APP_OWNER), PAYOUT = new Set<string>(APP_PAYOUT),
-  TREASURY = new Set<string>(APP_TREASURY), TREASURY_EXECUTE = new Set<string>(APP_TREASURY_EXECUTE);
+  TREASURY = new Set<string>(APP_TREASURY), TREASURY_EXECUTE = new Set<string>(APP_TREASURY_EXECUTE), MARKET = new Set<string>(APP_MARKET);
 /** Whether consent scopes cover a procedure (the gateway also requires the owner's own access to it). */
 export const appScopesCover = (scopes: readonly AppScope[], path: string) =>
   (scopes.includes("read") && READS.has(path)) || (scopes.includes("owner") && OWNER.has(path)) || (scopes.includes("payout") && PAYOUT.has(path))
   || (scopes.includes("treasury") && TREASURY.has(path))
-  || (scopes.includes("treasury") && scopes.includes("treasury-execute") && TREASURY_EXECUTE.has(path));
+  || (scopes.includes("treasury") && scopes.includes("treasury-execute") && TREASURY_EXECUTE.has(path))
+  || (scopes.includes("market") && MARKET.has(path));
 
 /**
  * What the app may ask an owner to sign. The app chooses what it asks for, but never what the owner reads: a prepared
@@ -61,7 +69,7 @@ export const appScopesCover = (scopes: readonly AppScope[], path: string) =>
  * policy, so it can release only a transfer to an agreed payee within the caps; its prepared answer carries the proven
  * terms for the app to show.
  */
-const APP_OWNER_ACTIONS = new Set(["agent_create", "agent_freeze", "agent_unfreeze", "grant_issue", "grant_revoke", "policy_update", "approval_vote"]);
+const APP_OWNER_ACTIONS = new Set(["agent_create", "agent_freeze", "agent_unfreeze", "agent_archive", "agent_restore", "grant_issue", "grant_revoke", "policy_update", "approval_vote"]);
 /** Whether a parsed owner action is one the app may prepare (signer `wallet` is checked separately). */
 export function appMayAsk(action: { type: string; payees?: readonly unknown[] }) {
   if (action.type === "agent_create" && action.payees?.length) return false;
@@ -71,7 +79,7 @@ type Of<T extends OwnerAction["type"]> = Extract<OwnerAction, { type: T }>;
 /** The owner actions an app may prepare, as types. The gateway's check (`appMayAsk`) is the authority. */
 export type AppOwnerAction =
   | (Omit<Of<"agent_create">, "payees"> & { owner: NonNullable<Of<"agent_create">["owner"]> })
-  | Of<"agent_freeze"> | Of<"agent_unfreeze"> | Of<"grant_issue"> | Of<"grant_revoke"> | Of<"approval_vote"> | Of<"policy_update">;
+  | Of<"agent_freeze"> | Of<"agent_unfreeze"> | Of<"agent_archive"> | Of<"agent_restore"> | Of<"grant_issue"> | Of<"grant_revoke"> | Of<"approval_vote"> | Of<"policy_update">;
 
 /**
  * A NEP-366 owner action the platform holds for the owner to sign on its confirm page (`/confirm/<token>`). The link
@@ -92,7 +100,7 @@ export const AppSigner = z.enum(["wallet", "dao"]);
  * with `treasury-execute` the app's plans within the policy and the strategy the DAO's grant binds, without a vote
  * each time. Not `owner` (the platform files a DAO's owner actions itself) or `payout` (not yet).
  */
-export const DAO_CONSENT_SCOPES = ["read", "treasury", "treasury-execute"] as const satisfies readonly AppScope[];
+export const DAO_CONSENT_SCOPES = ["read", "treasury", "treasury-execute", "market"] as const satisfies readonly AppScope[];
 /**
  * What a DAO's `treasury` consent doesn't cover although a wallet owner's does: the linked treasury account. A DAO-owned
  * agent's link is the DAO itself, fixed at setup (src/hosted-binding.ts): an app never changes which DAO it answers to.
@@ -122,17 +130,17 @@ export const DAO_APP_ACTIONS = ["grant_issue", "grant_revoke", "policy_update", 
  * a DAO's setup consent only, the Treasury agent's creation (its owner is the DAO's derived account, never given).
  */
 export function appMayAskDao(action: { type: string; label?: string; owner?: unknown; role?: string; payees?: readonly unknown[]; changes?: object }) {
-  if (action.type === "agent_create") return action.owner === undefined && !action.payees?.length && (action.role ?? "treasury") === "treasury";
+  if (action.type === "agent_create") return action.owner === undefined && !action.payees?.length && ["treasury", "market"].includes(action.role ?? "treasury");
   if (action.type === "policy_update") {
     // On-chain edits too: like a wallet owner, members rely on the provider's preview of the encrypted policy.
     return Object.keys(action.changes ?? {}).length > 0;
   }
-  return (DAO_APP_ACTIONS as readonly string[]).includes(action.type) && (action.type !== "grant_issue" || action.label === "treasury");
+  return (DAO_APP_ACTIONS as readonly string[]).includes(action.type) && (action.type !== "grant_issue" || action.label === "treasury" || action.label === "market");
 }
-export type AppDaoAction = Of<"agent_freeze"> | Of<"agent_unfreeze"> | (Of<"grant_issue"> & { label: "treasury" }) | Of<"grant_revoke"> | Of<"policy_update">
-  | { type: "agent_create"; role?: "treasury" };
-/** The areas a DAO may set up a hosted agent for through an app: Treasury only. */
-export const DAO_SETUP_AREAS = ["treasury"] as const;
+export type AppDaoAction = Of<"agent_freeze"> | Of<"agent_unfreeze"> | (Of<"grant_issue"> & { label: "treasury" | "market" }) | Of<"grant_revoke"> | Of<"policy_update">
+  | { type: "agent_create"; role?: "treasury" | "market" };
+/** The areas a DAO may set up a hosted agent for through an app: Treasury, and a market agent whose hires it votes on (user, 2026-11-09). */
+export const DAO_SETUP_AREAS = ["treasury", "market"] as const;
 
 /** A NEAR transaction for a DAO member's wallet to sign, as near-kit builds it (receiver and function-call actions). */
 const memberTransaction = z.looseObject({ receiverId: z.string(), actions: z.array(z.looseObject({ type: z.literal("FunctionCall"), params: z.looseObject({}) })) });
@@ -157,6 +165,19 @@ export const appDaoVoteFiled = z.looseObject({ request: appDaoVoteRequest,
 export const appDaoVoteState = z.discriminatedUnion("state", [
   z.looseObject({ state: z.literal("pending"), request: appDaoVoteRequest }),
   z.looseObject({ state: z.literal("relayed"), request: appDaoVoteRequest, proposalState: z.string() }),
+]);
+/**
+ * A DAO's approval of one market hire (docs/market.md), filed by the platform from its own text (`hireText`): it must
+ * pass before `votingUntil`. Once the DAO's signature is found the platform relays it to `market/approve`, which pays the
+ * hire once; `hireState` is that hire's state as the agent answered (`market/status` follows it from there).
+ */
+export const appDaoHireRequest = z.looseObject({ id: z.string(), dao: z.string(), organization: z.string(), agent: z.string(),
+  agentId: z.string(), requestId: z.string(), approved: z.looseObject({}), validUntil: z.string(), votingUntil: z.number(), hash: z.string(), description: z.string() });
+export const appDaoHireFiled = z.looseObject({ request: appDaoHireRequest,
+  transactions: z.looseObject({ proposal: memberTransaction.nullable(), proposalAndVote: memberTransaction.nullable() }) });
+export const appDaoHireState = z.discriminatedUnion("state", [
+  z.looseObject({ state: z.literal("pending"), request: appDaoHireRequest }),
+  z.looseObject({ state: z.literal("relayed"), request: appDaoHireRequest, hireState: z.string() }),
 ]);
 /**
  * A DAO's request that the platform set up a hosted agent for it, signed by its vote (the setup text, `setupMessage`,
@@ -184,7 +205,7 @@ export const appSetupStored = z.looseObject({ agent: z.string(), consent: appCon
  * `GET /apps/v1/agents?organization=`: the hosted agents this deployment's setups reserved for that Organization (one per
  * owner and area), narrowed by `owner` and `area`. How an app whose setup reply was lost learns the agent's name.
  */
-export const appReservations = z.looseObject({ agents: z.array(z.looseObject({ agent: z.string(), organization: z.string(), owner: z.string(), area: z.string() })) });
+export const appReservations = z.looseObject({ agents: z.array(z.looseObject({ agent: z.string(), organization: z.string(), owner: z.string(), area: z.string(), released: z.boolean().optional() })) });
 export const appRevoked = z.looseObject({ revoked: z.literal(true) });
 /** A NEP-413 nonce (32 bytes, base64) the platform issued this deployment, and when (ms). */
 export const appConsentNonce = z.looseObject({ nonce: z.string(), issuedAt: z.number() });
@@ -213,5 +234,5 @@ export const appConsentNonce = z.looseObject({ nonce: z.string(), issuedAt: z.nu
 export const APP_GATEWAY_CODES = ["invalid_request", "not_found", "signature_invalid", "browser", "dao_owned", "not_dao", "confirm_page",
   "not_created", "already_created", "agent_changed", "owner_changed", "consent_ended", "consent_revoked", "no_consent", "scope", "setup_key",
   "signed_expired", "vote_lapsed", "dao_stopped", "owner_stopped", "not_owner", "not_allowed", "setup_unavailable", "access_ended", "proposal_unanswered",
-  "proposal_not_open", "expires_too_soon", "setup_failed", "agent_refused", "too_many_consents", "dao_requests_limited"] as const;
+  "proposal_not_open", "expires_too_soon", "setup_failed", "agent_refused", "too_many_consents", "dao_requests_limited", "brief_mismatch", "agent_released"] as const;
 export type AppGatewayCode = (typeof APP_GATEWAY_CODES)[number];

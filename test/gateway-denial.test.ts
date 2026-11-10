@@ -189,7 +189,7 @@ test("DAO proposal, approval, execution and management permissions stay distinct
     assert.equal((await call("autopilot/set", account)).status, 403, "legacy setter needs both capabilities");
   assert.equal((await call("owner/submit", "council.near")).status, 403, "DAO rights do not grant a wallet-owner submission path");
   for (const [account, agent] of [[OWNER, "wallet"], ["council.near", "treasury"]])
-    for (const path of ["futureProcedure", "ownerIdentity", "payeeTerms"])
+    for (const path of ["futureProcedure", "ownerIdentity", "payeeTerms", "releaseCheck"])
       assert.equal((await call(path, account, agent)).status, 403, path);
   assert.deepEqual(reached, []);
   for (const [account, path] of [

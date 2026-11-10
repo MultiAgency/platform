@@ -1,3 +1,4 @@
+import { AgentReleased } from "../release-state.js";
 import { LocalRefusal } from "../agent.js";
 import { CompensationError } from "../compensation-store.js";
 import { AgentApiError } from "@near-intents-agent-api/sdk";
@@ -35,6 +36,7 @@ function toClientError(error: unknown, procedure: string) {
   // A send's local checks (`authorize`, the recipient, a reviewed policy), all made before anything is sent. A caller that
   // sends several (a proposal's plan) reads the journal instead, so one refused send doesn't hide those sent before it.
   if (error instanceof LocalRefusal) return new ORPCError("BAD_REQUEST", { message: error.detail, data: { kind: "refused", code: error.code } });
+  if (error instanceof AgentReleased) return new ORPCError("CONFLICT", { message: error.message, data: { kind: "refused", code: "agent_released" } });
   if (error instanceof PublicError) return new ORPCError("BAD_REQUEST", { message: error.message, data: { kind: "refused" } });
   // Held by this server's own checks before anything reached the provider (a vote's approval check, a send's local
   // checks, which the journal records as `local_authorization_held`): proven not to have taken effect.

@@ -1,6 +1,7 @@
 import { compensationRoutes } from "./rpc/compensation.js";
 import { ownerRoutes } from "./rpc/owner.js";
 import { payablesRoutes } from "./rpc/payables.js";
+import { marketRoutes } from "./rpc/market.js";
 import { treasuryRoutes } from "./rpc/treasury.js";
 import { observationsRoutes } from "./rpc/observations.js";
 import { workOrderRoutes } from "./rpc/work-orders.js";
@@ -17,6 +18,7 @@ export const router = {
   ...workOrderRoutes,
   ...demoGuideRoutes,
   ...proposalRoutes,
+  ...marketRoutes,
 };
 
 export type Router = typeof router;

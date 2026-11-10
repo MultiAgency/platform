@@ -5,6 +5,7 @@ import { z } from "zod";
 import { DAO_CONSENT_SCOPES, DAO_SETUP_AREAS } from "../contract/app-access.js";
 import { AppScope, parseConsentMessage, parseSetupMessage, UNBORN_AGENT } from "../contract/app-consent.js";
 import { MAX_PROPOSAL_MS } from "../contract/treasury-proposals.js";
+import { hireTerms } from "../contract/inputs.js";
 import { nextProposalId } from "../chain.js";
 import { findSignature, latestBlock, proposalAndVote, proposalTransaction } from "../dao-owner.js";
 import { BadRequest } from "../http.js";
@@ -47,6 +48,13 @@ const ConsentRequest = z.strictObject({ ...common, kind: z.literal("consent"), s
 /** A vote on a Treasury proposal, under the DAO consent `under`; `relayed` once the signature reached the agent. */
 const VoteRequest = z.strictObject({ ...common, kind: z.literal("proposal"), proposal: z.string(), verdict: z.enum(["approve", "reject"]),
   under: hex64, relayed: z.strictObject({ at: z.number().int(), state: z.string() }).nullable() });
+/**
+ * A DAO's approval of one market hire (docs/market.md), under the DAO consent `under` carrying `market`: the hire's terms
+ * and brief, kept to relay with the signature; `validUntil`, the end the text names; `relayed` once the signature reached
+ * the agent, with the hire's state as the agent answered.
+ */
+const HireRequest = z.strictObject({ ...common, kind: z.literal("hire"), requestId: z.string(), approved: hireTerms, brief: z.string(),
+  validUntil: z.string(), under: hex64, relayed: z.strictObject({ at: z.number().int(), state: z.string() }).nullable() });
 /** A DAO's setup of a hosted agent; `consent` and `agent` once the signature was found and the agent reserved. */
 const SetupRequest = z.strictObject({ ...common, kind: z.literal("setup"), area: z.enum(DAO_SETUP_AREAS),
   consent: hex64.nullable(), reserved: z.string().nullable() });
@@ -58,12 +66,13 @@ const SetupRequest = z.strictObject({ ...common, kind: z.literal("setup"), area:
 const StopRequest = z.strictObject({ ...common, kind: z.literal("stop"),
   done: z.strictObject({ at: z.number().int(), revoked: z.array(hex64), autopilotOff: z.boolean() }).nullable(),
   lapsed: z.boolean().optional() });
-const Request = z.discriminatedUnion("kind", [ConsentRequest, VoteRequest, SetupRequest, StopRequest]);
+const Request = z.discriminatedUnion("kind", [ConsentRequest, VoteRequest, SetupRequest, StopRequest, HireRequest]);
 export type DaoRequest = z.infer<typeof Request>;
 export type DaoConsentRequest = z.infer<typeof ConsentRequest>;
 export type DaoVoteRequest = z.infer<typeof VoteRequest>;
 export type DaoSetupRequest = z.infer<typeof SetupRequest>;
 export type DaoStopRequest = z.infer<typeof StopRequest>;
+export type DaoHireRequest = z.infer<typeof HireRequest>;
 /**
  * What differs between kinds of DAO request. `admitted`: counted against its deployment's request limits (a stop has no
  * deployment: its page limits opens and files one stop at a time per agent). `honouredLate`: a passed vote is honoured
@@ -75,8 +84,9 @@ const RULES: Record<DaoRequest["kind"], { admitted: boolean; honouredLate: boole
   setup: { admitted: true, honouredLate: false },
   proposal: { admitted: true, honouredLate: false },
   stop: { admitted: false, honouredLate: true },
+  hire: { admitted: true, honouredLate: false },
 };
-const settled = (r: DaoRequest) => r.kind === "proposal" ? r.relayed !== null : r.kind === "stop" ? r.done?.autopilotOff === true || r.lapsed === true
+const settled = (r: DaoRequest) => r.kind === "proposal" || r.kind === "hire" ? r.relayed !== null : r.kind === "stop" ? r.done?.autopilotOff === true || r.lapsed === true
   : r.consent !== null || (r.kind === "consent" && !!r.stoppedBy);
 /**
  * Nothing more can happen to it: completed, stopped, lapsed, or its window or text expired with no signature. A stop is
@@ -89,6 +99,8 @@ export const publicDaoSetup = ({ id, dao, organization, area, expiresAt, votingU
   ({ id, dao, organization, area, expiresAt, votingUntil, hash: id, description });
 export const publicDaoVote = ({ id, dao, organization, agent, agentId, proposal, verdict, votingUntil, description }: DaoVoteRequest) =>
   ({ id, dao, organization, agent, agentId, proposal, verdict, votingUntil, hash: id, description });
+export const publicDaoHire = ({ id, dao, organization, agent, agentId, requestId, approved, validUntil, votingUntil, description }: DaoHireRequest) =>
+  ({ id, dao, organization, agent, agentId, requestId, approved, validUntil, votingUntil, hash: id, description });
 
 /** The chain reads a DAO vote needs; tests pass their own. */
 export type DaoVotes = {
@@ -160,7 +172,8 @@ export function daoSetupConsent(request: DaoSetupRequest, signature: Buffer, age
 export const checkUrl = ({ host, id }: { host: string; id: string }) => `https://${host}/confirm/dao/${id}`;
 
 export const escape = (text: string) => text.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-const KINDS = { consent: "Consent for an app", setup: "Setup of a hosted agent", proposal: "Vote on a Treasury proposal", stop: "Stop of the agent" } as const;
+const KINDS = { consent: "Consent for an app", setup: "Setup of a hosted agent", proposal: "Vote on a Treasury proposal", stop: "Stop of the agent",
+  hire: "Approval of a market hire" } as const;
 
 /**
  * The voter check view (coordination/p5-treasury-dao-consent.md, slice 4): the exact text a DAO request's key signs,
@@ -170,6 +183,7 @@ const KINDS = { consent: "Consent for an app", setup: "Setup of a hosted agent",
 export function daoRequestPage(record: DaoRequest, now = Date.now()) {
   const recomputed = nep413Hash(record.message, Buffer.from(record.nonce, "base64"), record.host).toString("hex") === record.id;
   const state = record.kind === "proposal" ? (record.relayed ? `relayed to the agent (the proposal was ${record.relayed.state})` : null)
+    : record.kind === "hire" ? (record.relayed ? `relayed to the agent (the hire was ${record.relayed.state})` : null)
     : record.kind === "stop" ? (record.done ? `stopped: ${record.done.revoked.length} consent(s) revoked, autopilot ${record.done.autopilotOff ? "off" : "not yet confirmed off"}` : null)
     : record.consent ? (record.kind === "setup" ? `the agent ${record.reserved} was reserved` : "the consent was stored")
     : record.kind === "consent" && record.stoppedBy ? "ended by the DAO's stop of the agent; it is never stored" : null;
@@ -235,6 +249,17 @@ export const daoStopText = ({ host, dao, agent, agentId }: { host: string; dao: 
 /** The public page where anyone files a DAO's stop of its agent, and where a passed stop is applied. */
 export const stopUrl = ({ host, dao, agent }: { host: string; dao: string; agent: string }) => `https://${host}/confirm/dao/stop/${dao}/${agent}`;
 
+/** What the DAO's proposal says for a hire's approval: the platform's own text of its terms, verbatim. */
+export function daoHireDescription(request: Pick<DaoHireRequest, "message" | "votingUntil" | "id" | "host">) {
+  return [
+    ...request.message.split("\n").map((line, i) => i === 0 ? `* Proposal Action: ${line}` : `* ${line}`),
+    `* Signing window closes: ${new Date(request.votingUntil).toISOString()} (approve before then, or the approval isn't relayed)`,
+    `* Signs: NEP-413 hash ${request.id} for ${request.host} as the agents' owner (v1.signer, path agent-owner)`,
+    `* Check before voting: ${checkUrl(request)} (the exact text, and its hash recomputed)`,
+    "* Notes: Filed by the MultiAgency platform for an app. The platform relays the signature; the agent then pays this hire once, from its payment key.",
+  ].join(" <br>");
+}
+
 /** What a stop's proposal says. */
 export function daoStopDescription(request: Pick<DaoStopRequest, "agent" | "agentId" | "dao" | "votingUntil" | "id" | "host">) {
   return [
@@ -261,7 +286,8 @@ export type DaoFiling =
   | Omit<DaoConsentRequest, Filed | "consent">
   | Omit<DaoVoteRequest, Filed | "relayed">
   | Omit<DaoSetupRequest, Filed | "consent" | "reserved">
-  | Omit<DaoStopRequest, Filed | "done" | "deployment" | "organization">;
+  | Omit<DaoStopRequest, Filed | "done" | "deployment" | "organization">
+  | Omit<DaoHireRequest, Filed | "relayed">;
 type FiledAs<F extends DaoFiling> = Extract<DaoRequest, { kind: F["kind"] }>;
 /** The transactions a member files the DAO's proposal with; `proposalAndVote` when the next proposal id was read. */
 type DaoTransactions = { proposal: ReturnType<typeof proposalTransaction>; proposalAndVote: ReturnType<typeof proposalAndVote> | null };
@@ -350,6 +376,7 @@ export class DaoRequests {
     const record = this.write((f.kind === "consent" ? { ...f, ...filed, description: daoConsentDescription({ ...f, ...filed }), consent: null }
       : f.kind === "proposal" ? { ...f, ...filed, description: daoVoteDescription({ ...f, ...filed }), relayed: null }
       : f.kind === "setup" ? { ...f, ...filed, description: daoSetupDescription({ ...f, ...filed }), consent: null, reserved: null }
+      : f.kind === "hire" ? { ...f, ...filed, description: daoHireDescription({ ...f, ...filed }), relayed: null }
       : { ...f, ...filed, deployment: "", organization: "", description: daoStopDescription({ ...f, ...filed }), done: null }) as FiledAs<F>);
     appendSynced(accessLog(this.root), { at: new Date(at()).toISOString(), ...log(record) });
     return { state: "filed", record, transactions: {
@@ -403,4 +430,5 @@ export class DaoRequests {
     return this.stops(agent, host).find(s => s.done ? s.done.at >= filedAt : !!s.signature);
   }
   relayed(id: string, state: string, now = Date.now()) { return this.amend(id, "proposal", { relayed: { at: now, state } }); }
+  hireRelayed(id: string, state: string, now = Date.now()) { return this.amend(id, "hire", { relayed: { at: now, state } }); }
 }

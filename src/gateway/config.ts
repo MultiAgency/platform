@@ -1,6 +1,7 @@
 import { isAbsolute, join } from "node:path";
 import { readFileSync, statSync } from "node:fs";
 import { z } from "zod";
+import { area, frontendArea } from "../contract/areas.js";
 import { frontendOrigin } from "./owner-frontend.js";
 
 /**
@@ -19,7 +20,7 @@ const Config = z.object({
     /** An owner app's own release process (P2): its contract.json is checked before any HTML is served. */
     frontend: z.object({ origin: z.string().refine(value => { try { frontendOrigin(value); return true; } catch { return false; } }, "Frontend origin must be HTTPS, or loopback HTTP"),
       product: z.string().regex(/^[a-z0-9-]{1,40}$/) }).strict().optional(),
-    hostedAreas: z.array(z.enum(["treasury", "payables"])).default([]),
+    hostedAreas: z.array(frontendArea).default([]),
   })).optional(),
   /** Fixed HTTPS intake origin; never selected by a request or used for dashboard RPC. */
   invoiceUpstream: z.url().refine(value => {
@@ -33,7 +34,7 @@ const Config = z.object({
   /** Setup of a hosted agent by an owner signed in on this host (`/gw/agents`). */
   selfService: z.boolean().default(false),
   /** The areas an app deployment may set up hosted agents for, with the owner's signed setup text (`/apps/v1/setup`). */
-  appSetup: z.array(z.enum(["treasury", "payables"])).default([]),
+  appSetup: z.array(area).default([]),
   /**
    * The platform as an engine for apps: this host serves only `/health`, app access (`/apps/v1`) and the confirm page
    * with its assets. No sign-in, owner app, owner RPC, machine credentials or demo hosts.
@@ -48,7 +49,7 @@ const Config = z.object({
       z.object({
         name: z.string().regex(/^[a-z0-9-]{1,32}$/),
         /** Stable presentation identity, independent of the policy's current permissions. */
-        area: z.enum(["payables", "treasury"]).optional(),
+        area: area.optional(),
         /** Explicit payee entry for this static payout agent; never inferred from global intake. */
         invoices: z.url().refine(value => {
           const url = new URL(value);

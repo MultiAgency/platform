@@ -1,11 +1,15 @@
 // Runs the SDK skills' examples (copied into an isolated consumer by verify-skills.mjs) against stand-in servers:
 // an oRPC owner agent, a payee entry and the platform host's routes. Each check records what was sent and asserts the documented recovery.
+// Then loads every other public entry and runs a payout through `payoutDouble`. Runs under Node and, for `pnpm sdk:bun`, Bun.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readdirSync } from "node:fs";
 import { os } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/node";
-import { appClient, ownerClient, proposalText, type ProposalView } from "@multiagency/sdk";
+import { appClient, ASSETS, ownerClient, proposalText, type ProposalView } from "@multiagency/sdk";
+import { ownerContract, ownerErrors } from "@multiagency/sdk/contract";
+import { payoutDouble } from "@multiagency/sdk/testing";
 import { payeeClient, payeeDisclosureMessage, type PayeePolicyProof } from "@multiagency/sdk/payee";
 import { owner as setupOwner } from "./examples/owner-workflows-1.ts";
 import { heldPayouts } from "./examples/owner-workflows-2.ts";
@@ -376,4 +380,37 @@ ok(memberMay("council.near", "dao.sputnik-dao.near", policy, "strategy/save") &&
 ok(!memberMay("voter.near", "dao.sputnik-dao.near", policy, "strategy/save") && !memberMay("anyone.near", "dao.sputnik-dao.near", policy, "overview"));
 ran.dao = "consent and proposal vote filed, member signs once, state read; members gated by the DAO's roles";
 await platform.close();
+
+// The other entries: the contract objects, and each JSON Schema loaded as a module.
+ok(ownerContract.overview && ownerContract.owner.prepare && ownerErrors, "the contract entry loads");
+const schemaDir = new URL(".", import.meta.resolve("@multiagency/sdk/schemas/session.json"));
+const schemaFiles = readdirSync(schemaDir).filter(file => file.endsWith(".json"));
+for (const file of schemaFiles) {
+  const loaded = await import(`@multiagency/sdk/schemas/${file}`, { with: { type: "json" } }) as { default: { $schema?: string } };
+  ok(loaded.default.$schema, file);
+}
+ran.entries = `contract, testing and ${schemaFiles.length} schemas loaded`;
+
+// The payout double, as an app's tests use it: the skill's own example, then a round trip through an app's own fetch.
+await import("./examples/app-server-7.ts");
+const double = payoutDouble({ organization: "org_1", agent: "payout", payees: ["payee.near"] });
+const doubleSent: string[] = [];
+// As an app adds a TLS option to each request (Bun's `tls.ca` for the local stack); the double ignores it.
+const custom = appClient({ base: double.base, credential: double.credential, fetch: (input, init) => {
+  doubleSent.push(new URL(String(input)).pathname.split("/rpc/")[1]!);
+  return double.fetch(input, { ...init, tls: { ca: "" } } as RequestInit);
+} });
+const payoutCalls = custom.agent("org_1", "payout");
+const asked = await payoutCalls.call("payouts/request", { requestId: "r-1", asset: ASSETS.USDC, delivery: "intents", recipient: "payee.near",
+  amount: "1000000", expectedPolicy: double.reviewedPolicy() });
+ok(asked.ok && asked.value.state === "held" && asked.value.status === "PENDING_APPROVAL", JSON.stringify(asked));
+const listed = await payoutCalls.call("held");
+ok(listed.ok && listed.value.length === 1 && listed.value[0]!.correlationId === asked.value.correlationId, JSON.stringify(listed));
+double.vote("r-1", "approve");
+double.settle("r-1");
+const settled = await payoutCalls.call("payouts/status", { requestId: "r-1" });
+ok(settled.ok && settled.value.state === "succeeded" && settled.value.status === "SUCCESS", JSON.stringify(settled));
+deepStrictEqual(doubleSent, ["payouts/request", "held", "payouts/status"], "every call went through the app's fetch");
+deepStrictEqual(double.unmodelled(), []);
+ran.payoutDouble = "skill example ran; request held, listed, approved, settled and read succeeded through the app's own fetch";
 console.log(JSON.stringify(ran));

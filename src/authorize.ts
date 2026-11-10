@@ -6,6 +6,7 @@ import type { Plan, PlannedAction } from "./plans.js";
 import { ASSETS, outputAssetRefusal } from "./policy.js";
 import { grantApproves, type Strategy, strategyDigest } from "./strategy-digest.js";
 import { costBps } from "./value.js";
+import { NETWORK, OPEN_ACCOUNT_WNEAR, sameTerms, termsOf, type HireTerms } from "./market/x402.js";
 import { tokenUsd } from "./valuation.js";
 import { breaksCashFloor, cashChange, cashUsd, withinRunCeiling } from "./strategy-value.js";
 
@@ -18,7 +19,7 @@ import { breaksCashFloor, cashChange, cashUsd, withinRunCeiling } from "./strate
  * missing evidence is a type error, never a skipped rule.
  */
 
-export type Purpose = "treasury" | "autopilot" | "payout" | "invoice" | "approval";
+export type Purpose = "treasury" | "autopilot" | "payout" | "invoice" | "approval" | "market";
 type Refusal = { code: string; message: string };
 
 type PolicyView = Awaited<ReturnType<typeof api.getPolicy>>;
@@ -56,6 +57,14 @@ export type Facts = {
   payout: Common & Funds & { heldPayouts: Transfer[]; allowDuplicateHeld?: boolean };
   invoice: Common & Funds;
   approval: Common;
+  /**
+   * A market hire's sends (docs/market.md): `hire`, the terms approved (null when the caller named none); `paymentAccount`,
+   * the agent's payment key (null when it has none); `payee`, the market's published payee for `near:mainnet`, read under
+   * the lock (null when unread or not exactly one; read only for a payment); `keyBalance`, the key's raw USDC at a final
+   * block (null when unread).
+   */
+  market: Common & { hire: HireTerms | null; paymentAccount: string | null; payee: { asset: string; payTo: string } | null;
+    keyBalance: string | null };
 };
 
 /** A purpose with the facts it is judged on. */
@@ -84,6 +93,7 @@ function grantAllows(purpose: Purpose, label: string, strategy?: Strategy) {
     case "autopilot": return label.startsWith("treasury:") && grantApproves(label, strategy!);
     case "payout": case "invoice": return label === "payout" || label === "invoices";
     case "approval": return true;
+    case "market": return label === "market";
   }
 }
 
@@ -167,6 +177,47 @@ export function authorize(action: Action, c: Case): Refusal | null {
       if (c.facts.heldPayouts.some((h) => h.recipient === recipient && h.asset === token && h.amount === units))
         return refuse("duplicate_held_payout", "A payout with the same recipient, asset and amount is already waiting for approval");
     }
+  }
+
+  if (c.purpose === "market") {
+    const { hire, paymentAccount, payee, keyBalance } = c.facts;
+    if (!hire) return refuse("market_hire_missing", "A market send names the hire it is for");
+    if (!paymentAccount) return refuse("payment_key_missing", "This agent has no payment key: a market agent is set up by an app");
+    if (action.method === "x402") {
+      // Paid only to the payee the market publishes, in its asset, by the exact scheme, from this agent's own key, for
+      // exactly the hire approved (user decision, 2026-11-09).
+      const { row, payer } = action.request;
+      if (!payee || row.payTo !== payee.payTo || row.asset !== payee.asset)
+        return refuse("payee_not_published", "The payment's payee or asset isn't the one the market publishes");
+      if (row.scheme !== "exact" || row.network !== NETWORK) return refuse("scheme_not_supported", `Only the exact scheme on ${NETWORK} is paid`);
+      if (payer !== paymentAccount) return refuse("payer_not_payment_key", "The payment isn't from this agent's payment key");
+      if (action.request.asset !== `nep141:${row.asset}` || action.request.amount !== row.amount)
+        return refuse("payment_terms_mismatch", "The payment's recorded asset or amount isn't its row's");
+      if (!sameTerms(hire, termsOf(action.request))) return refuse("hire_not_approved", "The payment's terms aren't the hire approved");
+      return null;
+    }
+    if (action.method !== "withdraw") return refuse("market_action_not_allowed", "A market agent only tops up its payment key and pays hires");
+    // A top-up: to chain `near`, from the confidential balance, without a memo, only to this agent's payment key, which
+    // the policy must name (user decision, 2026-11-09). USDC at most what the hire needs beyond what the key holds.
+    const { chain, asset, confidential, memo, recipient, amount } = action.request;
+    if (chain !== "near" || !confidential || memo !== undefined || !WITHDRAWN.has(asset))
+      return refuse("withdraw_not_allowed", "A top-up is wNEAR or USDC to chain near, from the confidential balance, without a memo");
+    if (recipient !== paymentAccount || !agreedWithdrawals(policy).has(recipient))
+      return refuse("payee_not_agreed", "A top-up goes only to this agent's payment key, as the policy names it");
+    if (policy.assets !== "any" && !policy.assets.includes(asset))
+      return refuse("asset_not_allowed", "The policy doesn't permit this asset: the owner adds it to the policy's assets first");
+    const cap = policy.limits.per_transaction?.[asset];
+    if (cap !== undefined && BigInt(amount) > BigInt(cap))
+      return refuse("per_transaction_exceeded", `${amount} of ${asset} is over the per-transaction limit of ${cap}`);
+    // wNEAR only opens the key's account: no more than that, whatever the policy's cap (sdk-5f review, 2026-11-10).
+    if (asset === ASSETS.wNEAR && BigInt(amount) > BigInt(OPEN_ACCOUNT_WNEAR))
+      return refuse("top_up_exceeds_opening", `A wNEAR top-up only opens the payment key's account: at most ${OPEN_ACCOUNT_WNEAR}`);
+    if (asset === ASSETS.USDC) {
+      if (keyBalance === null) return refuse("payment_key_unread", "The payment key's balance couldn't be read");
+      const shortfall = BigInt(hire.amount) - BigInt(keyBalance);
+      if (BigInt(amount) > shortfall) return refuse("top_up_exceeds_hire", `The payment key needs at most ${shortfall > 0n ? shortfall : 0n} more for this hire`);
+    }
+    return null;
   }
 
   if (c.purpose === "treasury" || c.purpose === "autopilot") {

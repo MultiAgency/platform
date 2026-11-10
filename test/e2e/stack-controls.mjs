@@ -93,6 +93,11 @@ export function stackControls(stack, { owner, payees = [] }) {
     /** A held payment's approval reads expired: the platform refuses a vote on it. */
     expireApproval: ({ correlation }) => simulated.expireApproval(correlation),
     fundPayout: ({ amount }) => simulated.fundPayout(amount),
+    // The simulated agent market (`--market`, docs/market.md): the owner's one-time registration of a market agent's payment
+    // key on USDC (the transaction `market/account` hands the app, simulated), and the market chain's blocks moving on, so a
+    // hire's unused payment expires and reads not charged.
+    marketRegister: ({ account }) => { if (!stack.market) throw new Error('Start the stack with --market'); if (typeof account !== 'string') throw new Error('Give account'); stack.market.register(account); },
+    marketAdvance: ({ blocks }) => { if (!stack.market) throw new Error('Start the stack with --market'); stack.market.advance(Number(blocks ?? 1_300)); },
     dropSignatureResponse: ({ agent } = {}) => providerOf(agent).dropSignatureResponse(),
     revealOwnerOutcome: ({ agent } = {}) => providerOf(agent).revealOwnerOutcome(),
     setUnavailable: ({ value, agent }) => providerOf(agent).setUnavailable(value === true),

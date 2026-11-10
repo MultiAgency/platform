@@ -32,6 +32,7 @@ type View = {
 
 const TITLES: Record<string, string> = {
   agent_create: "Create the agent", agent_freeze: "Freeze the agent", agent_unfreeze: "Unfreeze the agent",
+  agent_archive: "Archive the agent", agent_restore: "Restore the agent",
   policy_update: "Change the agent's policy", grant_issue: "Issue a grant", grant_revoke: "Revoke a grant", approval_vote: "Vote on a held payout",
 };
 const token = location.pathname.split("/").pop() ?? "";

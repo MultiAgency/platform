@@ -62,3 +62,9 @@ The canonical list is the README's [Not done yet](../README.md#not-done-yet). Th
 - `pnpm smoke` reads a host without signing in or moving anything.
 - Op ids, tx hashes, amounts and payees for every mainnet run are in the private release record, available to reviewers
   on request.
+
+
+The 0.5.6 [hosted-agent release candidate](agent-release.md) has offline/stack checks of archive/restore relaying,
+executor refusal, capacity recovery, consent termination, retained identity, child shutdown, registry crash points and
+an older registry reader. External archive/restore behaviour is per pinned provider docs; no platform mainnet release
+is recorded. An incomplete transition needs recovery before rollback; DAO release remains unavailable.

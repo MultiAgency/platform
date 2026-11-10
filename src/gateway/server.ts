@@ -1,3 +1,4 @@
+import { isFrontendArea, type FrontendArea } from "../contract/areas.js";
 import { servePayeeFrontend } from "./payee-frontend.js";
 import { accessFrontend } from "./access-frontend.js";
 import { serveOwnerFrontend } from "./owner-frontend.js";
@@ -26,7 +27,7 @@ import { type AgentEntry, childEnv, hostOf, loadConfig } from "./config.js";
 import { recentSignProposals } from "./proposals.js";
 import { ownerOf, resolveAccess, resolveAgentAccess } from "./roles.js";
 import { appendSynced } from "../synced.js";
-import { HostedAgents, authorizeSetup, boundPorts, hostedEnvironment, setupRequest, type HostedAgent, type OrganizationScope, type SetupRequest } from "./hosted-agents.js";
+import { HostedAgents, authorizeSetup, boundPorts, hostedEnvironment, selfServiceRequest, type HostedAgent, type OrganizationScope, type SetupRequest } from "./hosted-agents.js";
 import { AgentNotListening, agentOrigin, childReported, childStopped } from "./agent-origin.js";
 
 /**
@@ -96,7 +97,9 @@ function hostCapabilities(selected: typeof agents, site: { hostedAreas?: ("treas
  */
 async function agentsView(me: Awaited<ReturnType<typeof viewer>>, selected = agents) {
   if (!me && (config.walkthroughs || config.hosts)) return [];
-  const all = await Promise.all(selected.filter(a => !me || me.access[a.name]).map(async (agent) => ({ name: agent.name, owner: agent.owner, ...(agent.area && { area: agent.area }), ...("kind" in agent && { managed: true, invoices: agent.area === "payables" && payeeHost ? `https://${payeeHost}${payeeBase(agent.name)}/` : null }), ...(!("kind" in agent) && agent.invoices !== undefined && { invoices: agent.invoices }), dao: (await ownerOf(agent.owner)).policy !== null })));
+  // A market agent is an app's: the owner frontend has no page for it, so its discovery leaves it out.
+  const shown = selected.filter((a): a is typeof a & { area?: FrontendArea } => !a.area || isFrontendArea(a.area));
+  const all = await Promise.all(shown.filter(a => !me || me.access[a.name]).map(async (agent) => ({ name: agent.name, owner: agent.owner, ...(agent.area && { area: agent.area }), ...("kind" in agent && { managed: true, invoices: agent.area === "payables" && payeeHost ? `https://${payeeHost}${payeeBase(agent.name)}/` : null }), ...(!("kind" in agent) && agent.invoices !== undefined && { invoices: agent.invoices }), dao: (await ownerOf(agent.owner)).policy !== null })));
   return all.filter((a) => (me ? Boolean(me.access[a.name]) : a.dao));
 }
 
@@ -173,7 +176,11 @@ const server = createServer(async (req, res) => {
     if (await walletStopRoutes(req, res, pathname, signingHost, APP_ROOT, selected, DIST, () => stopping)) return;
     if (await payeePolicyRoutes(req, res, pathname, signingHost, APP_ROOT, selected)) return;
     const setupAreas = appSetupAreas(config.appSetup, site ?? undefined);
-    if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, { nonceSecret: SECRET, ...(config.appSetup.length && { setup: async ({ owner, kind, area, deployment, organization }) => {
+    if (await appRoutes(req, res, pathname, signingHost, selected, () => stopping, { nonceSecret: SECRET, hosted, stopHosted: async name => {
+      await supervisor.stopOne(name);
+      const index = agents.findIndex(a => a.name === name);
+      if (index >= 0) agents.splice(index, 1);
+    }, ...(config.appSetup.length && { setup: async ({ owner, kind, area, deployment, organization }) => {
       if (!setupAreas.includes(area)) throw new Error("This area is not available on this host");
       return await reserveHosted({ owner, kind, area }, { deployment, organization });
     }, setupAreas }) })) return;
@@ -214,7 +221,7 @@ const server = createServer(async (req, res) => {
       const account = auth.account(req);
       if (!account) return json(res, 401, { error: "Sign in first" });
       if (!config.selfService) return json(res, 403, { error: "New agent setup is disabled on this host" });
-      const parsed = setupRequest.safeParse(await readJson(req));
+      const parsed = selfServiceRequest.safeParse(await readJson(req));
       if (!parsed.success) return json(res, 400, { error: "Choose a valid owner, owner type and area" });
       if (site && !site.hostedAreas?.includes(parsed.data.area)) return json(res, 403, { error: "This area is not available on this host" });
       try { authorizeSetup(account, parsed.data.kind, await ownerOf(parsed.data.owner)); }

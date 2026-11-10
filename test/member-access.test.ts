@@ -18,18 +18,19 @@ function paths(node: object, prefix = ""): string[] {
 /** What every admitted member may read. */
 const READS = ["compensation/list", "instance", "account", "setup", "overview", "policyHistory", "treasury/get", "activity", "unresolved", "held", "payouts/status", "autopilot/get", "autopilot/evidence",
   "autopilot/log", "strategy/get", "inbox/list", "ledger", "ledgerCsv", "reconcileBooks", "owner/status", "owner/pending", "owner/actions", "paymentHistory", "agreements/list", "paymentStatus", "invoices",
-  "workOrders/list", "workOrders/get", "workOrders/status", "demoGuide/compose", "proposals/get", "proposals/list"];
+  "workOrders/list", "workOrders/get", "workOrders/status", "demoGuide/compose", "proposals/get", "proposals/list",
+  "market/quote", "market/status", "market/account"];
 /**
  * Preparations require FunctionCall proposal permission. None executes money or replaces the
  * owner's signature. The first three retain their historical non-intervention classification.
  */
 const PROPOSES = ["owner/prepare", "agreements/propose", "agreements/offer", "rebalance", "externalPlan", "deposit", "treasury/fund",
   "workOrders/create", "workOrders/prepare", "workOrders/deposit", "proposals/create", "proposals/withdraw"];
-const EXECUTES = ["proposals/execute", "compensation/prepare", "compensation/send", "compensation/review", "workOrders/file", "pay", "payouts/request", "sweep", "executePlan", "autopilot/tick", "autopilot/enable"];
+const EXECUTES = ["proposals/execute", "compensation/prepare", "compensation/send", "compensation/review", "workOrders/file", "pay", "payouts/request", "market/hire", "sweep", "executePlan", "autopilot/tick", "autopilot/enable"];
 const MANAGES = ["compensation/agreement", "strategy/save", "treasury/link", "treasury/unlink", "agreements/decline"];
 const MAINTAINS = ["autopilot/stop", "recover", "inbox/dismiss", "cancelPreparedInvoice"];
 /** Relaying an owner's signature: signers only. */
-const SIGNS = ["owner/submit", "workOrders/submit", "proposals/approve", "proposals/reject"];
+const SIGNS = ["owner/submit", "workOrders/submit", "proposals/approve", "proposals/reject", "market/approve"];
 
 const policy = {
   proposal_bond: "0",
@@ -48,7 +49,7 @@ const owner = { account: "fixture.sputnik-dao.near", policy, signer: "s" };
 const access = (account: string) => accessOf(`${account}.near`, owner)!;
 
 test("every procedure is explicitly assigned, with the gateway's internal reads denied to all browser callers", () => {
-  const all = paths(router), internal = ["ownerIdentity", "payeeTerms"];
+  const all = paths(router), internal = ["ownerIdentity", "payeeTerms", "releaseCheck"];
   assert.deepEqual(all.sort(), [...READS, ...PROPOSES, ...EXECUTES, ...MANAGES, ...MAINTAINS, "autopilot/set", ...SIGNS, ...internal].sort());
   const wallet = accessOf("owner.near", { account: "owner.near", policy: null, signer: "owner.near" })!;
   for (const path of all) assert.equal(mayCall(wallet, path), !internal.includes(path), path);

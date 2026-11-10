@@ -54,3 +54,14 @@ export function nep413Hash(message: string, nonce: Buffer, recipient: string, ca
   const callback = callbackUrl == null ? Buffer.from([0]) : Buffer.concat([Buffer.from([1]), str(callbackUrl)]);
   return createHash("sha256").update(Buffer.concat([tag, str(message), nonce, str(recipient), callback])).digest();
 }
+
+/** A NEP-413 signature as an app relays it: the text, its 32-byte nonce (base64), the signing key and the signature. */
+export type SignedText = { message: string; nonce: string; publicKey: string; signature: string };
+
+/** Whether `signed` is a NEP-413 signature over exactly `text` for `host`. Who holds the key is the caller's to check. */
+export function signsText(signed: SignedText, host: string, text: string) {
+  if (signed.message !== text) return false;
+  const nonce = Buffer.from(signed.nonce, "base64");
+  if (nonce.length !== 32) return false;
+  try { return verifyEd25519(signed.publicKey, nep413Hash(signed.message, nonce, host), signatureBytes(signed.signature)); } catch { return false; }
+}

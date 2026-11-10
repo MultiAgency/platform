@@ -1,5 +1,6 @@
 import { createIdempotencyKey, type StatusResponse } from "@near-intents-agent-api/sdk";
 import { api, waitForStatus } from "./api.js";
+import { assertCanSendAfterRelease } from "./release-state.js";
 import { agentId, executes } from "./env.js";
 import { assertCanDispatch, assertMoneyLock, type MoneyLock, withMoneyLock } from "./lock.js";
 import { mandateDigest, type ReviewedPolicy } from "./mandate.js";
@@ -16,6 +17,14 @@ import { tokenUsd } from "./valuation.js";
 import { refusalDetails } from "./provider-display.js";
 import { workOrderDispatchProblem } from "./work-order-binding.js";
 import { PublicError } from "./public-error.js";
+import { ASSETS } from "./policy.js";
+import { contractOf } from "./chain.js";
+import { payees } from "./market/client.js";
+import { recordTask } from "./market/evidence.js";
+import { paidHire, signedPayment } from "./market/pay.js";
+import { paymentKey } from "./market/payment-key.js";
+import { readChainView } from "./market/resolution.js";
+import { publishedPayee, type HireTerms, type X402Request } from "./market/x402.js";
 
 /** Every money action runs under the agent's grant, never the owner's key. With none, quoting and sending are refused. */
 export function agent() {
@@ -31,12 +40,21 @@ export type Action =
   | { method: "transfer"; request: Parameters<Grant["transfer"]>[1] }
   | { method: "shield"; request: Parameters<Grant["shield"]>[1] }
   | { method: "unshield"; request: Parameters<Grant["unshield"]>[1] }
-  | { method: "withdraw"; request: Parameters<Grant["withdraw"]>[1] };
+  | { method: "withdraw"; request: Parameters<Grant["withdraw"]>[1] }
+  /** A market hire's payment (docs/market.md): signed by the agent's payment key, paid to the market over x402. */
+  | { method: "x402"; request: X402Request };
+type ProviderAction = Exclude<Action, { method: "x402" }>;
+type X402Action = Extract<Action, { method: "x402" }>;
+/** A market hire's payment, taken by the market: its identity on chain and the task it pays for. Its outcome is the chain's. */
+export type X402Sent = { paymentId: string; taskId: string; state: string };
+/** The hire a market send is for, as approved: what its payment must pay and its top-up may fund. */
+export type MarketSend = { hire: HireTerms };
 
 /** First submissions only. Remote deduplication semantics are not assumed. */
 const FIRST_SUBMISSION = Symbol("first submission in this dispatch");
-export async function send(action: Action, idempotencyKey: string, lock: MoneyLock, permit?: symbol): Promise<{ correlation_id: string }> {
+export async function send(action: Action, idempotencyKey: string, lock: MoneyLock, permit?: symbol): Promise<{ correlation_id: string; task?: Awaited<ReturnType<typeof paidHire>>["task"] }> {
   assertMoneyLock(lock);
+  assertCanSendAfterRelease();
   if (permit !== FIRST_SUBMISSION) throw new AuthorizationHeld("submission must pass through dispatch; direct replay is blocked");
   const op = readOps().find((op) => op.idempotencyKey === idempotencyKey);
   if (!op || op.refused || op.correlationId || (op.submissionState && op.submissionState !== "PREPARED"))
@@ -47,6 +65,8 @@ export async function send(action: Action, idempotencyKey: string, lock: MoneyLo
   // Every check that can refuse runs before the claim: once claimed, nothing may throw before the
   // network call, or a payment that never left would read "outcome unknown" and block every send.
   const [grant, id, options] = [agent(), agentId(), { idempotencyKey }];
+  // A payment is signed here, locally: a key that isn't the recorded payer refuses before the claim.
+  const payment = action.method === "x402" ? await signedPayment(action.request) : undefined;
   // Commit submission-attempted before network I/O, in SQLite for invoices and JSONL otherwise.
   // A crash after this point is ambiguous even if the request never leaves this host.
   claimSubmission(idempotencyKey, action.request);
@@ -61,6 +81,8 @@ export async function send(action: Action, idempotencyKey: string, lock: MoneyLo
       return grant.unshield(id, action.request, options);
     case "withdraw":
       return grant.withdraw(id, action.request, options);
+    case "x402":
+      return paidHire(action.request, payment!);
   }
 }
 
@@ -69,7 +91,7 @@ export async function send(action: Action, idempotencyKey: string, lock: MoneyLo
  * autopilot sends it, and the clock it is judged by.
  */
 export type Sending = { planned: { plan: Plan; leg: PlannedAction } | null; autopilot: boolean; now: () => Date;
-  onSubmitted?: (method: Exclude<Action["method"], "withdraw">, correlationId: string) => void };
+  onSubmitted?: (method: Exclude<Action["method"], "withdraw" | "x402">, correlationId: string) => void };
 
 /**
  * Sends one money action under the money lock and follows it to a stable status. The request is
@@ -79,8 +101,15 @@ export type Sending = { planned: { plan: Plan; leg: PlannedAction } | null; auto
  * attempt. Anything else unanswered stays unresolved, and blocks new money actions until
  * status-only reconciliation proves its outcome.
  */
-/** `requestKey`: the operation's identity derived from a caller's request (payout-requests.ts), instead of a new one. */
-export async function dispatch(lock: MoneyLock, kind: string, action: Action, sending?: Sending, preparedKey?: string, expectedPolicy?: ReviewedPolicy, requestKey?: string, payout?: { allowDuplicateHeld?: boolean }): Promise<StatusResponse> {
+/**
+ * `requestKey`: the operation's identity derived from a caller's request (payout-requests.ts), instead of a new one.
+ * `market`: the hire a market send is for (src/market/hire.ts). A payment's outcome is never awaited here: it is the
+ * chain's, recorded by reconciliation (src/recover.ts).
+ */
+export function dispatch(lock: MoneyLock, kind: string, action: X402Action, sending: undefined, preparedKey: undefined, expectedPolicy: ReviewedPolicy | undefined, requestKey: string | undefined, payout: undefined, market: MarketSend): Promise<X402Sent>;
+export function dispatch(lock: MoneyLock, kind: string, action: ProviderAction, sending?: Sending, preparedKey?: string, expectedPolicy?: ReviewedPolicy, requestKey?: string, payout?: { allowDuplicateHeld?: boolean }, market?: MarketSend): Promise<StatusResponse>;
+export async function dispatch(lock: MoneyLock, kind: string, action: Action, sending?: Sending, preparedKey?: string, expectedPolicy?: ReviewedPolicy, requestKey?: string, payout?: { allowDuplicateHeld?: boolean }, market?: MarketSend): Promise<StatusResponse | X402Sent> {
+  assertCanSendAfterRelease();
   action = structuredClone(action);
   expectedPolicy = expectedPolicy && { ...expectedPolicy };
   // An approve-only instance never sends: refused before anything is recorded, so nothing is left open.
@@ -97,17 +126,25 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
   // strategy read after the provider's answers, so one saved meanwhile refuses it. A floor added meanwhile finds no
   // cash read, which refuses a swap that would lower cash.
   const cashFloor = sending?.planned?.leg.type === "swap" ? loadStrategy().cashFloor : undefined;
-  const [view, tokens, grants, shielded, recipient, cashViews] = await Promise.all([
+  // A market send reads the market's published payee and its payment key's balance: what its payment may pay, and how
+  // much a top-up may add. Read before anything is recorded: an unanswered read records nothing.
+  const key = market ? paymentKey() : undefined;
+  const [view, tokens, grants, shielded, recipient, cashViews, published, keyView] = await Promise.all([
     api.getPolicy(agentId()), api.getTokens(), api.listGrants(agentId()),
     // A payout's funds, so `authorize` can refuse one the wallet can't cover before it goes to a vote.
     paysOut ? api.getBalances(agentId(), { source: "confidential" }) : undefined,
     payee === null ? "exists" as const : recipientState(payee, action.method === "withdraw" ? registrationFor(action.request.asset) : null),
     cashFloor ? Promise.all([api.getBalances(agentId(), { source: "public" }), api.getBalances(agentId(), { source: "confidential" })]) : undefined,
+    market && action.method === "x402" ? payees().then(publishedPayee) : undefined,
+    key ? readChainView(key.account, key.publicKey, contractOf(ASSETS.USDC)) : undefined,
   ]);
   // A recipient that doesn't exist on NEAR, isn't registered on the token it is withdrawn to, or that the chain couldn't
   // confirm, is refused before anything is recorded: the provider's own refusal, or a failed delivery, would arrive after
   // the send claim, where it can't yet prove nothing was sent.
-  if (recipient === "absent") throw new LocalRefusal("recipient_not_found", `${payee} is not an account on NEAR. Nothing was sent.`);
+  // The one exception: a market agent's first wNEAR top-up opens its payment key's implicit account, which receiving
+  // NEAR creates (mainnet, 2026-10-20, a withdrawal to such an account settled; docs/market.md).
+  const opensPaymentKey = key !== undefined && payee === key.account && action.method === "withdraw" && action.request.asset === ASSETS.wNEAR;
+  if (recipient === "absent" && !opensPaymentKey) throw new LocalRefusal("recipient_not_found", `${payee} is not an account on NEAR. Nothing was sent.`);
   if (recipient === "unregistered") throw new LocalRefusal("recipient_not_registered",
     `${payee} isn't registered on this token's contract, so a withdrawal to it would fail. Nothing was sent; the payee registers (storage_deposit) and the request is asked again.`);
   if (recipient === "unchecked") throw new LocalRefusal("recipient_unchecked", "Whether the recipient can receive this on NEAR couldn't be checked. Nothing was sent; try again.");
@@ -156,12 +193,16 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
   // A payout or invoices grant only pays out (a transfer or a withdrawal): anything else it sends is judged, and refused,
   // as treasury work.
   const payoutGrant = grant?.label === "payout" || grant?.label === "invoices";
+  // A market grant only hires: its top-ups and payments are judged as market sends, and a payment always is.
   const purpose: Purpose = preparedKey ? "invoice"
+    : grant?.label === "market" || action.method === "x402" ? "market"
     : payoutGrant && (action.method === "transfer" || action.method === "withdraw") ? "payout"
     : sending?.autopilot ? "autopilot"
     : "treasury";
   // A payout request is a payout, judged as one, or nothing: under a grant for other work it would skip the payout checks.
-  if (requestKey && purpose !== "payout") refuseLocally("grant_purpose_denied", "A payout request is sent only under a payout grant; this agent's grant is for other work.");
+  // A hire's payment carries its request's identity too, and is judged as a market send.
+  if (requestKey && purpose !== "payout" && !(purpose === "market" && action.method === "x402"))
+    refuseLocally("grant_purpose_denied", "A payout request is sent only under a payout grant; this agent's grant is for other work.");
   const common = { now, agentId: agentId(), view, grant };
   const held = priorOps.filter(isHeld);
   const reserved = held.filter((op) => op.request.asset === asset).reduce((sum, op) => sum + BigInt(String(op.request.amount)), 0n);
@@ -183,10 +224,13 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
       : purpose === "payout"
         ? { purpose, facts: { ...common, available, allowDuplicateHeld: payout?.allowDuplicateHeld === true,
           heldPayouts: held.map(({ request: r }) => ({ recipient: String(r.recipient), asset: String(r.asset), amount: String(r.amount) })) } }
-        : { purpose, facts: { ...common, available } };
+        : purpose === "market"
+          ? { purpose, facts: { ...common, hire: market?.hire ?? null, paymentAccount: key?.account ?? null, payee: published ?? null,
+            keyBalance: keyView ? keyView.balance.toString() : null } }
+          : { purpose, facts: { ...common, available } };
   const refusal = authorize(action, judged);
   if (refusal) refuseLocally(refusal.code, refusal.message);
-  let sent: { correlation_id: string };
+  let sent: Awaited<ReturnType<typeof send>>;
   try {
     sent = await send(action, idempotencyKey, lock, FIRST_SUBMISSION);
   } catch (error) {
@@ -204,6 +248,14 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
       recordSubmissionEvidence(idempotencyKey, error);
     }
     throw error;
+  }
+  if (action.method === "x402") {
+    // Taken by the market. Nothing proves yet whether it settles: reconciliation reads that from the chain. The task id
+    // is the only way back to a paid result, kept as evidence beside the journal.
+    const task = sent.task!;
+    try { recordTask({ idempotencyKey, handle: action.request.handle, taskId: task.id, state: task.status.state }); }
+    catch { console.warn(`Market evidence unavailable for ${idempotencyKey}; the task id is ${task.id}.`); }
+    return { paymentId: sent.correlation_id, taskId: task.id, state: task.status.state };
   }
   record({ idempotencyKey, correlation_id: sent.correlation_id, status: "SENT" });
   // Observational callback only, after durable acceptance evidence. Never let UI logging alter recovery.

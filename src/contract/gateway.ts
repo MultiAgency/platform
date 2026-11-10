@@ -1,11 +1,11 @@
 import { z } from "zod";
 import type { Access } from "./permissions.js";
+import { frontendArea } from "./areas.js";
 
 /**
  * The hosted gateway's own routes (`gateway-session-v1`), as owner frontends read them. Discovery describes what this
  * host shows; it grants nothing. Every agent call is still authorized per session, agent and procedure.
  */
-const area = z.enum(["treasury", "payables"]);
 /** An HTTP(S) payee entry. The protocol is checked by the URL schema itself, so a malformed value fails the parse. */
 const entry = z.url({ protocol: /^https?$/ });
 export const gatewayAccess = z.looseObject({ canSign: z.boolean(), canPropose: z.boolean(), canVote: z.boolean(), canExecute: z.boolean(), canManage: z.boolean() });
@@ -15,7 +15,7 @@ export const gatewayAgent = z.looseObject({
   owner: z.string().min(1),
   /** Whether the owner is a Sputnik DAO (owner actions then pass through its votes). */
   dao: z.boolean(),
-  area: area.optional(),
+  area: frontendArea.optional(),
   /** A self-service instance created through `/gw/agents`. */
   managed: z.boolean().optional(),
   /** This agent's payee entry, or null when it has none. Absent: the host-wide `invoices` applies. */
@@ -34,7 +34,7 @@ export const gatewayDiscovery = z.looseObject({
   /** The owner-app capabilities this host provides (`ownerCapabilities`). */
   capabilities: z.array(z.string()).optional(),
   /** The areas the visitor may create agents in here. */
-  setupAreas: z.array(area).optional(),
+  setupAreas: z.array(frontendArea).optional(),
   selfService: z.boolean().optional(),
   walkthroughs: z.boolean().optional(),
 });

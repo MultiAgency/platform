@@ -45,7 +45,9 @@ delete: a lost final record lets an approved proposal execute again; a build bef
 open proposals wait unexecuted). Builds before 0.5.3 kept every agent's proposals directly in `.proposals/`, shared by
 the hosted agents of one host. From 0.5.3 those stay where they are, never moved: each agent reads its own there (by the
 agent id each records) and writes their approval and final record beside them, and writes new proposals in its own
-directory. Rolling back to a build before 0.5.3 reads the older proposals as before, but not the newer ones: those wait
+directory. A market agent's settings file also holds its payment key, `MARKET_PAYMENT_KEY` ([agent market](market.md)),
+written once at reservation: it may hold USDC or an outstanding payment authorization, so never delete, replace or
+regenerate it, and keep it as secret as the grant token beside it. Rolling back to a build before 0.5.3 reads the older proposals as before, but not the newer ones: those wait
 unexecuted, and a `requestId` an app sends again then makes a new proposal there, which needs the owner's approval
 again. Rolling forward, an agent's own directory wins over such a duplicate. Stop writers before copying state; never start the destination before stopping the
 source. The lease coordinates processes on one host only.
@@ -320,6 +322,10 @@ also for a refused one) is unreadable to a build before it: that build refuses t
 shape"), so it sends nothing for that agent and its reads of that journal (status, held payouts, the dashboard) fail
 too. That fails closed, but rolling an executor back past P3b after its first withdrawal request needs the
 compatibility review first; hosted agents are executors.
+A journal line with method `x402` (a market hire's payment, since 0.5.6, [agent market](market.md)) is unreadable to a
+build before it in the same way. Only a market agent's journal holds one, so a rollback past 0.5.6 stops only market
+agents, after their first hire; their reads of that journal fail too. Roll market agents back only with the
+compatibility review, and preserve their settings files: each holds the agent's payment key.
 
 **Deploy on Railway** (`Dockerfile.payouts`, selected by `railway.json`, one replica, one executor host per agent):
 
@@ -508,3 +514,22 @@ Effect deadline; each request, including response-body consumption, is also boun
 Failure or cancellation aborts active requests and stops queued lookups. These reads never retry
 automatically. Separate Agent API reads and the ten-second status diagnostic retain their existing
 bounds. Public history still cannot establish confidential settlement or authorize a replay.
+
+
+## Hosted-agent release (0.5.6 candidate)
+
+Preserve `.hosted/released.json`, every `.hosted/<name>.env` including `RELEASED_AT`, `RELEASED_ARCHIVE`, grant tokens
+and market payment keys, and both `registry.json` and `apps.json`, alongside every state directory listed above.
+Release adds optional records and needs no conversion of existing state. Back up with executors stopped; never delete
+or recreate settings to reclaim a slot. The release marker is written before retirement, released history before removing
+an active reservation, and process shutdown before marking release complete. Retried release finishes its durable state.
+After a completed release, the 0.5.5 registry reader leaves the agent down and refuses replacement over retained settings
+(offline compatibility test). Complete interrupted releases/restorations before rollback or review them separately:
+earlier dispatchers ignore release markers. Market agents additionally retain the x402 rollback limit. Restoration
+re-reserves the same provider ID and key, subject to capacity; the owner signs a new setup with a platform nonce and a
+new ordinary consent, then separately unfreezes and restores. See [agent release](agent-release.md).
+
+During re-reservation `RESTORE_REQUIRED=<provider agent ID>` replaces the release marker in the same atomic settings
+write. Dispatch remains refused until this executor records a successful owner-signed `agent_restore`; a host slot alone
+never authorizes a send, including the market key's locally signed last leg. Preserve this key with the release keys.
+A provider restore performed outside this executor needs operator recovery; it does not silently clear this marker.

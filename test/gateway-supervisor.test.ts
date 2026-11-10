@@ -90,3 +90,21 @@ test("shutdown signals all children promptly and preserves the requested signal"
   assert.ok(children.every(c => c.signalCode === "SIGKILL"));
 });
 
+
+test("stopping one agent cancels only its restart loop and permits a later restore", async t => {
+  const children = new Map<string, ChildProcess[]>();
+  const supervisor = new Supervisor((agent: { name: string }) => {
+    const c = child(ready); children.set(agent.name, [...children.get(agent.name) ?? [], c]); return c;
+  }, options);
+  t.after(() => supervisor.stop());
+  supervisor.start({ name: "released" }); supervisor.start({ name: "retained" });
+  await Promise.all([...children.values()].map(cs => once(cs[0]!, "message")));
+  await supervisor.stopOne("released");
+  await delay(150);
+  assert.equal(children.get("released")!.length, 1);
+  assert.notEqual(children.get("released")![0]!.exitCode, null);
+  assert.equal(children.get("retained")![0]!.exitCode, null);
+  supervisor.start({ name: "released" });
+  await once(children.get("released")![1]!, "message");
+  assert.equal(children.get("released")!.length, 2);
+});

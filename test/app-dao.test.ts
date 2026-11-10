@@ -144,7 +144,7 @@ test("a DAO files its consent for a vote: the platform picks the nonce and answe
   assert.notEqual((await file()).body.request.hash, pending.hash, "each filing gets its own nonce");
 });
 
-test("a DAO's consent carries only read, treasury and treasury-execute, and only for its own agent as it is now", async t => {
+test("a DAO's consent carries only read, treasury, treasury-execute and market, and only for its own agent as it is now", async t => {
   const { port, state, staging, production, file } = await harness(t);
   for (const scopes of [["owner"], ["read", "payout"], ["treasury", "owner"]] as const)
     assert.equal((await file({ scopes })).status, 400, scopes.join(","));
@@ -1173,4 +1173,82 @@ test("a completed DAO consent or setup answers the same after its consent is rev
   const setupAgain = await call(port, `/apps/v1/dao-setups/${setup.hash}`, "GET", staging);
   assert.equal(setupAgain.status, 200, JSON.stringify(setupAgain.body));
   assert.deepEqual([setupAgain.body.state, setupAgain.body.agent, setupAgain.body.consent.revoked], ["reserved", "own-dao", true]);
+});
+
+// A DAO-owned market agent (docs/market.md; user decision, 2026-11-09): each hire is paid only after the DAO votes on its
+// exact terms, filed from the platform's own text and relayed once, under a DAO consent carrying `market`.
+test("a DAO approves a market hire from the platform's own text, and the platform relays the signature once", async t => {
+  const { port, state, forwarded, signer, staging, production, file, vote } = await harness(t);
+  const { createHash } = await import("node:crypto");
+  const brief = "An article\nWrite 300 words on NEAR Intents.";
+  const approved = { handle: "writer", brief: createHash("sha256").update(brief).digest("hex"), network: "near:mainnet" as const,
+    asset: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", payTo: "c".repeat(64), amount: "500000", maxTimeoutSeconds: 1_200 };
+  const ask = (over = {}, token = staging) => call(port, "/apps/v1/dao-hires", "POST", token,
+    { organization: "org_1", agent: "treasury", requestId: "h-1", brief, approved, validUntil: later(3), ...over });
+  // A DAO consent with read and treasury doesn't reach hires; one with market does.
+  const treasuryOnly = (await file()).body.request;
+  vote(treasuryOnly.hash);
+  assert.equal((await call(port, `/apps/v1/dao-consents/${treasuryOnly.hash}`, "GET", staging)).body.state, "signed");
+  state.signature = null;
+  assert.equal((await ask()).status, 403, "no live DAO consent with market");
+  const market = (await file({ scopes: ["read", "market"] })).body.request;
+  vote(market.hash);
+  const consent = (await call(port, `/apps/v1/dao-consents/${market.hash}`, "GET", staging)).body.consent.id;
+  state.signature = null;
+
+  assert.equal((await ask({ brief: `${brief}!` })).status, 400, "a brief other than the one quoted");
+  assert.equal((await ask({ validUntil: new Date(Date.now() + 30_000).toISOString() })).status, 409, "an approval ending too soon for a vote");
+  assert.equal((await ask({}, production)).status, 403, "another deployment has no DAO consent");
+  const filed = await ask();
+  assert.equal(filed.status, 201, JSON.stringify(filed.body));
+  const { request: pending } = filed.body;
+  assert.match(pending.description, /Approve market hire h-1/);
+  assert.match(pending.description, /Hire writer\.market\.near\.ai for 0\.5 USDC, paid over x402/);
+  assert.equal(filed.body.transactions.proposal.receiverId, DAO);
+
+  state.replies["/rpc/market/approve"] = { status: 200, json: { requestId: "h-1", state: "paid", code: null, taskId: "t-1", taskState: "TASK_STATE_COMPLETED" } };
+  const stateOf = () => call(port, `/apps/v1/dao-hires/${pending.hash}`, "GET", staging);
+  assert.equal((await stateOf()).body.state, "pending");
+  const before = forwarded.length;
+  vote(pending.hash, generateKey());
+  assert.equal((await stateOf()).body.state, "pending", "another key's signature relays nothing");
+  assert.equal(forwarded.length, before);
+  vote(pending.hash);
+  const relayed = await stateOf();
+  assert.deepEqual([relayed.status, relayed.body.state, relayed.body.hireState], [200, "relayed", "paid"], JSON.stringify(relayed.body));
+  const approval = forwarded.at(-1)!;
+  assert.deepEqual([approval.path, approval.headers["x-gateway-actor"], approval.headers["x-gateway-consent"]], ["/rpc/market/approve", "app:staging:org_1", consent]);
+  const sent = approval.body.json;
+  assert.deepEqual([sent.requestId, sent.brief, sent.approved], ["h-1", brief, approved], "the terms and brief the DAO voted on");
+  assert.equal(sent.signed.publicKey, signer.public_key, "signed by the DAO's derived key");
+  assert.match(sent.signed.message, /^Approve market hire h-1\n/);
+  assert.equal((await stateOf()).body.state, "relayed");
+  assert.equal(forwarded.length, before + 1, "relayed once");
+  assert.equal((await call(port, `/apps/v1/dao-hires/${pending.hash}`, "GET", production)).status, 404);
+});
+
+test("a DAO sets up a market agent by vote on a host that sets them up, and creates it as a market agent", async t => {
+  const { port, state, staging, vote, setups } = await harness(t);
+  const setupText = (over = {}) => setupMessage({ host: HOST, deployment: "staging", organization: "org_1", owner: DAO, area: "market", expiresAt: later(3), ...over });
+  const fileSetup = (over = {}) => call(port, "/apps/v1/dao-setups", "POST", staging, { message: setupText(over) });
+  assert.equal((await fileSetup()).status, 403, "a host that doesn't set up market agents files no vote");
+  state.setupAreas = ["treasury", "market"];
+  const filed = await fileSetup();
+  assert.equal(filed.status, 201, JSON.stringify(filed.body));
+  assert.match(filed.body.request.description, /set up a hosted market agent owned by this DAO/);
+  vote(filed.body.request.hash);
+  state.providerId = null;
+  const reserved = await call(port, `/apps/v1/dao-setups/${filed.body.request.hash}`, "GET", staging);
+  assert.equal(reserved.body.state, "reserved", JSON.stringify(reserved.body));
+  assert.deepEqual(setups, [{ owner: DAO, kind: "dao", area: "market", deployment: "staging", organization: "org_1" }]);
+  const prepare = (action: object) => call(port, "/apps/v1/o/org_1/a/own-dao/rpc/owner/prepare", "POST", staging, { json: { action, signer: "dao" } });
+  state.replies["/rpc/owner/prepare"] = { status: 200, json: { correlationId: "c-create", preview: { summary: "Create" }, expiresAt: later(0.007), digest: null,
+    dao: { owner: "x", transaction: { receiverId: "v1.signer", actions: [] }, proposal: null, proposalAndVote: null } } };
+  assert.equal((await prepare({ type: "agent_create", role: "payout" })).status, 403);
+  assert.equal((await prepare({ type: "agent_create", role: "market" })).status, 200, "forwarded: the agent binds its role to its area");
+  // The agent itself refuses a role its area doesn't bind (src/hosted-binding.ts), as a Treasury agent refuses `market`.
+  const { checkHostedCreation } = await import("../src/hosted-binding.js");
+  const owner = { type: "near" as const, account_id: DAO, public_key: "ed25519:11111111111111111111111111111111" };
+  assert.throws(() => checkHostedCreation(owner, "dao", "market", { HOSTED_OWNER: DAO, HOSTED_OWNER_KIND: "dao", TREASURY_ACCOUNT: DAO, DASHBOARD_AREA: "treasury" }));
+  assert.doesNotThrow(() => checkHostedCreation(owner, "dao", "market", { HOSTED_OWNER: DAO, HOSTED_OWNER_KIND: "dao", TREASURY_ACCOUNT: DAO, DASHBOARD_AREA: "market" }));
 });

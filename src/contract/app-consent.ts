@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { area } from "./areas.js";
 
 /**
  * An agent owner's consent for one app deployment to act for one Organization on one agent: `read` for the listed
@@ -9,7 +10,7 @@ import { z } from "zod";
  * canonical text, so what was signed and what is stored are the same bytes.
  */
 export const APP_CONSENT_TYPE = "multiagency.app-consent";
-export const AppScope = z.enum(["owner", "payout", "read", "treasury", "treasury-execute"]);
+export const AppScope = z.enum(["owner", "payout", "read", "treasury", "treasury-execute", "market"]);
 export type AppScope = z.infer<typeof AppScope>;
 const name = z.string().regex(/^[a-z0-9-]{1,32}$/);
 /** Stands for an agent its server reports not created yet; only the platform's setup consent carries it, never a signed text. */
@@ -69,7 +70,7 @@ export const appSetup = z.strictObject({
   deployment: name,
   organization: appConsent.shape.organization,
   owner: account,
-  area: z.enum(["treasury", "payables"]),
+  area,
   expiresAt: z.iso.datetime(),
 });
 export type AppSetup = z.output<typeof appSetup>;

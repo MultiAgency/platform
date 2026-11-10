@@ -4,10 +4,10 @@ import { dispatch } from "./agent.js";
 import { readStatus } from "./api.js";
 import { executes } from "./env.js";
 import { withMoneyLock } from "./lock.js";
-import { isTerminal, isUnknownOutcome } from "./operation-status.js";
-import { isHeld, readOps, settle, type Op } from "./ops.js";
+import { isTerminal } from "./operation-status.js";
+import { readOps, settle, type Op } from "./ops.js";
 import { type ReviewedPolicy } from "./mandate.js";
-import { payoutFailure } from "./payout-failure.js";
+import { payoutAnswer, readsProvider } from "./payout-answer.js";
 import { PublicError } from "./public-error.js";
 
 /**
@@ -26,22 +26,10 @@ type Terms = { method: "transfer"; request: { recipient: string; asset: string; 
   | { method: "withdraw"; request: { asset: string; amount: string; chain: "near"; recipient: string; confidential: true } };
 
 type Status = Awaited<ReturnType<typeof readStatus>>;
-/** What the journal proves about one request, never more; for one that ended `failed`, what the provider says of it. */
+/** The request's answer from the journal; one that ended `failed` reads the provider's status of it once (or reuses `seen`). */
 async function answer(requestId: string, op: Op | undefined, seen?: Status) {
-  const base = { requestId, status: op?.status ?? null, correlationId: op?.correlationId ?? null, code: op?.refused ?? null,
-    failureCode: null as string | null, neverExecuted: false };
-  if (!op) return { ...base, state: "not_found" as const };
-  if (op.refused !== undefined) return { ...base, state: "refused" as const };
-  if (op.status === "SUCCESS") return { ...base, state: "succeeded" as const };
-  // FAILED and REFUNDED end the operation but don't prove nothing moved (a partial payout fails): a person decides,
-  // unless the provider's own record says it never executed. An unread status claims nothing and still answers.
-  if (op.status && isTerminal(op.status)) {
-    const read = seen ?? (op.correlationId ? await readStatus(op.correlationId).catch(() => undefined) : undefined);
-    return { ...base, ...payoutFailure(op.status, read), state: "failed" as const };
-  }
-  if (isHeld(op)) return { ...base, state: "held" as const };
-  if (op.correlationId && op.status && !isUnknownOutcome(op.status)) return { ...base, state: "processing" as const };
-  return { ...base, state: "unknown" as const };
+  const read = readsProvider(op) ? seen ?? (op!.correlationId ? await readStatus(op!.correlationId).catch(() => undefined) : undefined) : undefined;
+  return payoutAnswer(requestId, op, read);
 }
 
 const callerOf = (actor: string | undefined) => {

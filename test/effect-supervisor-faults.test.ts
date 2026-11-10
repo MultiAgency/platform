@@ -19,3 +19,12 @@ for (const throws of [false, true]) {
     assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
   });
 }
+
+test("a per-agent stop refuses to confirm release when child shutdown is unknown", { timeout: 1500 }, async () => {
+  const child = Object.assign(new EventEmitter(), { kill() { return false; } });
+  const supervisor = new Supervisor(() => child as unknown as ChildProcess,
+    { initialDelay: 20, maxDelay: 80, stableAfter: 1000, grace: 20, killGrace: 20 });
+  supervisor.start({ name: "fixture" });
+  await assert.rejects(supervisor.stopOne("fixture"), /did not confirm shutdown/);
+  assert.equal(await supervisor.stop(), false);
+});

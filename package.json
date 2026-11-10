@@ -24,6 +24,7 @@
     "evidence:check": "tsx scripts/evidence-docs.ts --check && tsx scripts/evidence-receipts.ts --check",
     "contract:pack": "tsx scripts/contract-pack.ts",
     "contract:skills": "node scripts/verify-skills.mjs",
+    "sdk:bun": "node scripts/verify-skills.mjs --runtime bun",
     "sdk:dev": "tsx scripts/sdk-dev.ts",
     "journal:check": "tsx scripts/check-journal-backup.ts",
     "typecheck": "tsc && tsc -p web && tsc -p examples/minimal-prototype",

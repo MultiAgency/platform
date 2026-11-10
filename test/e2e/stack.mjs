@@ -36,12 +36,16 @@ if (frontend && payablesDist) throw new Error('Use --frontend or --payables-rele
 // `--on-chain-policy-edits`: freeze, unfreeze and a policy edit that changes a provider-enforced field come back as NEP-366, held for the
 // platform's confirm page (see provider.mjs), for the Treasury agent and the Payables agent alike.
 const onChainPolicyEdits = args.includes('--on-chain-policy-edits');
+// `--market`: a simulated agent market (docs/market.md) with two listed agents, `writer` (delivers) and `refuser` (rejects),
+// and app setup of market agents. Use with `--app`: a market agent is an app's. Controls `marketRegister` and `marketAdvance`.
+const marketSim = args.includes('--market');
+if (marketSim && !app) throw new Error('--market needs --app: a market agent is set up by an app');
 const directory = join(process.env.PROTO_E2E_ARTIFACTS, 'stack'), controls = join(directory, 'controls');
 mkdirSync(controls, { recursive: true });
 const stack = await environment(join(directory, 'environment'), { owner, payees, ...(builder && { accounts: [builder] }), ...(payoutFunding !== undefined && { payoutFunding: BigInt(payoutFunding) }),
   ...(frontend && { frontendDist: resolve(frontend) }), ...(treasury && { workspace: true, portfolioOwner: owner }), ...(daoTreasury && { daoPortfolio: true }),
   ...(app && { selfService: true, hostedAreas: ['payables'] }),
-  ...(onChainPolicyEdits && { onChainPolicyEdits }),
+  ...(onChainPolicyEdits && { onChainPolicyEdits }), ...(marketSim && { market: true }),
   ...(payablesDist && { ownerApp: { product: 'payables', a: resolve(payablesDist), b: resolve(payablesDist) } }) });
 const { simulated } = stack;
 // One browser, two wallet contexts (owner, payee) behind the same wallet boundary as the tests. Attach over CDP.
@@ -87,10 +91,11 @@ const state = () => ({
   dao: daoTreasury ? { account: DAO, council: OWNER, member: SECOND } : null,
   // The simulated chain, as the stack's services read it (`NEAR_RPC_URL`): an app's server makes its own chain reads here.
   chain: { rpc: `${simulated.url}/chain` },
+  market: stack.market ? { url: stack.market.url, agents: ['writer', 'refuser'] } : null,
   app: app ? { deployment: app, base: stack.dashboard, credentialFile } : null,
   deposits: simulated.deposits.map(({ agent, correlation_id }) => ({ agent, correlation: correlation_id })),
   transfers: simulated.transfers.map(p => ({ agent: p.agent, correlation: p.correlation, approval: p.approval, status: p.status, recipient: p.body.recipient, amount: p.body.amount })),
-  providerErrors: simulated.errors, simulated: ['provider', 'chain', 'wallet signatures', 'deposits', 'settlement'],
+  providerErrors: simulated.errors, simulated: ['provider', 'chain', 'wallet signatures', 'deposits', 'settlement', ...(stack.market ? ['agent market'] : [])],
   controls: { directory: controls, write: '<name>.json with {"command": one of ' + Object.keys(commands).join('|') + ', ...arguments}; the result appears as <name>.result.json', stop: 'create a file named stop' },
 });
 writeWhole(join(directory, 'state.json'), JSON.stringify(state(), null, 2));
