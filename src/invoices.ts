@@ -5,7 +5,7 @@ import { api, readStatus, StatusMismatch } from "./api.js";
 import { agreedPayees } from "./authorize.js";
 import { acquireMoneyLock, MoneyLockBusy, UnresolvedOperations } from "./lock.js";
 import { ASSETS } from "./policy.js";
-import { isResolved, record } from "./ops.js";
+import { isHeld, isResolved, readOps, record } from "./ops.js";
 import type { ReviewedPolicy } from "./mandate.js";
 import { currentWorkOrder } from "./work-order-store.js";
 import { getInvoice, invoiceId, legacyInvoices, listInvoices, markInvoiceUnknown, noteRevision, prepareInvoice,
@@ -14,6 +14,15 @@ import { getInvoice, invoiceId, legacyInvoices, listInvoices, markInvoiceUnknown
 export type Status = "needs_agreement" | "refused" | "busy" | "prepared" | "waiting" | "paying" | "paid" | "failed" | "unknown" | "needs_review";
 
 const MAX_WAITING = 10;
+/**
+ * Payouts waiting for the owner: those `held` lists (after it settles any that moved on), plus this agent's own still
+ * held without an approval the provider names yet, which `held` can't list for a vote but dispatch still reserves.
+ */
+async function waiting() {
+  const listed = await held();
+  const shown = new Set(listed.map((payment) => payment.correlationId));
+  return listed.length + readOps().filter((op) => isHeld(op) && !shown.has(op.correlationId!)).length;
+}
 const ACCOUNT = /^(?=.{2,64}$)(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/;
 const USDC_DECIMALS = 6;
 
@@ -94,7 +103,7 @@ export const file = (invoice: InvoiceInput, authenticatedPayee: string, expected
     lock = await acquireMoneyLock();
     // Reads occur under the same lock as filing, with a final payout-policy check in dispatch.
     if (!(await agreed()).has(invoice.payee)) return { id, status: "needs_agreement" };
-    if ((await held()).length >= MAX_WAITING) return { id, status: "busy" };
+    if (await waiting() >= MAX_WAITING) return { id, status: "busy" };
     // All four records are committed before dispatch can reach a provider submission.
     known = prepareInvoice(invoice, ASSETS.USDC);
     if (known.amount !== invoice.amount || known.note !== invoice.note) {

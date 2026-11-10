@@ -507,3 +507,18 @@ for (const trigger of ["schedule", "operator"] as const) {
     assert.equal(book[ASSETS.USDC]!.confidential, 50n);
   });
 }
+
+test("a held invoice whose status read answers for another operation stops the tick as unresolved, as the store now holds it", async () => {
+  const { claimInvoiceSubmission } = await import("../src/invoice-store.js");
+  const { record } = await import("../src/ops.js");
+  const held = prepareInvoice({ payee: "p.near", submission: "s", amount: "1", note: "" }, ASSETS.USDC);
+  assert.ok(claimInvoiceSubmission(held.operation.idempotencyKey, held.operation.request));
+  record({ idempotencyKey: held.operation.idempotencyKey, correlation_id: "op_invoice_held", status: "PENDING_APPROVAL" });
+  // The provider answers about some other operation: recovery marks the invoice unknown, which blocks the money lock.
+  mock.method(api, "getStatus", async (correlation_id: string) =>
+    ({ correlation_id: correlation_id === "op_invoice_held" ? "someone-else" : correlation_id, status: statusOf(correlation_id) }));
+  limit(100);
+  assert.equal(await tick("schedule"), "Skipped: unresolved money actions.");
+  assert.deepEqual(sends, []);
+  assert.ok(readOps().some(op => op.idempotencyKey === held.operation.idempotencyKey && blocksDispatch(op)));
+});

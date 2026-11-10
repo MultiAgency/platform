@@ -596,3 +596,12 @@ test("two approvals racing with different signatures: one is recorded and answer
   assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
   assert.ok(results.some(r => r.status === "rejected" && refusedWith("already_approved")(r.reason)));
 });
+
+test("two proposals created at once can't both pass the open-proposal limit", async () => {
+  const { MAX_OPEN_PROPOSALS } = await import("../src/contract/treasury-proposals.js");
+  for (let n = 0; n < MAX_OPEN_PROPOSALS - 1; n++) await propose(`fill-${n}`);
+  const results = await Promise.allSettled([propose("race-a"), propose("race-b")]);
+  assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
+  assert.ok(results.some(r => r.status === "rejected" && refusedWith("too_many_proposals")(r.reason)));
+  assert.equal(listProposals(app).proposals.filter(p => ["proposed", "approved"].includes(p.state)).length, MAX_OPEN_PROPOSALS);
+});

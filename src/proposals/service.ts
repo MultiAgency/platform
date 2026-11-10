@@ -115,8 +115,10 @@ export async function createProposal(context: CallContext, input: unknown, now =
   const until = Date.parse(expiresAt);
   if (until <= now.getTime() + 60_000) throw refused("expiry_invalid", "A proposal must stay valid for more than a minute.");
   if (until > now.getTime() + MAX_PROPOSAL_MS) throw refused("expiry_invalid", "A proposal is valid for at most 7 days.");
-  const open = proposalIds().filter(other => { const p = loadProposal(other); return p && ["proposed", "approved"].includes(proposalState(p.record).state); });
-  if (open.length >= MAX_OPEN_PROPOSALS) throw refused("too_many_proposals", `This agent already has ${MAX_OPEN_PROPOSALS} open proposals. Withdraw or wait for some.`);
+  const full = () => proposalIds().filter(other => { const p = loadProposal(other); return p && ["proposed", "approved"].includes(proposalState(p.record).state); })
+    .length >= MAX_OPEN_PROPOSALS;
+  const tooMany = () => refused("too_many_proposals", `This agent already has ${MAX_OPEN_PROPOSALS} open proposals. Withdraw or wait for some.`);
+  if (full()) throw tooMany();
   let quoted: Awaited<ReturnType<typeof quoteChosen>>;
   try {
     const chosen = legs === "strategy" ? await strategyLegs() : legs;
@@ -130,7 +132,10 @@ export async function createProposal(context: CallContext, input: unknown, now =
     quoted: actions.map(({ amountOut, costBps }, i) => ({ amountOut, costBps, usdIn: usdIn[i]! })),
     policyRevision: snapshot.policyRevision, policyDigest: snapshot.policyDigest, strategyDigest: snapshot.strategyDigest,
     createdAt: now.toISOString(), expiresAt: new Date(until).toISOString(), note: note ?? null };
-  // Asked twice at once, one is stored and the other answers it.
+  // Counted again after the quote's wait and saved with no wait between, so two created at once can't both pass the
+  // limit. Asked twice at once with the same requestId, one is stored and the other answers it.
+  if (loadProposal(id)) return answer();
+  if (full()) throw tooMany();
   saveProposal(record);
   return answer();
 }
