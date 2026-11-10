@@ -979,6 +979,9 @@ USDC per-transaction ceiling, including a partly or fully funded key: before any
 If the cap tightens after a top-up, the funding is retained and the payment refused. These are platform checks,
 offline-tested in `test/market-hire.test.ts` and `test/authorize.test.ts`, not observed on mainnet. Daily/monthly caps and
 USD budgets still count provider withdrawals, not the timing or sum of later payments from retained funds.
+A DAO's approval deadline is checked after asynchronous signing and before every new claim; expiry stops paid-call
+retries without resolving an already attempted payment. Earlier top-ups remain recorded even if the final payment is
+refused. These boundaries are offline-tested in `test/market-deadline.test.ts` and `test/market-signing-race.test.ts`.
 The last leg, the key's signed `ft_transfer` to the market, is not the provider's: its
 payee, asset, amount and window are the platform's checks (the market's published payee, the exact terms approved,
 `authorize`'s `market` purpose), and a payment's outcome is read from the chain, never from the market's answer. What

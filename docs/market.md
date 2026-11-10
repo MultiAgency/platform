@@ -100,7 +100,8 @@ code.
    as `payout` does with `owner_approval: false`. A DAO approves each hire's exact terms by vote first, as it approves
    Treasury proposals (`proposalText`): the hire is filed as a durable proposal and paid only once the vote passes.
    A vote takes days and the agent's price can change meanwhile: the hire re-quotes before paying and refuses unless
-   the new `402` row equals the approved terms.
+   the new `402` row equals the approved terms. The signed `validUntil` is checked before each new submission,
+   after asynchronous preflight and signing, including top-ups and paid-call retries.
 3. **Hire.** `market/hire { requestId, terms }` sends once per `requestId` (the payout-request identity), under the
    money lock, through `dispatch`, purpose `market`, in two legs:
    - *Top-up:* a provider `withdraw` of the shortfall (the quote less what the payment key already holds) and, the
@@ -111,7 +112,10 @@ code.
      `SendMessage` is repeated with `X-PAYMENT`. The task id is recorded the moment it is known: it is the only way back
      to a paid result.
 4. **Follow.** `market/status { requestId }` answers what the journal proves: `refused`, `paid` (task completed and the
-   transfer observed on chain), `not_charged`, or `unknown`, and polls `GetTask` while the task moves.
+   transfer observed on chain), `not_charged`, or `unknown`, and polls `GetTask` while the task moves. These are the
+   final payment's outcomes: earlier top-ups can remain recorded on the key when a later leg is refused or approval
+   expires. Expiry does not undo those withdrawals. A matching retained attempt is followed after expiry without
+   another send; different terms under its requestId refuse `request_conflict`.
 
 ### When a payment is resolved
 
@@ -148,6 +152,11 @@ key's account and balances, the approved terms and, for a DAO, the passed vote.
 
 Daily/monthly caps and USD budgets account for provider withdrawals when they occur, not later payments from retained
 key funds. This change does not add payment-time cumulative accounting or make the last leg provider-enforced.
+For a DAO, the deadline is checked after all asynchronous reads and signing, immediately before each submission claim.
+If approval expires after a paid call was attempted, further 502 retries stop while its recorded outcome stays unknown
+until chain evidence resolves it. Offline regressions cover expiry during ownership, dispatch reads, finality,
+signing and retry waits (`test/market-deadline.test.ts`), and lost lock/shutdown/release during signing
+(`test/market-signing-race.test.ts`). No platform mainnet hire observation is claimed.
 
 ### State
 

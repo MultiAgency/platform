@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { dispatch, sendRefusal } from "../agent.js";
+import { dispatch, sendRefusal, type MarketSend } from "../agent.js";
 import { marketHireCapRefusal, notInForce } from "../authorize.js";
 import { contractOf, storageRegistered } from "../chain.js";
 import { registrationTransaction } from "../contract/funding.js";
@@ -18,7 +18,8 @@ import { challenge, getTask, message, payees, TERMINAL } from "./client.js";
 import { latestTasks, recordTask } from "./evidence.js";
 import { paymentKey } from "./payment-key.js";
 import { readChainView } from "./resolution.js";
-import { briefDigest, OPEN_ACCOUNT_WNEAR, paymentExpiry, quoteTerms, sameTerms, type HireTerms, type X402Request } from "./x402.js";
+import { briefDigest, OPEN_ACCOUNT_WNEAR, paymentExpiry, quoteTerms, sameTerms, termsOf, type HireTerms, type X402Request } from "./x402.js";
+import { approvalExpired } from "./approval.js";
 
 /**
  * Hiring a listed agent on the NEAR AI Agent Market over x402 (docs/market.md). A quote moves nothing. A hire runs
@@ -56,6 +57,19 @@ const callerOf = (actor: string | undefined) => {
   return actor;
 };
 const find = (key: string) => readOps().find((op) => op.idempotencyKey === key);
+type HireInput = { requestId: string; brief: string; approved: HireTerms };
+
+/** An existing attempt is followed even after approval expiry, and never mistaken for different work. */
+function retained(input: HireInput, op: Op) {
+  if (op.method !== "x402" || op.request.brief !== input.brief || !sameTerms(input.approved, termsOf(op.request as unknown as X402Request)))
+    throw refused("request_conflict", "This requestId already names another hire. Follow its existing record; no additional payment was submitted.");
+  return answer(input.requestId, op);
+}
+
+function checkApproval(expiresAt: number | undefined, now = Date.now()) {
+  if (approvalExpired(expiresAt, now)) throw refused("approval_expired",
+    "The DAO's hire approval expired before another submission. Check recorded top-ups; no further payment is attempted.");
+}
 
 /** What the journal proves about one hire's payment, with the task it paid for when the market answered. */
 function answer(requestId: string, op: Op | undefined) {
@@ -69,14 +83,16 @@ function answer(requestId: string, op: Op | undefined) {
 }
 
 /** Sends `amount` of `asset` to the payment key, as a market send judged against `hire`. */
-const topUp = (lock: MoneyLock, hire: HireTerms, account: string, asset: string, amount: string) =>
+const topUp = (lock: MoneyLock, market: MarketSend, account: string, asset: string, amount: string) =>
   dispatch(lock, "market-topup", { method: "withdraw", request: { asset, amount, chain: "near", recipient: account, confidential: true } },
-    undefined, undefined, undefined, undefined, undefined, { hire });
+    undefined, undefined, undefined, undefined, undefined, market);
 
 /** Waits until the key's account exists and holds `asset` at least `atLeast`, at a final block. */
-async function landed(account: string, publicKey: string, asset: string, atLeast: bigint) {
+async function landed(account: string, publicKey: string, asset: string, atLeast: bigint, approvalExpiresAt?: number) {
   for (let attempt = 0; attempt < LAND_ATTEMPTS; attempt++) {
+    checkApproval(approvalExpiresAt);
     const view = await readChainView(account, publicKey, contractOf(asset));
+    checkApproval(approvalExpiresAt);
     if (view.keyNonce !== null && view.balance >= atLeast) return view;
     await new Promise((resolve) => setTimeout(resolve, LAND_MS));
   }
@@ -88,18 +104,22 @@ const daoOwned = () => process.env.HOSTED_OWNER_KIND === "dao";
 
 /**
  * Pays for one hire, at most once per `requestId`. Asked again, it answers what the journal proves and sends nothing.
- * Refused, with nothing sent, unless a fresh quote equals `approved` and the brief is the one approved; for a DAO-owned
- * agent, unless the DAO approved it (`approveHire`).
+ * The payment is refused unless a fresh quote equals `approved` and the brief is the one approved; a DAO's approval
+ * must remain live before each new top-up or payment submission. Earlier top-ups can already be recorded when a later
+ * leg is refused. A matching attempted hire stays poll-only even after its approval expires.
  */
-export async function hire(actor: string | undefined, input: { requestId: string; brief: string; approved: HireTerms }, voted = false) {
+export async function hire(actor: string | undefined, input: HireInput, approvalExpiresAt?: number) {
   const key = requestKey(callerOf(actor), input.requestId);
-  if (find(key)) return answer(input.requestId, find(key));
-  if (daoOwned() && !voted) throw refused("dao_vote_required", "This agent's DAO approves each hire by vote first (POST /apps/v1/dao-hires). Nothing was sent.");
+  const existing = find(key);
+  if (existing) return retained(input, existing);
+  if (daoOwned() && approvalExpiresAt === undefined) throw refused("dao_vote_required", "This agent's DAO approves each hire by vote first (POST /apps/v1/dao-hires). Nothing was sent.");
+  checkApproval(approvalExpiresAt);
   checkBrief(input.brief);
   if (briefDigest(input.brief) !== input.approved.brief) throw refused("hire_not_approved", "This brief isn't the one approved. Nothing was sent.");
   const signer = paymentKey();
   const usdc = ASSETS.USDC;
   if (`nep141:${input.approved.asset}` !== usdc) throw refused("asset_not_supported", "Market hires are paid in USDC. Nothing was sent.");
+  const market: MarketSend = { hire: input.approved, ...(approvalExpiresAt !== undefined && { approvalExpiresAt }) };
   try {
     await withMoneyLock(async (lock) => {
       // Refuse the full quote before opening or funding the key, even when retained funds cover its shortfall.
@@ -120,19 +140,19 @@ export async function hire(actor: string | undefined, input: { requestId: string
         throw refused("payment_key_unregistered", `The owner registers the payment key ${signer.account} on USDC (storage_deposit) first. Nothing was sent.`);
       let view = await readChainView(signer.account, signer.publicKey, input.approved.asset);
       if (view.keyNonce === null) {
-        await topUp(lock, input.approved, signer.account, ASSETS.wNEAR, OPEN_ACCOUNT_WNEAR);
-        view = await landed(signer.account, signer.publicKey, usdc, 0n);
+        await topUp(lock, market, signer.account, ASSETS.wNEAR, OPEN_ACCOUNT_WNEAR);
+        view = await landed(signer.account, signer.publicKey, usdc, 0n, approvalExpiresAt);
       }
       const amount = BigInt(input.approved.amount);
       if (view.balance < amount) {
-        await topUp(lock, input.approved, signer.account, usdc, (amount - view.balance).toString());
-        view = await landed(signer.account, signer.publicKey, usdc, amount);
+        await topUp(lock, market, signer.account, usdc, (amount - view.balance).toString());
+        view = await landed(signer.account, signer.publicKey, usdc, amount, approvalExpiresAt);
       }
       const request: X402Request = { handle: input.approved.handle, brief: input.brief, messageId, row: quote.row,
         asset: usdc, amount: quote.row.amount, payer: signer.account, publicKey: signer.publicKey,
         nonce: (view.keyNonce! + 1n).toString(), maxBlockHeight: paymentExpiry(view.height, quote.terms).toString(),
         balanceAtSigning: view.balance.toString() };
-      return dispatch(lock, "market-hire", { method: "x402", request }, undefined, undefined, undefined, key, undefined, { hire: input.approved });
+      return dispatch(lock, "market-hire", { method: "x402", request }, undefined, undefined, undefined, key, undefined, market);
     });
   } catch (error) {
     // Recorded: the journal holds the outcome (a refusal, or none proven yet). Not recorded: nothing reached the payment.
@@ -186,13 +206,15 @@ export async function approveHire(context: { actor?: string; host?: string }, in
   const match = actor.match(ACTOR);
   if (!match || !context.host) throw new PublicError("A DAO's hire approval is relayed by the platform for an app. Nothing was sent.");
   if (!daoOwned()) throw refused("not_dao_owned", "This agent isn't a DAO's: its hires need no vote. Nothing was sent.");
-  if (!Number.isFinite(Date.parse(input.validUntil)) || Date.parse(input.validUntil) <= now)
-    throw refused("approval_expired", "The DAO's approval of this hire has ended. Nothing was sent.");
+  const existing = find(requestKey(actor, input.requestId));
+  if (existing) return retained(input, existing);
+  const approvalExpiresAt = Date.parse(input.validUntil);
+  checkApproval(approvalExpiresAt, now);
   const text = hireText({ requestId: input.requestId, agentId: agentId(), deployment: match[1]!, organization: match[2]!,
     approved: input.approved, validUntil: input.validUntil });
   // The key is checked here too, not only by the gateway: the DAO's derived key is this agent's owner on the provider.
   const { owner } = await api.getAgent(agentId());
   if (owner?.type !== "near" || owner.public_key !== input.signed.publicKey || !signsText(input.signed, context.host, text))
     throw refused("signature_invalid", "The signature isn't the agent's DAO owner's over this hire's approval text for this host. Nothing was sent.");
-  return hire(actor, { requestId: input.requestId, brief: input.brief, approved: input.approved }, true);
+  return hire(actor, { requestId: input.requestId, brief: input.brief, approved: input.approved }, approvalExpiresAt);
 }

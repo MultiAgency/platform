@@ -182,7 +182,8 @@ test("a DAO-owned market agent pays a hire only on its DAO's signed approval of 
     await assert.rejects(approveHire(context, await daoApproval({ key: generateKey().secretKey })), /isn't the agent's DAO owner's/);
     await assert.rejects(approveHire(context, await daoApproval({ host: "other.test" })), /isn't the agent's DAO owner's/);
     await assert.rejects(approveHire(context, await daoApproval({ text: "Approve anything" })), /isn't the agent's DAO owner's/);
-    await assert.rejects(approveHire(context, await daoApproval({ validUntil: new Date(Date.now() - 1_000).toISOString() })), /has ended/);
+    await assert.rejects(approveHire(context, await daoApproval({ validUntil: new Date(Date.now() - 1_000).toISOString() })),
+      (error: unknown) => (error as { data?: { code?: string } }).data?.code === "approval_expired");
     const tampered = await daoApproval();
     await assert.rejects(approveHire(context, { ...tampered, approved: { ...tampered.approved, amount: "1" } }), /isn't the agent's DAO owner's/, "terms other than the ones signed");
     assert.equal(withdrawals.length, 0);

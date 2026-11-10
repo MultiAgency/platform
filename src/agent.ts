@@ -25,6 +25,7 @@ import { paidHire, signedPayment } from "./market/pay.js";
 import { paymentKey } from "./market/payment-key.js";
 import { readChainView } from "./market/resolution.js";
 import { publishedPayee, type HireTerms, type X402Request } from "./market/x402.js";
+import { approvalExpired } from "./market/approval.js";
 
 /** Every money action runs under the agent's grant, never the owner's key. With none, quoting and sending are refused. */
 export function agent() {
@@ -48,11 +49,11 @@ type X402Action = Extract<Action, { method: "x402" }>;
 /** A market hire's payment, taken by the market: its identity on chain and the task it pays for. Its outcome is the chain's. */
 export type X402Sent = { paymentId: string; taskId: string; state: string };
 /** The hire a market send is for, as approved: what its payment must pay and its top-up may fund. */
-export type MarketSend = { hire: HireTerms };
+export type MarketSend = { hire: HireTerms; approvalExpiresAt?: number };
 
 /** First submissions only. Remote deduplication semantics are not assumed. */
 const FIRST_SUBMISSION = Symbol("first submission in this dispatch");
-export async function send(action: Action, idempotencyKey: string, lock: MoneyLock, permit?: symbol): Promise<{ correlation_id: string; task?: Awaited<ReturnType<typeof paidHire>>["task"] }> {
+export async function send(action: Action, idempotencyKey: string, lock: MoneyLock, permit?: symbol, approvalExpiresAt?: number): Promise<{ correlation_id: string; task?: Awaited<ReturnType<typeof paidHire>>["task"] }> {
   assertMoneyLock(lock);
   assertCanSendAfterRelease();
   if (permit !== FIRST_SUBMISSION) throw new AuthorizationHeld("submission must pass through dispatch; direct replay is blocked");
@@ -67,6 +68,11 @@ export async function send(action: Action, idempotencyKey: string, lock: MoneyLo
   const [grant, id, options] = [agent(), agentId(), { idempotencyKey }];
   // A payment is signed here, locally: a key that isn't the recorded payer refuses before the claim.
   const payment = action.method === "x402" ? await signedPayment(action.request) : undefined;
+  // Signing yields: shutdown, lock ownership or the durable release marker may have changed before the claim.
+  assertCanDispatch(lock, idempotencyKey);
+  assertCanSendAfterRelease();
+  if (approvalExpired(approvalExpiresAt)) throw new LocalRefusal("approval_expired",
+    "The DAO's hire approval expired before this submission. Check recorded top-ups; no further payment is attempted.");
   // Commit submission-attempted before network I/O, in SQLite for invoices and JSONL otherwise.
   // A crash after this point is ambiguous even if the request never leaves this host.
   claimSubmission(idempotencyKey, action.request);
@@ -82,7 +88,7 @@ export async function send(action: Action, idempotencyKey: string, lock: MoneyLo
     case "withdraw":
       return grant.withdraw(id, action.request, options);
     case "x402":
-      return paidHire(action.request, payment!);
+      return paidHire(action.request, payment!, approvalExpiresAt);
   }
 }
 
@@ -112,6 +118,7 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
   assertCanSendAfterRelease();
   action = structuredClone(action);
   expectedPolicy = expectedPolicy && { ...expectedPolicy };
+  market = market && structuredClone(market);
   // An approve-only instance never sends: refused before anything is recorded, so nothing is left open.
   if (!executes()) throw new PublicError("This copy only approves: payouts are sent by the agent's executor on its own host. Nothing was sent.");
   if (preparedKey && !invoiceOperations().some((op) => op.idempotencyKey === preparedKey && op.submissionState === "PREPARED"))
@@ -232,15 +239,15 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action, se
   if (refusal) refuseLocally(refusal.code, refusal.message);
   let sent: Awaited<ReturnType<typeof send>>;
   try {
-    sent = await send(action, idempotencyKey, lock, FIRST_SUBMISSION);
+    sent = await send(action, idempotencyKey, lock, FIRST_SUBMISSION, market?.approvalExpiresAt);
   } catch (error) {
-    // Thrown only before any network call, so nothing was sent.
+    // Recognized local guard failures precede submission; other errors below may follow network I/O.
     if (error instanceof AuthorizationHeld) {
       // Proven local failure before submission; invoice preparation stays available for revalidation.
       if (!preparedKey) record({ idempotencyKey, refused: "local_authorization_held" });
       throw error;
     }
-    const code = provenRefusal(error);
+    const code = error instanceof LocalRefusal ? error.code : provenRefusal(error);
     if (code) record({ idempotencyKey, refused: code });
     else {
       if (preparedKey) markInvoiceUnknown(preparedKey);

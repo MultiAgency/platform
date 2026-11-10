@@ -2,6 +2,7 @@ import { paidCall, message, type Task } from "./client.js";
 import { paymentKey } from "./payment-key.js";
 import { paymentHeader, paymentId, type X402Request } from "./x402.js";
 import { contractOf } from "../chain.js";
+import { approvalExpired } from "./approval.js";
 
 /**
  * The x402 leg of `send` (src/agent.ts), the only caller. Signing is local and runs before the submission claim, so a
@@ -30,9 +31,11 @@ export class PaymentNotTaken extends Error {
 const ATTEMPTS = 3, RETRY_MS = 2_000;
 
 /** The paid call. Its task, or `PaymentNotTaken`; a transport failure throws as it is. */
-export async function paidHire(request: X402Request, header: string): Promise<{ correlation_id: string; task: Task }> {
+export async function paidHire(request: X402Request, header: string, approvalExpiresAt?: number): Promise<{ correlation_id: string; task: Task }> {
   const params = message(request.messageId, request.brief);
   for (let attempt = 1; ; attempt++) {
+    // Submission was already claimed: stopping a retry cannot prove that the header was never taken.
+    if (approvalExpired(approvalExpiresAt)) throw new Error("The DAO's approval expired after this payment was attempted. Follow its recorded outcome; no further paid call was sent.");
     const answer = await paidCall(request.handle, params, header);
     if ("task" in answer) return { correlation_id: paymentId(request), task: answer.task };
     if (answer.status !== 502 || attempt === ATTEMPTS) throw new PaymentNotTaken(answer.status, answer.error);

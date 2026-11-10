@@ -48,7 +48,10 @@ platform-only fixes are listed separately.
   (`DAO_CONSENT_SCOPES`), a DAO may set up a market agent (`DAO_SETUP_AREAS`), and it approves each hire by vote:
   `appClient(...).daoHires.file` and `.state` (`/apps/v1/dao-hires`, `appDaoHireFiled`, `appDaoHireState`) file the
   DAO's proposal from `hireText` and relay its signature once to `market/approve` (`marketApproveInput`), which no app
-  scope reaches. New refusal code `brief_mismatch`. Capability `market-hire-v1`.
+  scope reaches. New refusal code `brief_mismatch`. Capability `market-hire-v1`. A DAO's approval deadline stops
+  every new top-up/payment submission and paid-call retry; attempted unknown payments remain poll-only. Earlier
+  top-ups stay recorded if the final payment is refused. Reusing a requestId with different terms refuses
+  `request_conflict`. Signing is followed by fresh lock, shutdown and durable release checks before submission.
 - **A journal operation may be `x402`** (`OPERATION_METHODS`): a market hire's payment. An SDK before 0.5.6 refuses a
   market agent's journal reads (`activity`, `unresolved`) and owner outputs naming `area: "market"`; no other agent's.
 - **`payoutDouble` answers with the platform's own code** (no API change): the journal's answer to a payout request

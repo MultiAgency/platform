@@ -43,7 +43,7 @@ test("inside src/agent.ts, money methods are called only from send, which only d
   assert.deepEqual(outside, []);
   // The permit is module-private and passed by dispatch alone.
   assert.equal(text.match(/FIRST_SUBMISSION/g)?.length, 3, "declared, checked in send, passed once by dispatch");
-  assert.equal(text.match(/\bsend\([^)]*FIRST_SUBMISSION\)/g)?.length, 1);
+  assert.equal(text.match(/\bsend\([^)]*FIRST_SUBMISSION\b[^)]*\)/g)?.length, 1);
   assert.match(text, /const FIRST_SUBMISSION = Symbol\(/);
   assert.doesNotMatch(text, /export\s+(const|let)\s+FIRST_SUBMISSION/);
 });
