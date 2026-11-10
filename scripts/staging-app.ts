@@ -109,10 +109,10 @@ table{border-collapse:collapse;width:100%;font-size:.85rem}td,th{border-bottom:1
 <button data-run="loadAgents">Agents with consent</button><button data-run="refresh">Refresh view</button></header>
 <main><div>
 <section><h2>1. Setup</h2>
-<div class="row"><label>Area <select id="area"><option>payables</option><option>treasury</option></select></label>
+<div class="row"><label>Area <select id="area"><option>payables</option><option>treasury</option><option>market</option></select></label>
 <button data-run="setup">Sign setup text</button><button data-run="create">Create the agent</button></div>
 <div class="row"><label>Scopes</label><label><input type="checkbox" class="scope" value="owner" checked> owner</label>
-<label><input type="checkbox" class="scope" value="payout" checked> payout</label><label><input type="checkbox" class="scope" value="read" checked> read</label>
+<label><input type="checkbox" class="scope" value="payout" checked> payout</label><label><input type="checkbox" class="scope" value="read" checked> read</label><label><input type="checkbox" class="scope" value="market"> market</label>
 <button data-run="consent">Sign consent</button><button data-run="grant">Issue payout grant</button></div>
 <p class="muted">A NEP-413 action is signed here; a NEP-366 one opens the platform's confirm page (its link is also in the history).</p></section>
 <section><h2>2. Policy</h2>
@@ -137,7 +137,8 @@ table{border-collapse:collapse;width:100%;font-size:.85rem}td,th{border-bottom:1
 <div id="daoRequest" class="muted">No DAO request filed in this tab.</div></section>
 <section><h2>5. Call a procedure</h2>
 <div class="row"><label>Path <input id="path" size="22" placeholder="strategy/save"></label><label>Input (JSON) <input id="input" class="w" placeholder='{}'></label><button data-run="callPath">Call</button></div>
-<p class="muted">For the Treasury steps: strategy/get, strategy/save, treasury/get, deposit, proposals/create, proposals/get, proposals/execute, autopilot/enable, autopilot/stop.</p></section>
+<p class="muted">For the Treasury steps: strategy/get, strategy/save, treasury/get, deposit, proposals/create, proposals/get, proposals/execute, autopilot/enable, autopilot/stop.
+For a market hire: market/account, deposit, market/quote, market/hire, market/status (docs/platform-staging.md).</p></section>
 <section><h2>3. Payouts</h2>
 <div class="row"><label>Asset <select id="asset"><option value="USDC">USDC</option><option value="wNEAR">wNEAR</option></select></label>
 <label>Delivery <select id="delivery"><option value="intents">confidential transfer</option><option value="near">withdraw to chain near</option></select></label></div>
@@ -358,14 +359,15 @@ var runs = {
     var r = await api("setup", { submission: submission });
     if (r.ok) { $("agent").value = r.value.agent; store("agent", r.value.agent); remember("agents", "agents", r.value.agent); setupKey = submission.publicKey; store("setupKey", setupKey); }
   },
-  create: function () { var a = needWallet(); return owner({ type: "agent_create", owner: { type: "near", account_id: a.accountId, public_key: setupKey || store("setupKey") || a.publicKey }, role: $("area").value === "payables" ? "payout" : "treasury" }); },
+  create: function () { var a = needWallet(); return owner({ type: "agent_create", owner: { type: "near", account_id: a.accountId, public_key: setupKey || store("setupKey") || a.publicKey }, role: $("area").value === "payables" ? "payout" : $("area").value === "market" ? "market" : "treasury" }); },
   consent: async function () {
     var c = needAgent(); needWallet();
     var scopes = Array.prototype.filter.call(document.querySelectorAll(".scope"), function (s) { return s.checked; }).map(function (s) { return s.value; });
     var text = await api("consentText", { organization: c.org, agent: c.agent, scopes: scopes });
     if (text.message) await api("consent", { submission: await signText(text.message) });
   },
-  grant: function () { return owner({ type: "grant_issue", label: "payout" }); },
+  // A market agent takes a `market` grant (docs/market.md); every other app agent here a `payout` one.
+  grant: function () { return owner({ type: "grant_issue", label: $("area").value === "market" ? "market" : "payout" }); },
   // The edit names the whole list: each adds to the payees in force, never replacing them.
   addTransferPayee: async function () {
     var read = await currentPolicy(), p = read.policy, list = (p.destinations.list || []).filter(function (d) { return d.action === "transfer"; }).map(function (d) { return { address: d.address, confidential: d.confidential !== false }; });
