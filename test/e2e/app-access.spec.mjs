@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { consentMessage, setupMessage } from '../../src/contract/app-consent.ts';
 import { environment } from './environment.mjs';
-import { connect, later, localFetch, value } from './app-steps.mjs';
+import { connect, later, value } from './app-steps.mjs';
 import { BUILDER, DAO, OWNER, PUBLIC_KEY, USDC, sign } from './provider.mjs';
 import { browserContext } from './wallet.mjs';
 
@@ -18,7 +18,7 @@ test('an app server relays readable owner actions, sends NEP-366 ones to the pla
   const steps = [];
   try {
     // The operator issues the deployment's service credential on the platform host.
-    const { host, gateway, app, ownerSigned, ownerStep, confirmStep } = await connect(stack);
+    const { host, gateway, app, localFetch, ownerSigned, ownerStep, confirmStep } = await connect(stack);
     const intents = () => stack.simulated.requests.filter(r => r.path === '/v1/generate-intent').length;
 
     // 1. The configured payout agent: identity, then the owner's consent for reads and owner actions.
@@ -331,7 +331,7 @@ test("a DAO consents to an app by its own vote; its grant vote lets autopilot ru
   test.setTimeout(180_000);
   const stack = await environment(info.outputPath('environment'), { daoPortfolio: true, headless: true });
   try {
-    const { host, app } = await connect(stack);
+    const { host, app, localFetch } = await connect(stack);
     /** A member files the DAO's proposal and it passes: the simulated MPC key signs the hash it names. */
     const passes = transaction => {
       const call = transaction.actions[0].params, kind = call.args.proposal.kind.FunctionCall.actions[0];

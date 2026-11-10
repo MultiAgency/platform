@@ -1,7 +1,7 @@
 import { expect } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { request as httpsRequest } from 'node:https';
+import { stackFetch } from './stack-controls.mjs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { appClient } from '../../src/contract/app-client.ts';
@@ -12,12 +12,6 @@ import { OWNER, PUBLIC_KEY, sign, signDelegate } from './provider.mjs';
  * An app deployment's server on the local stack, as the E2E specs drive it: an operator-issued credential, the SDK's
  * appClient, the owner's simulated wallet, and owner steps (readable ones relayed, NEP-366 ones on the confirm page).
  */
-export const localFetch = (url, options = {}) => new Promise((resolve, reject) => {
-  const req = httpsRequest(url, { method: options.method ?? 'GET', headers: Object.fromEntries(new Headers(options.headers)), rejectUnauthorized: false }, res => {
-    const chunks = []; res.on('data', chunk => chunks.push(chunk));
-    res.on('end', () => resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers: res.headers })));
-  }); req.on('error', reject); req.end(options.body);
-});
 export const later = days => new Date(Date.now() + days * 86_400_000).toISOString();
 export const value = result => { if (!result.ok) throw new Error(JSON.stringify(result)); return result.value; };
 
@@ -28,6 +22,7 @@ export async function connect(stack) {
     { cwd: gateway, env: { PATH: process.env.PATH, NODE_OPTIONS: process.env.NODE_OPTIONS } });
   const token = stdout.trim().split('\n').at(-1);
   expect(token).toMatch(/^tap_/);
+  const localFetch = stackFetch(stack);
   const app = appClient({ base: stack.dashboard, credential: token, fetch: localFetch });
   const ownerSigned = async message => {
     const nonce = value(await app.consents.nonce()).nonce, signed = await sign(OWNER, { message, recipient: host, nonce });
@@ -72,5 +67,5 @@ export async function connect(stack) {
     await ownerStep(app.agent(organization, name), { type: 'agent_create', owner: { type: 'near', account_id: OWNER, public_key: PUBLIC_KEY }, role: area === 'payables' ? 'payout' : area === 'market' ? 'market' : 'treasury' });
     return name;
   };
-  return { host, gateway, app, ownerSigned, ownerStep, confirmStep, consent, hostedAgent };
+  return { host, gateway, app, localFetch, ownerSigned, ownerStep, confirmStep, consent, hostedAgent };
 }

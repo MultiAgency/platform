@@ -10,7 +10,7 @@ import { sign, signDelegate } from './provider.mjs';
 // fixture key, standing in for the owner's or a payee's wallet. None of this is an application route.
 
 /** A `fetch` for the stack's dashboard host, trusting only the stack's own certificate. */
-const stackFetch = stack => (url, { method = 'GET', headers, body } = {}) => {
+export const stackFetch = stack => (url, { method = 'GET', headers, body } = {}) => {
   const ca = readFileSync(join(stack.directory, 'localhost.crt'));
   return new Promise((resolve, reject) => {
     const req = request(new URL(url, stack.dashboard), { method, headers: Object.fromEntries(new Headers(headers)), ca }, res => {
