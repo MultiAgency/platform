@@ -125,6 +125,64 @@ test("a successful top-up without destination proof needs review and rejects cha
   assert.equal(withdrawals.length, 1);
 });
 
+for (const stage of ["open", "usdc"] as const) test(`a ${stage} top-up whose acceptance reply is lost needs funding review without another send`, async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY);
+  if (stage === "usdc") sim.fund(KEY, "0");
+  mock.method(api, "forGrant", () => ({ withdraw: async (_id: string,
+    request: { asset: string; amount: string; recipient: string }, { idempotencyKey }: { idempotencyKey: string }) => {
+    withdrawals.push({ ...request, key: idempotencyKey });
+    // The provider accepted and credited the exact original withdrawal before losing its HTTP reply.
+    sim.fund(request.recipient, request.asset === ASSETS.USDC ? request.amount : "0");
+    throw new Error("fixture drops the accepted withdrawal reply");
+  } }));
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const requestId = `lost-${stage}-acceptance`, bindingKey = requestKey(APP, requestId);
+  const result = await hire(APP, { requestId, brief: BRIEF, approved });
+  const op = readOps().find(item => item.idempotencyKey === marketStageKey(bindingKey, stage));
+  assert.equal(op?.submissionState, "SUBMISSION_ATTEMPTED", "the send claim reached the real journal");
+  assert.equal(op?.correlationId, undefined, "the provider's identity was in the lost reply");
+  assert.equal(op?.status, undefined);
+  assert.equal(withdrawals.length, 1);
+  assert.equal(sim.chain.accounts.get(KEY)!.balance, stage === "usdc" ? BigInt(approved.amount) : 0n,
+    "the unknown outcome follows an accepted fixture credit, not a refusal before I/O");
+  assert.equal(result.state, "funding_review");
+  assert.equal(result.code, "funding_review_required");
+  const recorded = readOps();
+  assert.equal((await hireStatus(APP, requestId)).state, "funding_review");
+  assert.equal((await hire(APP, { requestId, brief: BRIEF, approved })).state, "funding_review");
+  await assert.rejects(acquireMoneyLock(), error => error instanceof UnresolvedOperations);
+  await assert.rejects(hire(APP, { requestId: `${requestId}-other`, brief: BRIEF, approved }));
+  assert.deepEqual(readOps(), recorded, "status and retries cannot replace or infer a funding outcome");
+  assert.equal(withdrawals.length, 1, "the original or another request never replays the unknown funding");
+  assert.equal(sim.chain.accounts.get(KEY)!.transfers.length, 0);
+});
+
+test("an in-flight preparation stays funding and a proven refusal stays refused after its claim", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const requestId = "local-funding-preparation", bindingKey = requestKey(APP, requestId);
+  const { record, recordMarketBinding, claimSubmission } = await import("../src/ops.js");
+  const { marketFundingNeedsReview } = await import("../src/market/binding-guard.js");
+  const request = { asset: ASSETS.USDC, amount: approved.amount, chain: "near", recipient: KEY, confidential: true };
+  const stageKey = marketStageKey(bindingKey, "usdc");
+  const lock = await acquireMoneyLock();
+  try {
+    recordMarketBinding({ idempotencyKey: bindingKey, actor: APP, requestId, brief: BRIEF, approved,
+      paymentAccount: KEY, publicKey: parseKey(secretKey).publicKey.toString() });
+    record({ at: new Date().toISOString(), idempotencyKey: stageKey, kind: "market-topup", method: "withdraw", journalVersion: 2, request });
+    // Another read cannot retire the preparation while its money-lock holder is still running.
+    assert.equal((await hireStatus(APP, requestId)).state, "funding");
+    assert.equal(marketFundingNeedsReview(readMarketBindings()[0]!, readOps()), false);
+    claimSubmission(stageKey, request);
+    record({ idempotencyKey: stageKey, refused: "approval_expired" });
+    assert.equal((await hireStatus(APP, requestId)).state, "refused");
+    assert.equal(marketFundingNeedsReview(readMarketBindings()[0]!, readOps()), false,
+      "a proven local refusal is not an unknown acceptance");
+  } finally { await lock.release(); }
+  assert.equal(withdrawals.length, 0);
+  assert.equal(sim.chain.accounts.get(KEY)!.transfers.length, 0);
+});
+
 test("an unproved top-up reserves the payment key across request IDs", async () => {
   sim.advance(1n); sim.chain.accounts.clear();
   sim.register(KEY); sim.fund(KEY, "0");

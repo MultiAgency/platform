@@ -44,7 +44,9 @@ platform-only fixes are listed separately.
   under the same ID refuses `request_conflict` even when no x402 payment was prepared. `market/status` can now answer
   `funding` or `funding_review` for a bound hire without a payment; `not_found` means no binding or payment exists.
   `funding_review` includes provider `SUCCESS` without final destination proof and `UNKNOWN`/`UNCERTAIN`; status
-  can still retry read-only proof reconciliation. A destination transaction cannot prove two funding stages.
+  can still retry read-only proof reconciliation. It also covers a lost funding acceptance reply with no provider
+  correlation to poll; that attempted stage needs reviewed recovery and cannot be resubmitted. A destination
+  transaction cannot prove two funding stages.
   **Breaking for exhaustive switches:** these are new `marketHireOutput.state` values. If verified USDC funding
   still leaves the key below the approved price, the hire refuses `funding_shortfall` and retains the credit. Apps
   should read `market/status` after a lost answer, show unresolved funding for review, and keep the same ID and terms when asking
@@ -64,6 +66,10 @@ platform-only fixes are listed separately.
 
 Platform changes in this unreleased version, outside the package:
 
+- **Hosted release retains unproven funding:** a submitted market top-up without final landing proof refuses
+  `unresolved`, including legacy unbound top-ups and provider `SUCCESS` with zero visible balances. `allowBalance`
+  does not bypass this check. Proven landed funds keep the existing explicit balance choice; the binding and proof
+  remain preserved for restoration. Offline-tested in `test/agent-release.test.ts`.
 - **The books attribute a wNEAR deposit** (staging, 2026-11-11): a deposit's asset was proven only by a NEP-141
   `ft_transfer` event to the deposit address, and wrap.near logs none, so a staging agent's 3 wNEAR deposit (wrapped and
   sent in one transaction, 2026-11-06) read as unattributed in `reconcileBooks`. A successful `ft_transfer` call of the

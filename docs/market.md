@@ -126,7 +126,8 @@ code.
      `SendMessage` is repeated with `X-PAYMENT`. The task id is recorded the moment it is known: it is the only way back
      to a paid result.
 4. **Follow.** `market/status { requestId }` answers `funding` for a bound hire with a pending top-up,
-   `funding_review` when a provider outcome is terminal or unknown without final landing proof, or landed USDC
+   `funding_review` when a provider outcome is terminal or unknown without final landing proof, an attempted
+   withdrawal lost its acceptance reply and has no provider correlation to poll, or landed USDC
    still awaits the hire's payment, `refused`, `paid` (the x402 transfer observed on chain,
    regardless of task state), `not_charged`, `unknown`, or `not_found` only when no binding or payment is recorded.
    It also polls `GetTask` while the task moves. Funding can remain on the key when a later leg is refused or DAO

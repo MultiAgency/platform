@@ -1011,7 +1011,11 @@ The 0.5.8 candidate writes a version 3 binding of the caller, requestId, brief, 
 any top-up. The opening and USDC stages use fixed keys derived from it. Different terms with the same ID refuse
 `request_conflict` even before x402 preparation; `market/status` sees a bound request as `funding` or
 `funding_review`, not `not_found`. A submitted stage reserves the payment key across hires until a final destination
-receipt proves the exact credit and a later final chain view includes it. Landed funds remain reserved to the original
+receipt proves the exact credit and a later final chain view includes it. A lost funding acceptance reply with no
+provider correlation also answers `funding_review`; it cannot be polled or automatically replayed. Hosted release
+refuses submitted funding without final proof, including legacy unbound top-ups, even with zero balances and an
+explicit balance override. Proven landed funds retain the existing release balance choice and preserved binding.
+Landed funds remain reserved to the original
 request until its x402 payment is recorded or its binding is terminally closed; a new ID cannot spend them while an
 expired approval waits for a fresh same-ID vote. Provider `SUCCESS` alone, a balance increase, or a
 `FAILED`/`REFUNDED` status after submission is insufficient to release an unproven funding reservation. A locally

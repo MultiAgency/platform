@@ -7,8 +7,21 @@ export function marketFundingNeedsReview(binding: MarketBinding, ops: readonly O
   return (["open", "usdc"] as const).some(stage => {
     if (binding.landed[stage]) return false;
     const op = ops.find(item => item.idempotencyKey === marketStageKey(binding.idempotencyKey, stage));
-    return op?.status !== undefined && (isTerminal(op.status) || isUnknownOutcome(op.status));
+    if (!op || op.refused !== undefined) return false;
+    // A lost acceptance reply leaves no provider identity to poll. It requires review, never another submission.
+    return (op.submissionState === "SUBMISSION_ATTEMPTED" && !op.correlationId) ||
+      (op.status !== undefined && (isTerminal(op.status) || isUnknownOutcome(op.status)));
   });
+}
+
+/** Archive does not cancel an earlier withdrawal: release waits until its destination credit is proven.
+ * Submitted legacy top-ups have no supported automatic proof or clearance. Proven landed funds remain subject to
+ * release's existing explicit balance choice and keep their binding on restoration. */
+export function hasUnprovenMarketFunding(ops: readonly Op[], bindings: readonly MarketBinding[]): boolean {
+  const landed = new Set(bindings.flatMap(binding => (["open", "usdc"] as const)
+    .filter(stage => binding.landed[stage]).map(stage => marketStageKey(binding.idempotencyKey, stage))));
+  return ops.some(op => op.kind === "market-topup" && op.method === "withdraw" && op.refused === undefined &&
+    (op.submissionState === "SUBMISSION_ATTEMPTED" || op.correlationId !== undefined) && !landed.has(op.idempotencyKey));
 }
 
 /** A pre-binding top-up has no request-ID binding. Its eventual credit cannot be assigned to a later hire. */

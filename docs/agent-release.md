@@ -19,6 +19,12 @@ evidence refuses. Every listed public and confidential balance must be zero unle
 agent this also checks the payment key's native NEAR (including locked storage) and USDC. Other unsolicited assets on
 that key are not enumerated; retain the key and inspect it before explicitly leaving funds behind.
 
+The unreleased 0.5.8 market binding candidate also refuses `unresolved` while a submitted top-up lacks final
+destination proof, even if the provider reports `SUCCESS`, current balances are zero, or `allowBalance` is true.
+Archive does not cancel a possible later credit. This includes legacy unbound top-ups, which require reviewed
+recovery. Proven landed funds can still be left behind with the existing explicit balance override; release preserves
+their hire binding and proof for restoration (`test/agent-release.test.ts`, offline-tested).
+
 A refusal returns `{ state: "refused", reason, balances }`; it writes no release marker. A successful check first writes
 `RELEASED_AT` and `RELEASED_ARCHIVE` in the kept instance settings and turns autopilot off. Every later dispatch and
 owner-action submission refuses `agent_released`, including from another process sharing those settings. The gateway
