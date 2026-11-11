@@ -501,6 +501,15 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     const found = await daoAgent(name, organization, "market");
     if ("error" in found) { json(res, 403, found); return true; }
     const { agent, authority, consent } = found;
+    // One requestId, one hire (#70): an earlier filing with other terms refuses; one with the same terms that is relayed,
+    // signed or still within its vote is the answer, and nothing new is filed. One that lapsed unsigned may be filed again.
+    const earlier = daoRequests.hires(credential.deployment, organization, name, requestId);
+    if (earlier.some(r => r.brief !== brief || JSON.stringify(r.approved) !== JSON.stringify(approved))) {
+      json(res, 409, { code: "request_conflict", error: "This requestId was already filed with other terms. Nothing was filed." }); return true;
+    }
+    const current = earlier.find(r => r.relayed !== null || Boolean(r.signature) || r.votingUntil > Date.now());
+    // Nothing to file, so no transactions: an SDK reads the answer as before, with both left null.
+    if (current) { json(res, 200, { request: publicDaoHire(current), transactions: { proposal: null, proposalAndVote: null } }); return true; }
     // The approval ends when the app asks, within the consent it is relayed under and Sputnik's default proposal period.
     const until = Math.min(Date.parse(validUntil), consent.expiresAt, Date.now() + MAX_HIRE_APPROVAL_MS);
     if (!Number.isFinite(until) || until <= Date.now() + 60_000) { json(res, 409, { code: "expires_too_soon", error: "This approval, or the consent it would be relayed under, ends too soon for a vote. Nothing was filed." }); return true; }

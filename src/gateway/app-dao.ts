@@ -409,6 +409,11 @@ export class DaoRequests {
   settle(id: string, consent: string) { this.amend(id, "consent", { consent }); }
   reserved(id: string, consent: string, agent: string) { return this.amend(id, "setup", { consent, reserved: agent }); }
   /** Stop requests for an agent on a host, newest first. */
+  /** A deployment's hire requests for one Organization, agent and requestId, newest first. */
+  hires(deployment: string, organization: string, agent: string, requestId: string) {
+    return this.list().filter((r): r is DaoHireRequest => r.kind === "hire" && r.deployment === deployment && r.organization === organization
+      && r.agent === agent && r.requestId === requestId).sort((a, b) => b.createdAt - a.createdAt);
+  }
   stops(agent: string, host: string) {
     return this.list().filter((r): r is DaoStopRequest => r.kind === "stop" && r.agent === agent && r.host === host).sort((a, b) => b.createdAt - a.createdAt);
   }

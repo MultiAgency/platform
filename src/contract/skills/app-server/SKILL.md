@@ -369,6 +369,13 @@ and `app.daoHires.state(hash)` relays the DAO's signature once it is found; then
 (raising, lowering or removing those caps).
 Don't ask a DAO for `treasury` to run a market agent. Before 0.5.7 those owner actions answered `forbidden`.
 
+The filing shortens `validUntil` rather than refusing it: to the earliest of what you ask, the consent's expiry and
+seven days from filing (`MAX_HIRE_APPROVAL_MS`, Sputnik's default proposal period). The DAO votes on the text carrying
+the shortened date, and the filing's answer returns it (`validUntil`, `votingUntil`): show members that one, not the
+date you asked for. One `requestId` is one hire (0.5.7): filing it again with the same terms answers the earlier request
+(200, nothing to file) while it is relayed, signed or still within its vote; with other terms it is refused
+`request_conflict`. Only one that lapsed unsigned is filed anew.
+
 A quote, and the re-quote inside `market/hire`, is refused with nothing sent when the market won't take the request:
 `agent_not_found` (no such listed agent) or `agent_not_hireable` (not taking calls, or no price): pick another agent;
 `quote_refused` (the market refused the request itself; its `error` says why): don't send it again unchanged. A quote
@@ -418,7 +425,8 @@ Controls: `setPolicy`, `setPolicyState`, `setGrant`, `setBalance`, `vote`, `sett
 that blocks new requests), `recipients.absent` / `unregistered` / `unchecked`, `revokeConsent` (`forbidden`,
 `no_consent`); a consent without `payout` answers `forbidden` with `code: "scope"`. Not modelled: budgets and hourly or
 monthly limits, approval expiry, provider outages, owner actions (`owner/prepare`: votes are `double.vote`), `deposit`
-and other procedures (answered 501, listed by `double.unmodelled()`). For those, and for the wire to a real gateway, use
+and other procedures, including `market/*` (refused with `code: "not_modelled"` from 0.5.7, so a test never retries
+them; listed by `double.unmodelled()`). For those, and for the wire to a real gateway, use
 the local stack (`pnpm test:e2e:stack --app <deployment>`): its controls sign as the owner (`signOwner`) or a payee
 (`signPayee`), lose a transfer's or withdrawal's reply, unregister a recipient, refuse the next payout under a provider
 code, expire an approval and end a payout `FAILED` or `REFUNDED` (docs/testing.md).
@@ -444,6 +452,9 @@ code, expire an approval and end a payout `FAILED` or `REFUNDED` (docs/testing.m
   link. A proposal that signs another hash isn't the request, whatever its description says.
 - **Letting anyone signed in act for a DAO** (HIGH): the platform admits your app, not the member. Check
   `memberMay(...)` on every call.
+- **Preparing again after a lost prepare reply** (MEDIUM): a second creation while one is open is refused
+  `owner_action_open`. Read `owner/pending` for the open action's `correlationId` and follow it; don't wait for it to
+  expire. A `busy` answer (another owner action preparing at that moment) can be sent again shortly.
 
 ## Completion
 

@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { assertNotReleased } from "./release-state.js";
 import { PublicError } from "./public-error.js";
 import lockfile from "proper-lockfile";
@@ -157,7 +158,7 @@ async function withDelegateLock<T>(owner: string, run: (assertHeld: () => void) 
       onCompromised: () => { held = false; } });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ELOCKED")
-      throw new PublicError("Another owner action is preparing a delegate; retry after it finishes.");
+      throw new ORPCError("CONFLICT", { message: "Another owner action is preparing a delegate; retry after it finishes.", data: { kind: "busy" } });
     throw error;
   }
   const assertHeld = () => { if (!held) throw new PublicError("Owner delegate preparation lock lost; refresh before preparing again."); };
@@ -283,7 +284,9 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
   assertNotReleased();
   if (signer === "dao" && (action.type === "agent_archive" || action.type === "agent_restore")) throw new PublicError("Archive and restore through apps currently support wallet owners only.");
   if (process.env.HOSTED_OWNER && action.type === "agent_create" && [...pending.values()].some(p => p.type === "agent_create" && p.stage !== "settled"))
-    throw new PublicError("Agent creation already has an open owner action. Follow its existing record before preparing another.");
+    // Coded, so an app whose prepare reply was lost can tell this apart and find the open action (`owner/pending`).
+    throw new ORPCError("CONFLICT", { message: "Agent creation already has an open owner action. Follow its existing record (owner/pending) before preparing another.",
+      data: { kind: "refused", code: "owner_action_open" } });
   const vote = action.type === "approval_vote" ? await checkPaymentApproval(action) : undefined;
   const paymentApproval = vote?.binding;
   const owner = signer === "dao" ? await treasuryOwner() : undefined;

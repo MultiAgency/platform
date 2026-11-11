@@ -77,7 +77,7 @@ export type PayoutDouble = {
   /** The owner's consent ends: every call answers `forbidden` with `code: "no_consent"`. */
   revokeConsent(): void;
   requests(): DoubleRequest[];
-  /** Calls the double doesn't model (answered 501, which the client reports as `unavailable` or `unknown`). */
+  /** Calls the double doesn't model (refused with `code: "not_modelled"`, which the client reports as `refused`). */
   unmodelled(): string[];
 };
 
