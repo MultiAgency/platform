@@ -969,6 +969,19 @@ test("calls carrying an owner's or DAO's signature draw on their own budget, and
   assert.equal(accessLogText().trim().split("\n").filter(line => line.includes('"rate_limited"')).length, 2, "a repeated 429 within the minute adds no line");
 });
 
+test("one Organization can't use up the hour of an app's other Organizations: each seen keeps a slice (#59)", async t => {
+  const { port } = await routeHarness(t);
+  const { token } = new AppCredentials(".app-access").issue({ deployment: "tenants", host: HOST, label: "tenants", days: 30, perHour: 40 });
+  const overview = (org: string) => call(port, `/apps/v1/o/${org}/a/payout/rpc/overview`, "POST", token, { json: {} });
+  const allowed = async (org: string, n: number) => { let ok = 0; for (let i = 0; i < n; i++) if ((await overview(org)).status !== 429) ok++; return ok; };
+  assert.equal(await allowed("org_2", 1), 1, "org_2 is seen, with 1 of its slice of 2 used");
+  // org_1 gets everything but what org_2 is still owed: 40 - 1 used - 1 owed.
+  assert.equal(await allowed("org_1", 40), 38);
+  assert.equal(await allowed("org_2", 1), 1, "org_2 still gets its slice");
+  const limited = accessLogText().trim().split("\n").map(line => JSON.parse(line)).filter(line => line.event === "rate_limited" && line.deployment === "tenants");
+  assert.deepEqual(limited.map(({ budget, reason, organization }) => ({ budget, reason, organization })), [{ budget: "shared", reason: "fair_share", organization: "org_1" }]);
+});
+
 test("app access state is written only into a directory no one else can read", t => {
   const dir = mkdtempSync(join(tmpdir(), "app-private-")); t.after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, "confirm"), { mode: 0o755 }); chmodSync(join(dir, "confirm"), 0o755);

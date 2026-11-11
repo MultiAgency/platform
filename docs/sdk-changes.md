@@ -21,6 +21,12 @@ Platform changes in this release, outside the package:
   can't refuse them with a 429 inside the signature's window, and they still can't exceed a limit of their own. Each 429
   is logged with its budget and, when the path names one, its Organization (at most once a minute per credential and
   budget). No client change. Offline-tested (`test/app-access.test.ts`).
+- **No Organization can use up an app's hour for the others** (platform#59): the shared budget keeps a slice (5% of the
+  limit) for each other Organization seen in the hour, even one refused, until it has used that much; a call that would
+  eat into what is still owed to the others is refused, and the slices kept back never exceed half the limit. An app
+  serving one Organization keeps its whole budget. The 429 log line names why (`reason: "fair_share"` or `"limit"`). No
+  client change: the SDK reports either as `rate_limited`. Offline-tested (`test/fair-share.test.ts`,
+  `test/app-access.test.ts`).
 - **A market hire keeps to the DAO's approval and to one requestId's terms** (#62): a DAO's approval deadline stops
   every new top-up or payment submission and paid-call retry; attempted payments with unknown outcomes stay poll-only.
   Earlier top-ups stay recorded if the final payment is refused. Once an x402 payment is recorded, reusing its
