@@ -1,7 +1,7 @@
 # Agencies on the NEAR AI Agent Market
 
 **Status: built and offline-tested (released in 0.5.6 on 2026-11-10; the approval-deadline and requestId binding
-from #62 are 0.5.7, unreleased); nothing observed on mainnet through the platform.** Built,
+from #62 in 0.5.7, 2026-11-11); nothing observed on mainnet through the platform.** Built,
 against a simulated market and chain (`test/e2e/market.mjs`) and a stand-in Agent API: the quote check, client,
 payment key and chain resolution (`src/market/`, `test/market.test.ts`); the `market` area (app setup only), the key
 written at reservation, the market role and policy, creation bound to them (`test/market-agent.test.ts`); the `x402`
