@@ -125,6 +125,7 @@ export const observationsRoutes = {
       book,
       unmanaged,
       target: targets(strategy),
+      ...(strategy.cashFloor && { cashFloor: strategy.cashFloor }),
       rebalance: { minLegUsd: strategy.minLegUsd, maxCostBps: strategy.maxCostBps },
       policy: countedSpend(policy),
       digest,
