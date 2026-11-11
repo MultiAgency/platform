@@ -12,6 +12,14 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
+## 0.5.8 (unreleased)
+
+- **The `app-server` skill says to derive a payout's `requestId`, payee and amount in code** (docs): from the app's own
+  record of what is owed, never from what a model or an incoming message proposes, and lists a model choosing them as a
+  critical mistake. In the [crash test](crash-test.md), models given the SDK call without the skill sent a second payment
+  under a new `requestId` when a tool result said the first had failed or was pending (14 of 46 runs, simulated provider).
+  No API change.
+
 ## 0.5.7 (2026-11-11)
 
 - **A DAO's `market` consent covers its market agent's own owner actions** (platform#67; the user's decision,
@@ -49,6 +57,7 @@ platform-only fixes are listed separately.
   parses. Offline-tested (`test/provider-display.test.ts`).
 - **Docs:** the app-server skill says how a DAO hire filing shortens `validUntil` (the earliest of the request, the
   consent's expiry and `MAX_HIRE_APPROVAL_MS`) and that the answer carries the date the DAO votes on (platform#70).
+
 
 Platform changes in this release, outside the package:
 - **The local stack's simulated provider describes a market grant as one** ("Authorize the local market hires", where it

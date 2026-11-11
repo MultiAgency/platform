@@ -10,7 +10,7 @@ metadata:
   purpose: 'Payee reports and their payment status with payeeClient, from a browser session or an agent connection, with recovery by kept identities; the payee''s own policy terms from the platform host.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.5.7'
+  library_version: '0.5.8'
 requires:
   - getting-started
 sources:
