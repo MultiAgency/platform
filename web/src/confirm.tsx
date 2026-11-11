@@ -17,7 +17,9 @@ import "./styles.css";
  * signs it directly. Standalone: no platform session, nothing but this one action.
  */
 type Policy = Record<string, unknown>;
-type Payment = { correlationId: string; verdict: "approve" | "reject"; terms: { recipient: string; asset: string; amount: string; chain?: "near" } | null };
+type Repeats = { checked: true; payouts: { correlationId: string; at: string; status: string }[] } | { checked: false };
+type Payment = { correlationId: string; verdict: "approve" | "reject"; terms: { recipient: string; asset: string; amount: string; chain?: "near" } | null;
+  repeats?: Repeats };
 type View = {
   deployment: string; organization: string; agent: string; owner: string; type: string; action: Record<string, unknown>;
   policy: { current: Policy | null; requested: Policy } | null; summary: string | null; expiresAt: string; payment: Payment | null;
@@ -60,7 +62,23 @@ function PaymentTerms({ payment }: { payment: Payment }) {
       <span className="block text-sm text-muted-foreground">{terms.amount} raw units of {terms.asset}</span></>)}
     {row("How", terms.chain === "near" ? "A public withdrawal to the NEAR account, which may arrive less a route fee" : "A confidential transfer")}
     {row("Held payout", <code>{payment.correlationId}</code>)}
+    {payment.repeats && row("Paid before", <PaidBefore repeats={payment.repeats} />)}
   </dl>;
+}
+
+/**
+ * Earlier payouts of the same payee, asset and amount in the last 24 hours, from the payment provider's history. A second
+ * payment of one invoice looks like any new payout; this is where the owner sees the first. It never stops a vote.
+ */
+function PaidBefore({ repeats }: { repeats: Repeats }) {
+  if (!repeats.checked) return <span>Couldn't check: the payment provider's history for the last 24 hours couldn't be read in full.</span>;
+  if (!repeats.payouts.length) return <span>No payout of these terms in the last 24 hours.</span>;
+  return <div className="grid gap-1">
+    <strong>The same payee, asset and amount {repeats.payouts.length === 1 ? "was" : "were"} already paid in the last 24 hours.
+      Check this isn't a second payment of one invoice.</strong>
+    <ul className="text-sm">{repeats.payouts.map(p =>
+      <li key={p.correlationId}><code>{p.correlationId}</code>, {new Date(p.at).toLocaleString()}, {p.status.toLowerCase().replace(/_/g, " ")}</li>)}</ul>
+  </div>;
 }
 
 /**

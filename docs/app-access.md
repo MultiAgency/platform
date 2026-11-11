@@ -145,7 +145,8 @@ frozen agent, changes nothing on chain and is reversed by a restore once unfroze
   again under the money lock before submitting (`checkPaymentApproval`, `src/payment-approval.ts`): the approval and
   the held execution name each other and this agent's wallet, the approval's recipient, asset and amount hash to the
   provider's request hash, and an approve is re-authorized under the current policy. The prepared answer carries those
-  proven terms (`payment`) for the app to show. What a dishonest app gains: a vote on another of this agent's held
+  proven terms (`payment`) for the app to show, and for an approve, the agent's payouts of the same terms in the last
+  24 hours (`payment.repeats`, 0.5.8; `{ checked: false }` when the provider's history can't be read whole). What a dishonest app gains: a vote on another of this agent's held
   payouts than the one it showed, which is itself a transfer to an agreed payee within the caps; the power it would
   have if the owner had turned `owner_approval` off. The vote's signed text names no payee or amount: it is OutLayer's
   `approve:{approval_id}:{wallet_pubkey}:{request_hash}` (recorded 2026-10-11 on a payout agent,

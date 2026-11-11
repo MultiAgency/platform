@@ -155,6 +155,12 @@ signs with their own wallet. Prefer sending the owner there; the platform submit
 with `owner/status`. You also get `intent` and may have the owner sign it in your app as before. A payout an owner
 approves can still read `processing` until the provider settles it; follow `payouts/status`.
 
+An approve's `payment.repeats` lists this agent's payouts of the same payee, asset and amount in the last 24 hours
+(`{ checked: true, payouts: [{ correlationId, at, status }] }`), or `{ checked: false }` when the provider's history
+couldn't be read in full (0.5.8). Show it beside the terms: a second payment of one invoice under a new `requestId`
+looks like any new payout, and this is where the owner sees the first. It refuses nothing; a recurring payment repeats
+too. The confirm page shows it as well.
+
 ## Set up a hosted agent for an Organization
 
 Before an Organization has an agent, your server builds `setupMessage({ host, deployment, organization, owner, area,

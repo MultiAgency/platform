@@ -88,4 +88,30 @@ async function rejecting(browser, root) {
   } finally { await fixture.context.close(); }
 }
 
-runTask([signsOnce, rejecting]);
+/** Earlier payouts of the same terms show beside them, and the page says when it couldn't check; signing is unchanged. */
+async function paidBefore(browser, root) {
+  const terms = { recipient: 'payee.near', asset: USDC, amount: '2500000' };
+  const cases = [
+    [{ checked: true, payouts: [{ correlationId: 'earlier-1', at: new Date(Date.now() - 3_600_000).toISOString(), status: 'SUCCESS' }] },
+      /already paid in the last 24 hours\. Check this isn't a second payment of one invoice\./],
+    [{ checked: true, payouts: [] }, /^No payout of these terms in the last 24 hours\.$/],
+    [{ checked: false }, /^Couldn't check: the payment provider's history for the last 24 hours couldn't be read in full\.$/],
+  ];
+  for (const [repeats, shown] of cases) {
+    const fixture = await confirmPage(browser, root, view({ payment: { correlationId: 'held-1', verdict: 'approve', terms, repeats } }));
+    try {
+      await termsShown(fixture.tab);
+      await fixture.tab.getByText('Paid before', { exact: true }).waitFor();
+      await fixture.tab.getByText(shown).waitFor();
+      if (repeats.checked && repeats.payouts.length) {
+        await fixture.tab.getByText('earlier-1', { exact: true }).waitFor();
+        await fixture.tab.getByText(/success/).waitFor();
+      }
+      await fixture.tab.getByRole('button', { name: 'Sign and submit', exact: true }).waitFor();
+      assert.deepEqual(fixture.errors, []); assert.deepEqual(fixture.network, []);
+    } finally { await fixture.context.close(); }
+  }
+  console.log('PASS earlier payouts of the same terms show beside them, and an unchecked history says so');
+}
+
+runTask([signsOnce, rejecting, paidBefore]);

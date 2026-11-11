@@ -388,6 +388,12 @@ provider, 3 runs per cell), none paid twice with the SDK's `app-server` skill in
 Qwen3.8-27B, DeepSeek-V4.1-flash and Kimi K3 did in 14 of 46 without it, and in a second run (whose task also asked for
 a claim) every model but Claude Opus 5.5 did, in 19 of 72 ([crash test](crash-test.md)). A request that
 opts out of the duplicate check (`allowDuplicateHeld`, 0.5.5) is in the same position while the first is still held.
+Since 0.5.8 an approve's prepared vote lists this agent's payouts of the same payee, asset and amount in the last 24
+hours, read from the provider's history (`payment.repeats`, `src/repeat-payouts.ts`), and the confirm page shows them
+beside the terms; a history that can't be read whole says so, never "none". It informs the owner and refuses nothing
+(offline-tested, `test/repeat-payouts.test.ts`; browser-tested, `test/browser/approval-confirm.cjs`; stack-tested, a
+second payout of the same terms after the first settled names the first, `test/e2e/app-access.spec.mjs`). An app that
+has the owner sign the vote in its own page needn't show it.
 
 ## Local presentation limits
 
