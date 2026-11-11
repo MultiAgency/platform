@@ -247,6 +247,29 @@ export const readOrderCancellation = (id: string) => {
   return claimed;
 };
 
+/** Only a matching claim without a submission marker proves that its one provider POST has not begun. */
+export function cancellationClaimPhase(id: string, op: Op | undefined): "none" | "prepared" | "attempted" | "retired" {
+  const claim = readOrderCancellation(id);
+  if (!claim) {
+    if (op) throw new Error(`Limit-order proposal ${id} has a cancellation journal without its claim`);
+    return "none";
+  }
+  if (!op) return "prepared";
+  const proposal = loadOrderProposal(id);
+  const request = { proposalId: id, orderId: claim.orderId };
+  if (!proposal || op.idempotencyKey !== `limit-order-cancel:${id}` || op.kind !== "limit-order-cancel"
+    || op.method !== "limit_order_cancel" || op.journalVersion !== 2
+    || canonicalRecord(op.request) !== canonicalRecord(request)
+    || op.policyRevision !== null || op.policyDigest !== null
+    || op.originalOrderPolicyDigest !== proposal.record.policyDigest)
+    throw new Error(`Limit-order proposal ${id} has a mismatched cancellation journal`);
+  if (op.refused === "never_submitted" && op.submissionState === "PREPARED" && !op.correlationId && !op.status && !op.cancelFinal)
+    return "retired";
+  if (op.refused || op.correlationId || op.status || op.submissionState !== "PREPARED" && op.submissionState !== "SUBMISSION_ATTEMPTED")
+    throw new Error(`Limit-order proposal ${id} has cancellation evidence that needs review`);
+  return op.submissionState === "PREPARED" ? "prepared" : "attempted";
+}
+
 /** A terminal funded placement still blocks new sends if its local order identity or signed claim was lost. */
 export function assertSuccessfulOrderEvidence(ops: readonly Op[]) {
   for (const op of ops) {
@@ -266,7 +289,7 @@ export function assertSuccessfulOrderEvidence(ops: readonly Op[]) {
       throw new Error(`Successful limit order ${id} lost its provider order identity; preserve state and investigate`);
   }
 }
-/** Claim cancellation before its first provider call. A crash or lost answer permits reads only, never replay. */
+/** Claim cancellation before its first provider call. A pre-submission crash may resume; a claimed POST never replays. */
 export function claimOrderCancellation(id: string, orderId: string) {
   existingProposal(id);
   const placement = readOrderPlacement(id);

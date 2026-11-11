@@ -80,8 +80,13 @@ unknown. A canceled order can still have partial fills and payouts to track.
 An unanswered live placement leaves its submission claimed and its journal operation unresolved, blocking new
 sends. Neither the owner nor recovery repeats it: provider deduplication of an ambiguous request is unverified.
 If a correlation ID was retained, recovery reads status only and saves a successful `order_id` before terminal
-journal status. Cancellation has no provider idempotency key. It is claimed and journaled before one cancel call;
-a lost reply is followed only by live reads. Cancellation acceptance alone does not prove final payout. A freeze
+journal status. Cancellation has no provider idempotency key. It is claimed and journaled before one cancel call.
+A crash before the journal's submission marker proves no provider call began: a matching, still prepared claim stays
+unresolved and `cancelMayResume: true` lets the app explicitly continue the same cancellation under the money lock.
+That path rechecks the order and grant, records any missing preparation and retains the original order's mandate
+digest separately because the current policy may have been removed. `refresh` sends nothing. After the submission
+marker, even a lost reply permits only live reads and `cancelMayResume` is false. Cancellation acceptance alone does
+not prove final payout. A freeze
 may attempt cancellation, but resting fills can still occur, so freeze and agent release must account for every
 known order's live fill and payout state. Release checks all locally tracked orders and each provider-listed order
 by live ID; the provider list can lag, so an external order omitted from it still needs operator reconciliation.
@@ -121,8 +126,9 @@ owner to sign, then attempts placement once. After an uncertain placement reply 
 no replacement order. Its DAO flow files an exact vote with `daoLimitOrders.file`, follows `.state(hash)`, and checks
 current member roles before offering the voting transaction. Cancellation is claimed once and followed through
 `refresh` after an ambiguous reply. The UI keeps resting, partial fill, cancellation requested, failed payout and
-unknown states separate; it shows completion only after final payout evidence. These are local consumer test claims,
-not deployed or live provider observations.
+unknown states separate; it shows completion only after final payout evidence. The consumer has not yet integrated
+the 0.5.8 `cancelMayResume` signal for a proven pre-submission crash; that is part of its final package gate. These
+are local consumer test claims, not deployed or live provider observations.
 
 Focused offline tests in `test/limit-order-terms.test.ts`, `test/limit-order-store.test.ts`,
 `test/limit-order-dispatch.test.ts`, `test/limit-order-observe.test.ts` and the service/cancellation suites cover exact

@@ -28,7 +28,7 @@ import { readChainView } from "./market/resolution.js";
 import { publishedPayee, type HireTerms, type X402Request } from "./market/x402.js";
 import { approvalExpired } from "./market/approval.js";
 import { calculateLimitOrderSpend, assertLimitOrderPreviewSpend } from "./limit-orders/terms.js";
-import { claimOrderCancellation, claimOrderProposal, loadOrderProposal, readOrderApproval, readOrderCancellation,
+import { cancellationClaimPhase, claimOrderCancellation, claimOrderProposal, loadOrderProposal, readOrderApproval,
   readOrderFinal, readOrderPlacement, saveOrderPlacement, type OrderProviderView } from "./limit-orders/store.js";
 import { orderFinality, refreshTrackedOrder } from "./limit-orders/observe.js";
 import { strategyDigest } from "./strategy-digest.js";
@@ -416,29 +416,46 @@ async function dispatchLimitOrder(lock: MoneyLock, action: LimitOrderAction, exp
   return settled;
 }
 
-/** A cancellation has no provider idempotency key or correlation ID. Claim it once, then read only. */
+/** A cancellation has no provider idempotency key or correlation ID. Only a proven pre-submission claim may resume. */
 async function dispatchLimitOrderCancellation(lock: MoneyLock, proposalId: string): Promise<OrderProviderView> {
   if (!executes()) throw new PublicError("This copy only approves: the executor cancels Treasury orders. Nothing was sent.");
-  assertCanDispatch(lock);
+  const key = `limit-order-cancel:${proposalId}`;
+  assertCanDispatch(lock, key);
   const proposal = loadOrderProposal(proposalId);
   const placed = readOrderPlacement(proposalId);
   const final = readOrderFinal(proposalId);
   if (!proposal || !placed || final?.state !== "claimed" || !readOrderApproval(proposalId))
     throw new LocalRefusal("order_not_placed", "Only a placed, owner-approved order can be canceled here. Nothing was sent.");
-  // A prior claim may have reached the provider despite a lost answer. Never repeat its POST.
-  if (readOrderCancellation(proposalId)) return refreshTrackedOrder(proposalId);
+  const prior = readOps().find(op => op.idempotencyKey === key);
+  const phase = cancellationClaimPhase(proposalId, prior);
+  // Once the submission marker exists, a crash or lost answer is ambiguous forever: read only.
+  if (phase === "attempted" || phase === "retired") {
+    const observed = await refreshTrackedOrder(proposalId);
+    if (phase === "attempted" && orderFinality(observed) === "complete" && !prior?.cancelFinal)
+      record({ idempotencyKey: key, cancelFinal: true });
+    return observed;
+  }
   const [grants, current] = await Promise.all([api.listGrants(agentId()), refreshTrackedOrder(proposalId)]);
-  if (orderFinality(current) === "complete" || orderFinality(current) === "failed") return current;
+  if (orderFinality(current) === "complete") {
+    if (prior?.submissionState === "PREPARED") record({ idempotencyKey: key, refused: "never_submitted" });
+    return current;
+  }
+  if (orderFinality(current) === "failed") return current;
   const grant = liveGrant(grants, process.env.AGENT_GRANT_TOKEN);
   if (!grant || !(grant.label === "treasury" || grant.label.startsWith("treasury:")))
     throw new LocalRefusal("grant_purpose_denied", "A live Treasury grant is needed to cancel this order. Nothing was sent.");
   const granted = agent(); // Check local token before the irreversible claim.
-  assertCanDispatch(lock);
-  const key = `limit-order-cancel:${proposalId}`;
-  if (!claimOrderCancellation(proposalId, placed.orderId)) return refreshTrackedOrder(proposalId);
+  assertCanDispatch(lock, key);
+  assertCanSendAfterRelease();
+  const latest = readOps().find(op => op.idempotencyKey === key);
+  if (cancellationClaimPhase(proposalId, latest) !== phase || Boolean(latest) !== Boolean(prior))
+    throw new Error("Cancellation claim changed while the money lock was held; preserve state for review");
+  if (phase === "none" && !claimOrderCancellation(proposalId, placed.orderId))
+    throw new Error("Cancellation claim changed while the money lock was held; preserve state for review");
   const request = { proposalId, orderId: placed.orderId };
-  record({ at: new Date().toISOString(), idempotencyKey: key, kind: "limit-order-cancel", journalVersion: 2,
-    method: "limit_order_cancel", request, policyRevision: null, policyDigest: null });
+  if (!prior) record({ at: new Date().toISOString(), idempotencyKey: key, kind: "limit-order-cancel", journalVersion: 2,
+    method: "limit_order_cancel", request, policyRevision: null, policyDigest: null,
+    originalOrderPolicyDigest: proposal.record.policyDigest });
   claimSubmission(key, request);
   try { await granted.cancelLimitOrder(agentId(), placed.orderId); }
   catch (error) { recordSubmissionEvidence(key, error); }

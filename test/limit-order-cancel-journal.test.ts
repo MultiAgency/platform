@@ -46,12 +46,11 @@ test("record refuses cancellation acceptance before append, while an unclaimed p
   await assert.rejects(acquireMoneyLock(), /no proven outcome/, "a claimed cancel still blocks after restart");
 });
 
-test("a cancellation prepared but never submitted is resolved as never submitted", async () => {
+test("a cancellation preparation without its claim blocks new sends for review", async () => {
   record(prepare as never);
-  const lock = await acquireMoneyLock();
-  await lock.release();
-  assert.equal(readOps()[0]?.refused, "never_submitted");
-  assert.equal(isResolved(readOps()[0]!), true);
+  await assert.rejects(acquireMoneyLock(), /earlier money action/);
+  assert.equal(readOps()[0]?.submissionState, "PREPARED");
+  assert.equal(isResolved(readOps()[0]!), false);
 });
 
 for (const [name, lines] of Object.entries({

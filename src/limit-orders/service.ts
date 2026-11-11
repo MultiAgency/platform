@@ -16,7 +16,7 @@ import { loadStrategy } from "../strategy.js";
 import { strategyDigest } from "../strategy-digest.js";
 import { assertLimitOrderPreviewSpend, calculateLimitOrderSpend, type LimitOrderTerms } from "./terms.js";
 import { latestOrderObservation, orderFinality, refreshTrackedOrder } from "./observe.js";
-import { closeOrderProposal, loadOrderProposal, orderProposalIdOf, orderProposalIds,
+import { cancellationClaimPhase, closeOrderProposal, loadOrderProposal, orderProposalIdOf, orderProposalIds,
   readOrderApproval, readOrderCancellation, readOrderFinal, readOrderPlacement, saveOrderApproval, saveOrderProposal,
   type OrderProposalRecord } from "./store.js";
 
@@ -93,6 +93,9 @@ function view(loaded: { record: OrderProposalRecord; sha256: string }) {
   const placed = readOrderPlacement(record.id);
   const latest = placed ? latestOrderObservation(record.id) : null;
   const cancellation = readOrderCancellation(record.id);
+  const cancellationOp = readOps().find(row => row.idempotencyKey === `limit-order-cancel:${record.id}`);
+  const cancelMayResume = cancellationClaimPhase(record.id, cancellationOp) === "prepared"
+    && (!latest || !["complete", "failed"].includes(orderFinality(latest)));
   const final = readOrderFinal(record.id);
   const approval = readOrderApproval(record.id);
   const signatureHash = (signature: string) => createHash("sha256").update(signature).digest("hex");
@@ -108,7 +111,7 @@ function view(loaded: { record: OrderProposalRecord; sha256: string }) {
     correlationId: placed?.correlationId ?? operation?.correlationId ?? null, orderId: placed?.orderId ?? null,
     fillStatus: latest?.fill_status ?? null, payoutStatus: latest?.payout_status ?? null,
     isPayoutStatusFinal: latest?.is_payout_status_final ?? null, partialFills: latest?.partial_fills ?? null,
-    payouts: latest?.payouts ?? null, cancelRequestedAt: cancellation?.at ?? null,
+    payouts: latest?.payouts ?? null, cancelRequestedAt: cancellation?.at ?? null, cancelMayResume,
     operation: operation ? { idempotencyKey: operation.idempotencyKey, status: operation.status ?? null,
       refused: operation.refused ?? null, cancelFinal: operation.cancelFinal ?? false } : null,
     ...state(record),
@@ -258,14 +261,20 @@ export async function placeLimitOrder(context: CallContext, input: unknown) {
   return view(loadOrderProposal(id)!);
 }
 
-/** Cancel at most once, even if the provider reply is lost; fills and refunds are read afterward. */
+/** Resume only a proven pre-submission claim; after any attempted POST, read only. */
 export async function cancelLimitOrder(context: CallContext, input: unknown) {
   const who = caller(context);
   const { id } = limitOrderRef.parse(input);
   const loaded = mine(who, id);
   if (!readOrderPlacement(id)) throw refused("not_placed", "This proposal has no funded order to cancel.");
-  if (readOrderCancellation(id)) return refreshLimitOrder(context, input);
-  await withMoneyLock(lock => dispatch(lock, "limit-order-cancel", { method: "limit_order_cancel", request: { proposalId: id } }));
+  const key = `limit-order-cancel:${id}`;
+  const phase = cancellationClaimPhase(id, readOps().find(op => op.idempotencyKey === key));
+  if (phase === "attempted" || phase === "retired")
+    return refreshLimitOrder(context, input);
+  // A PREPARED cancel blocks ordinary locks; only this exact, checked request can bypass itself.
+  const lock = await acquireMoneyLock({ reconcile: true });
+  try { await dispatch(lock, "limit-order-cancel", { method: "limit_order_cancel", request: { proposalId: id } }); }
+  finally { await lock.release(); }
   return view(loaded);
 }
 
@@ -277,15 +286,11 @@ export async function refreshLimitOrder(context: CallContext, input: unknown) {
   if (!readOrderPlacement(id)) return view(loaded);
   const lock = await acquireMoneyLock({ reconcile: true });
   try {
-    const observed = await refreshTrackedOrder(id);
     const cancelOp = readOps().find(op => op.idempotencyKey === `limit-order-cancel:${id}`);
-    if (cancelOp?.submissionState === "SUBMISSION_ATTEMPTED" && !cancelOp.cancelFinal) {
-      const placed = readOrderPlacement(id), claimed = readOrderCancellation(id);
-      if (!placed || !claimed || placed.orderId !== claimed.orderId || cancelOp.request.orderId !== placed.orderId)
-        throw new Error("Cancellation claim or placement identity is missing; preserve state for review");
-      if (orderFinality(observed) === "complete")
-        record({ idempotencyKey: cancelOp.idempotencyKey, cancelFinal: true });
-    }
+    const phase = cancellationClaimPhase(id, cancelOp);
+    const observed = await refreshTrackedOrder(id);
+    if (phase === "attempted" && cancelOp && !cancelOp.cancelFinal && orderFinality(observed) === "complete")
+      record({ idempotencyKey: cancelOp.idempotencyKey, cancelFinal: true });
   } finally { await lock.release(); }
   return view(loaded);
 }

@@ -27,9 +27,11 @@ platform-only fixes are listed separately.
   nothing. Optional, so older apps ignore it. Offline-, browser- and stack-tested.
 
 - **Treasury limit orders** (addition): a dedicated `treasury-orders` consent and SDK contract cover quotes, exact
-  owner approval, guarded placement, live status reads and one-way cancellation. Order views include digests of saved
-  approval or rejection signatures so a DAO vote relay can reconcile a lost HTTP answer without signing or sending
-  again. This feature is absent from the tagged 0.5.7 package. Its platform path has offline tests; Treasury app
+  owner approval, guarded placement, live status reads and one-way cancellation. An order view's optional
+  `cancelMayResume` is true only when the platform's matching claim and journal prove no cancellation POST began;
+  otherwise the app reads status and never repeats the POST. Order views also include digests of saved approval or
+  rejection signatures so a DAO vote relay can reconcile a lost HTTP answer without signing or sending again. This
+  feature is absent from the tagged 0.5.7 package. Its platform path has offline tests; Treasury app
   integration with the final package and live order lifecycle checks remain release gates. See
   [limit orders](limit-orders.md).
 - **App host capability discovery** (addition): `appClient.capabilities()` reads the authenticated

@@ -69,6 +69,8 @@ export const limitOrderView = z.looseObject({
   fillStatus: z.string().nullable(), payoutStatus: z.string().nullable(), isPayoutStatusFinal: z.boolean().nullable(),
   partialFills: z.array(z.unknown()).nullable(), payouts: z.record(z.string(), z.unknown()).nullable(),
   cancelRequestedAt: z.string().nullable(),
+  /** True only when the claim and journal prove no cancellation POST began; a new cancel call may finish it. */
+  cancelMayResume: z.boolean().optional(),
   operation: z.looseObject({ idempotencyKey: z.string(), status: z.string().nullable(), refused: z.string().nullable(),
     cancelFinal: z.boolean() }).nullable(),
 });

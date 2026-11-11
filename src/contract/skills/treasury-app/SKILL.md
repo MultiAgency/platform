@@ -222,8 +222,11 @@ the agent's matching signature receipt. The app must enforce its member roles as
 
 Call `limitOrders/place` once after approval. A lost answer is followed by `limitOrders/get` and `refresh` using the
 same ID, never by a new request. Provider placement `SUCCESS` means funded/resting, not filled. Show partial fills,
-final payout and `unknown` separately. `limitOrders/cancel` is a one-way request without a provider idempotency key:
-after an ambiguous reply, read `refresh` only. A completed order needs a closed fill and final completed payouts.
+final payout and `unknown` separately. `limitOrders/cancel` is a one-way request without a provider idempotency key.
+After an ambiguous reply, read `refresh`. Repeat `cancel` for the same ID only when the view explicitly says
+`cancelMayResume === true`: a matching claim and journal prove the platform never began its provider POST. Once a
+submission attempt is recorded, `cancelMayResume` is false and all recovery is read-only. A completed order needs a
+closed fill and final completed payouts.
 No live placement, fill, payout or cancellation through this platform has been observed. Production provider order
 routes were absent in the 2026-11-10 read-only check. See [limit orders](https://github.com/MultiAgency/platform/blob/main/docs/limit-orders.md).
 

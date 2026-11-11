@@ -122,6 +122,8 @@ _Avoid_: rules, config
 
 **Mandate digest**:
 The sha256 of a policy's canonical JSON, recorded with every plan and every money action.
+An order cancellation may proceed after its policy is removed, so its operation records the original order's
+mandate digest separately from the absent current-policy digest.
 
 **Grant**:
 The owner's permission for this server to act for the agent, named by its **grant label**. It ends at its

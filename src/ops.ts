@@ -29,6 +29,8 @@ type Context = {
   policyRevision?: number | null;
   /** `mandateDigest` of the policy in force when the request was sent. */
   policyDigest?: string | null;
+  /** Cancellation is allowed after policy removal; retain the original order's signed mandate separately. */
+  originalOrderPolicyDigest?: string | null;
   /** The plan this action executes, when it executes one. */
   planId?: string;
   /** The input's value at a fresh API token price when authorized; null when unavailable. */
@@ -144,6 +146,7 @@ const preparationLine = z.object({ ...identity, ...noOutcome, at: z.string(), ki
     // a journal holding one (docs/operations.md, rollback).
     method: z.enum(OPERATION_METHODS).optional(), journalVersion: z.literal(2).optional(),
     policyRevision: z.number().nullable().optional(), policyDigest: z.string().nullable().optional(),
+    originalOrderPolicyDigest: z.string().nullable().optional(),
     usdIn: z.number().nullable().optional(), planId: z.string().optional() });
 const outcome = { ...identity, ...noOutcome, request: z.never().optional(), journalVersion: z.never().optional(), authorization: z.never().optional() };
 const journalLine = z.union([
@@ -261,10 +264,11 @@ export function claimSubmission(key: string, request: unknown) {
   record({ idempotencyKey: key, submissionState: "SUBMISSION_ATTEMPTED" });
 }
 
-/** Only the next money-lock holder may retire abandoned v2 preparations. Never infer legacy safety. */
+/** Only the next money-lock holder may retire abandoned v2 preparations. A claimed but unsent
+ * cancellation keeps its original journal identity so an explicit cancel request can finish it. */
 export function resolveUnsubmitted() {
   for (const op of readOps()) {
-    if (!op.invoiceId && op.journalVersion === 2 && op.submissionState === "PREPARED" &&
+    if (!op.invoiceId && op.method !== "limit_order_cancel" && op.journalVersion === 2 && op.submissionState === "PREPARED" &&
         !op.correlationId && !op.status && !isResolved(op))
       record({ idempotencyKey: op.idempotencyKey, refused: "never_submitted" });
   }

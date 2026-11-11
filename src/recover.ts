@@ -5,7 +5,7 @@ import { blocksDispatch, isResolved, isTerminal, type Method, type Op, readOps, 
 import { contractOf } from "./chain.js";
 import { paymentOutcome, readChainView } from "./market/resolution.js";
 import { paymentId, type X402Request } from "./market/x402.js";
-import { assertSuccessfulOrderEvidence, loadOrderProposal, readOrderCancellation, readOrderFinal, readOrderPlacement, saveOrderPlacement } from "./limit-orders/store.js";
+import { assertSuccessfulOrderEvidence, cancellationClaimPhase, loadOrderProposal, readOrderFinal, saveOrderPlacement } from "./limit-orders/store.js";
 import { orderFinality, refreshOpenOrders, refreshTrackedOrder } from "./limit-orders/observe.js";
 
 /**
@@ -98,12 +98,23 @@ async function recoverOne(op: Op): Promise<Recovery> {
   if (op.method === "x402" && op.submissionState === "SUBMISSION_ATTEMPTED") return recoverPayment(op);
   if (op.method === "limit_order_cancel") {
     const proposalId = op.idempotencyKey.startsWith("limit-order-cancel:") ? op.idempotencyKey.slice("limit-order-cancel:".length) : "";
-    const placed = proposalId && readOrderPlacement(proposalId);
-    const claimed = proposalId && readOrderCancellation(proposalId);
-    if (!placed || !claimed || placed.orderId !== claimed.orderId || op.request.orderId !== placed.orderId)
-      return { op, outcome: "unknown", detail: "Cancellation claim or placement identity is missing; preserve state for review" };
+    if (!proposalId) return { op, outcome: "unknown", detail: "Cancellation identity is missing; preserve state for review" };
+    const phase = cancellationClaimPhase(proposalId, op);
+    if (phase === "retired") return { op, outcome: "refused", detail: "Cancellation was proven never submitted" };
     const view = await refreshTrackedOrder(proposalId);
     const finality = orderFinality(view);
+    if (phase === "prepared") {
+      if (finality === "complete") {
+        record({ idempotencyKey: op.idempotencyKey, refused: "never_submitted" });
+        return { op, outcome: "refused", status: view.fill_status,
+          detail: "The order closed before the claimed cancellation was submitted" };
+      }
+      if (finality === "failed") return { op, outcome: "unknown", status: view.fill_status,
+        detail: "The order's final payout failed before cancellation was submitted; preserve state for review" };
+      return { op, outcome: finality === "unknown" ? "unknown" : "open", status: "PREPARED",
+        detail: "Cancellation is proven unsent; an explicit cancel request may finish it under the original claim" };
+    }
+    if (phase !== "attempted") throw new Error("Cancellation operation has no matching claim");
     if (finality === "complete") {
       record({ idempotencyKey: op.idempotencyKey, cancelFinal: true });
       return { op, outcome: "settled", status: view.fill_status };
