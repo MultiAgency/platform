@@ -159,8 +159,10 @@ Each line is a gap; the linked page says how the rest is known. The
   so the app's display is the only place the owner sees them; an owner who signs the platform's sign-in text on an
   app's page gives it a full session; a service credential is a bearer. See [app access](docs/app-access.md).
 - A second payout of an invoice already paid, under another `requestId`, is held for the owner's vote, the only check
-  left. Found by the [crash test](docs/crash-test.md) of an outside agent (stack-tested with scripted agents; no model run
-  recorded yet); see [enforcement](docs/enforcement.md#recovery-limitation).
+  left. Found by the [crash test](docs/crash-test.md) of an outside agent: with the SDK's skill no model tested paid twice
+  (0 of 71, 2026-11-10/11, simulated provider); without it, every model but Claude Opus 5.5 did in at least one of two
+  runs; see
+  [enforcement](docs/enforcement.md#recovery-limitation).
 - Treasury proposals (`treasury`, `treasury-execute`) are offline- and stack-tested for wallet owners; for a DAO owner,
   one proposal approved by vote and executed is mainnet-observed on staging (2026-11-05). The production platform
   configuration (`deploy/platform.json`) doesn't set up Treasury agents yet; staging's does. A proposal's approval is the platform's check, not the provider's: whoever holds

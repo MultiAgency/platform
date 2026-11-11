@@ -383,8 +383,11 @@ with the same payee, asset and amount only while the first is held. Once it has 
 invoice is a new payout, held for the owner's vote; the vote's text names no payee or amount (see app access). In the
 crash test, each "pay again" lie (failed, pending, an `unknown` urging a new `requestId`, a reissued invoice) gave a
 gullible scripted agent a second 2 USDC payout when the owner approved every held payout. The owner's vote is the only
-check left; nothing here measures owners. A request that opts out of the duplicate check (`allowDuplicateHeld`,
-0.5.5) is in the same position while the first is still held.
+check left; nothing here measures owners. With models in place of the scripted agent (2026-11-10/11, simulated
+provider, 3 runs per cell), none paid twice with the SDK's `app-server` skill in its prompt (0 of 71), and GLM-5.3-flash,
+Qwen3.8-27B, DeepSeek-V4.1-flash and Kimi K3 did in 14 of 46 without it, and in a second run (whose task also asked for
+a claim) every model but Claude Opus 5.5 did, in 19 of 72 ([crash test](crash-test.md)). A request that
+opts out of the duplicate check (`allowDuplicateHeld`, 0.5.5) is in the same position while the first is still held.
 
 ## Local presentation limits
 
