@@ -473,7 +473,15 @@ the gateway answers 429 before forwarding anything, with `Retry-After` (delay-se
 the hour to bring the credential under its limit: the oldest one, unless the limit was just lowered) and `{ error, retryAfterSeconds }`. From SDK 0.5.2 `appClient` reports that as `kind: "rate_limited"` with
 `retryAfterSeconds`, for its own routes and for agent calls alike, so it's never mistaken for a refusal or an unknown
 outcome; the same request may be sent again once it clears. A 429 that isn't the gateway's JSON answer (a proxy page)
-keeps its earlier kind: `refused` on the app routes, `unavailable` or `unknown` on agent calls. A limit per
+keeps its earlier kind: `refused` on the app routes, `unavailable` or `unknown` on agent calls.
+
+From 0.5.7, calls on the path of an owner's or a DAO's signature with a short window draw on a second budget of the same
+size, not the shared one: `POST /apps/v1/setup`, `/consents` and `/consent-nonces`, an agent's `owner/submit`, and the
+DAO request reads that relay a passed vote's signature (`GET /apps/v1/dao-{setups,consents,votes,hires}/<hash>`). Ordinary
+traffic can't use it up and waste a signature, and those calls can't be used to get around the limit, since they count
+against their own. A credential's busiest hour can therefore reach twice its limit. Each 429 adds a `rate_limited` line to the
+access log with the deployment, the credential, which budget, and the Organization when the path names one; at most
+one line a minute per credential and budget, so a flood can't grow the log (`test/app-access.test.ts`). A limit per
 Organization, within a deployment's, isn't built (#59). Offline-tested (`test/app-access.test.ts`,
 `test/contract-owner.test.ts`).
 

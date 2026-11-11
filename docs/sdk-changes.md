@@ -12,6 +12,16 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
+## 0.5.7 (unreleased)
+
+Platform changes in this release, outside the package:
+- **Calls carrying a signature have their own request budget** (platform#59): a setup, a consent and its nonce, an
+  owner action's `owner/submit`, and the DAO request reads that relay a passed vote's signature no longer share a
+  credential's hourly budget with its other calls; they draw on a second budget of the same size. Another tenant's traffic
+  can't refuse them with a 429 inside the signature's window, and they still can't exceed a limit of their own. Each 429
+  is logged with its budget and, when the path names one, its Organization (at most once a minute per credential and
+  budget). No client change. Offline-tested (`test/app-access.test.ts`).
+
 ## 0.5.6 (2026-11-10)
 
 - **Provider SDK 0.8.2** (was 0.8.0), pinned exactly with a version-scoped release-age exception. Reviewed against

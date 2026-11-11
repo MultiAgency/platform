@@ -948,6 +948,27 @@ test("the gateway holds each credential to the limit the operator set, read on e
   assert.notEqual((await call(port, "/apps/v1/agents/payout", "GET", token)).status, 429);
 });
 
+test("calls carrying an owner's or DAO's signature draw on their own budget, and each 429 is logged with its Organization (#59)", async t => {
+  const { port } = await routeHarness(t);
+  const { token } = new AppCredentials(".app-access").issue({ deployment: "busy", host: HOST, label: "busy", days: 30, perHour: 2 });
+  const ordinary = () => call(port, "/apps/v1/o/org_1/a/payout/rpc/overview", "POST", token, { json: {} });
+  const submit = () => call(port, "/apps/v1/o/org_1/a/payout/rpc/owner/submit", "POST", token, { json: { correlationId: "c", signedData: {} } });
+  const daoVote = () => call(port, `/apps/v1/dao-votes/${"a".repeat(64)}`, "GET", token);
+  const statuses = async (calls: (() => ReturnType<typeof call>)[]) => { const out: number[] = []; for (const c of calls) out.push((await c()).status); return out; };
+  // Ordinary traffic uses up its hour...
+  assert.deepEqual((await statuses([ordinary, ordinary, ordinary])).map(s => s === 429), [false, false, true]);
+  // ...and an owner's submission or a DAO vote's relay still gets through: a 429 there would waste a signature.
+  assert.deepEqual((await statuses([submit, daoVote])).map(s => s === 429), [false, false]);
+  // They have a budget of their own, so they can't be used to get around the limit.
+  assert.equal((await submit()).status, 429);
+  const limited = accessLogText().trim().split("\n").map(line => JSON.parse(line)).filter(line => line.event === "rate_limited");
+  assert.deepEqual(limited.map(({ deployment, budget, organization }) => ({ deployment, budget, organization })),
+    [{ deployment: "busy", budget: "shared", organization: "org_1" }, { deployment: "busy", budget: "signed", organization: "org_1" }],
+    "one line per budget and minute, naming the Organization in the path");
+  await ordinary();
+  assert.equal(accessLogText().trim().split("\n").filter(line => line.includes('"rate_limited"')).length, 2, "a repeated 429 within the minute adds no line");
+});
+
 test("app access state is written only into a directory no one else can read", t => {
   const dir = mkdtempSync(join(tmpdir(), "app-private-")); t.after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, "confirm"), { mode: 0o755 }); chmodSync(join(dir, "confirm"), 0o755);
