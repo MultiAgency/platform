@@ -481,9 +481,16 @@ DAO request reads that relay a passed vote's signature (`GET /apps/v1/dao-{setup
 traffic can't use it up and waste a signature, and those calls can't be used to get around the limit, since they count
 against their own. A credential's busiest hour can therefore reach twice its limit. Each 429 adds a `rate_limited` line to the
 access log with the deployment, the credential, which budget, and the Organization when the path names one; at most
-one line a minute per credential and budget, so a flood can't grow the log (`test/app-access.test.ts`). A limit per
-Organization, within a deployment's, isn't built (#59). Offline-tested (`test/app-access.test.ts`,
-`test/contract-owner.test.ts`).
+one line a minute per credential and budget, so a flood can't grow the log (`test/app-access.test.ts`).
+
+Also from 0.5.7, the shared budget keeps a slice for each Organization (#59, `src/gateway/fair-share.ts`). One
+Organization alone may use all of it. Each other Organization seen in the hour, even one that was refused, keeps 5% of
+the limit available until it has used that much, and a call is refused (`reason: "fair_share"` in the access log) if
+serving it would eat into what is still owed to the others; the slices kept back never exceed half the limit. A call
+whose path names an Organization (an agent call, a release) counts for it; one naming none counts toward the hour with
+no slice. So a busy tenant can't starve an app's other tenants, and an app serving one Organization loses nothing. The
+slice and its cap are fixed for now; an operator setting per Organization isn't built. Offline-tested
+(`test/fair-share.test.ts`, `test/app-access.test.ts`, `test/contract-owner.test.ts`).
 
 DAO requests are bounded per deployment: at most 64 waiting for a vote and 256 filed a day. A finished one (completed,
 ended by a stop, lapsed with no signature found, or past what it signed) is removed 30 days later; the access log keeps

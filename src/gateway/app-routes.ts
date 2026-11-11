@@ -28,6 +28,7 @@ import { AuthorityUnanswered, chainDaoOwner, type DaoOwnerReads, resolveDaoAutho
 import { forwardRpc } from "./rpc-proxy.js";
 import { issueNonce, nonceIssuedAt } from "./consent-nonce.js";
 import { walletStopCutoff } from "./wallet-stop.js";
+import { fairShare, type Decision } from "./fair-share.js";
 import { setupRequest } from "./hosted-agents.js";
 
 const ROOT = ".app-access";
@@ -46,6 +47,8 @@ const SIGNED = /^\/apps\/v1\/(?:setup|consents|consent-nonces|o\/[A-Za-z0-9_-]{1
 const RELAYS = /^\/apps\/v1\/dao-(?:setups|consents|votes|hires)\/[a-f0-9]{64}$/;
 const budgetOf = (method: string | undefined, pathname: string) =>
   method === "POST" && SIGNED.test(pathname) || method === "GET" && RELAYS.test(pathname) ? "signed" as const : "shared" as const;
+/** The shared budget, with a slice kept for each other Organization seen this hour (#59, `fair-share.ts`). */
+const share = fairShare();
 /** When each credential's budget last logged a 429: at most one line a minute, so a flood can't grow the log. */
 const limitLogged = new Map<string, number>();
 const publicConsent = ({ message: _m, nonce: _n, signature: _s, ...record }: ConsentRecord) => record;
@@ -124,15 +127,19 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   if (!credential) { json(res, 401, { error: "Invalid, expired or revoked app credential" }); return true; }
   // The SDK reads this as `rate_limited` (#15): refused before forwarding, so the same request may be sent once it clears.
   const now = Date.now();
-  const budget = budgetOf(req.method, pathname), key = budget === "signed" ? `${credential.id}:signed` : credential.id;
-  if (!mayUse(key, now, credential.perHour)) {
-    const after = mayUse.retryAfterSeconds(key, now, credential.perHour);
+  const budget = budgetOf(req.method, pathname), key = `${credential.id}:${budget}`;
+  const pathOrganization = pathname.match(/^\/apps\/v1\/o\/([A-Za-z0-9_-]{1,128})\//)?.[1] ?? null;
+  const decision: Decision = budget === "shared" ? share.allow(credential.id, pathOrganization, now, credential.perHour)
+    : mayUse(key, now, credential.perHour) ? { allowed: true }
+    : { allowed: false, reason: "limit", retryAfterSeconds: mayUse.retryAfterSeconds(key, now, credential.perHour) };
+  if (!decision.allowed) {
     if (now - (limitLogged.get(key) ?? 0) >= 60_000) {
       if (limitLogged.size > 10_000) limitLogged.clear();
       limitLogged.set(key, now);
       appendSynced(accessLog(ROOT), { at: new Date(now).toISOString(), deployment: credential.deployment, credential: credential.id,
-        event: "rate_limited", budget, organization: pathname.match(/^\/apps\/v1\/o\/([A-Za-z0-9_-]{1,128})\//)?.[1] ?? null });
+        event: "rate_limited", budget, reason: decision.reason, organization: pathOrganization });
     }
+    const after = decision.retryAfterSeconds;
     json(res, 429, { error: "Request limit reached", retryAfterSeconds: after }, { "retry-after": String(after) }); return true;
   }
   const url = new URL(req.url ?? "/", "http://gateway");
