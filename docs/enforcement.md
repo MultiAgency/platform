@@ -1052,7 +1052,9 @@ Limits:
   `generateIntent`). The delegate action a DAO signs for a wallet request stays valid on chain for 6,000 blocks
   (`src/dao-owner.ts`), so the provider's expiry is the tighter limit. A slower DAO can still approve each swap as a
   Treasury proposal, which has no provider window, but can't turn on autopilot or freeze its agent by vote (#20); its
-  own stop (below) neither freezes the agent nor revokes the grant.
+  own stop (below) neither freezes the agent nor revokes the grant. Nor can it grant its market agent, so a DAO-owned
+  market agent can't hire unless the DAO's vote on the `market` grant passes in about 290 s; each hire's own vote has
+  no provider window.
 - The platform authorizes the app, not a member. The app gates its own members with the SDK's `accessOf` and `mayCall`.
 - **The DAO's own stop** (`/confirm/dao/stop/<dao>/<agent>`, no app involved) ends everything given before it first
   applies, once the DAO's vote over the exact text is found and the page is opened: every app consent for the agent ID

@@ -383,7 +383,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
           if (target.id === id) return unsupported(res, 'another grant for the configured agent, which already holds its own');
           if (!(isMarket(target) ? ['market'] : ['invoices', 'payout']).includes(body.label)) return unsupported(res, `a "${body.label}" grant for ${isMarket(target) ? 'a market' : 'a payout'} agent`);
           const generated = { correlation_id: randomUUID(), type: 'grant_issue', signer: target.owner, expires_at: expires, intent: nep413(),
-            preview: { summary: body.label === 'payout' ? 'Authorize the local payouts' : 'Authorize the local work order payout' } };
+            preview: { summary: body.label === 'payout' ? 'Authorize the local payouts' : body.label === 'market' ? 'Authorize the local market hires' : 'Authorize the local work order payout' } };
           intents.push({ ...generated, agent: target, grantRequest: body }); return json(res, generated);
         }
         const payment = transfers.find(p => p.approval === body.approval_id);

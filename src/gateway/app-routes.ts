@@ -8,7 +8,7 @@ import { readJson, sendJson as json } from "../http.js";
 import { chainKeyState, hourlyLimit, type KeyLookup, type KeyStateLookup } from "../signin.js";
 import { appendSynced } from "../synced.js";
 import type { AgentEntry } from "./config.js";
-import { daoScopesCover } from "../contract/app-access.js";
+import { daoMarketMayAsk, daoScopesCover } from "../contract/app-access.js";
 import { ownerPrepareOutput } from "../contract/owner-outputs.js";
 import { mayCall } from "./allowlist.js";
 import { accessLog, consentKeyHolds, AppConsents, AppCredentials, appMayCall, DEFAULT_REQUESTS_PER_HOUR, appMayPrepare, appMayPrepareForDao, proposalSignatureProblem, setupConsent, submittedCorrelation, UNBORN, verifyConsent, verifySetup, type ConsentRecord } from "./app-access.js";
@@ -620,11 +620,11 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   // A DAO's consents answer to the DAO's derived account now, re-read on every call; a wallet's to the wallet's.
   const byDao = live.some(c => c.signer === "dao");
   // Through an app, an owner's wallet signs only what it can read or what the platform built entirely; a DAO votes only on
-  // `DAO_APP_ACTIONS` (a Treasury grant, its revocation, a policy edit, freeze or unfreeze), which the platform
-  // prepares and files as its proposal.
+  // `DAO_APP_ACTIONS` (a Treasury or market grant, its revocation, a policy edit, freeze or unfreeze), which the platform
+  // prepares and files as its proposal; which consent scope covers each is checked below (`covers`).
   const prepared = path === "owner/prepare" ? (byDao ? appMayPrepareForDao(input) : appMayPrepare(input)) : undefined;
   if (prepared === null) {
-    json(res, 403, { code: "not_allowed", access: "procedure", error: byDao ? "Through an app, a DAO (signer \"dao\") votes only on a Treasury grant, its revocation, a policy edit, freeze and unfreeze."
+    json(res, 403, { code: "not_allowed", access: "procedure", error: byDao ? "Through an app, a DAO (signer \"dao\") votes only on a Treasury or market grant, its revocation, a policy edit, freeze and unfreeze."
       : "Through an app, the owner's wallet (signer \"wallet\") signs only: agent creation without payees, freeze, " +
       "unfreeze, grants, policy edits and votes on held payouts." }); return true;
   }
@@ -640,10 +640,12 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   // relayed (status reads), and nothing else. Any other consent matches only the agent it names.
   const matches = (c: ConsentRecord) => (c.signer === "dao") === byDao && (c.agentId === (authority.agentId ?? UNBORN) ||
     (c.agentId === UNBORN && authority.agentId !== null && FOLLOW_CREATION.has(path)));
-  // A DAO's treasury consent also covers preparing the owner actions it votes on (checked above).
+  // A DAO's treasury consent also covers preparing the owner actions it votes on (checked above); its market consent, a
+  // market agent's own grant, its revocation, freeze, unfreeze and cap edits (`daoMarketMayAsk`, #67).
   const covers = (c: ConsentRecord) => byDao
     ? (mayCall(authority.access, path) && daoScopesCover(c.scopes, path) && path !== "owner/prepare")
-      || (prepared !== undefined && (c.agentId === UNBORN ? prepared.type === "agent_create" : prepared.type !== "agent_create" && c.scopes.includes("treasury")))
+      || (prepared !== undefined && (c.agentId === UNBORN ? prepared.type === "agent_create" : prepared.type !== "agent_create"
+        && (c.scopes.includes("treasury") || (agent.area === "market" && c.scopes.includes("market") && daoMarketMayAsk(prepared)))))
     : appMayCall(c.scopes, authority.access, path);
   const named = live.filter(matches);
   if (!named.length) { json(res, 403, { code: "agent_changed", access: "agent", error: "No live consent names this agent's current identity: it was replaced or created since. Ask the owner to sign a consent for it." }); return true; }

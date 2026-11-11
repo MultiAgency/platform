@@ -119,13 +119,14 @@ export const appConsentView = z.looseObject({ id: z.string(), deployment: z.stri
   publicKey: z.string(), revoked: z.boolean(), revokedAt: z.number().nullable(), signer: AppSigner.optional() });
 
 /**
- * The owner actions an app may ask a DAO to vote on, under its `treasury` consent: the platform prepares each with
+ * The owner actions an app may ask a DAO to vote on, under its `treasury` consent (or, on its market agent, the subset
+ * `daoMarketMayAsk` allows under `market`): the platform prepares each with
  * `signer: "dao"` and answers the proposal a member files; the agent submits the DAO's signature once the vote passes.
  * Each is a provider owner intent that expires in minutes, so the vote must pass within `expiresAt`.
  */
 export const DAO_APP_ACTIONS = ["grant_issue", "grant_revoke", "policy_update", "agent_freeze", "agent_unfreeze"] as const;
 /**
- * Whether a parsed owner action is one an app may ask a DAO to vote on: a Treasury grant, the revocation of a grant
+ * Whether a parsed owner action is one an app may ask a DAO to vote on: a Treasury or market grant, the revocation of a grant
  * (which only removes authority), a policy edit that changes something, freeze or unfreeze, or, under
  * a DAO's setup consent only, the Treasury agent's creation (its owner is the DAO's derived account, never given).
  */
@@ -139,6 +140,26 @@ export function appMayAskDao(action: { type: string; label?: string; owner?: unk
 }
 export type AppDaoAction = Of<"agent_freeze"> | Of<"agent_unfreeze"> | (Of<"grant_issue"> & { label: "treasury" | "market" }) | Of<"grant_revoke"> | Of<"policy_update">
   | { type: "agent_create"; role?: "treasury" | "market" };
+/**
+ * The policy fields a DAO's `market` consent may ask the DAO to change on its market agent: its caps only (user,
+ * 2026-11-11), raised, lowered or removed (`limits` is replaced whole; budgets and the hourly count take null). A cap can't move money by itself: every hire is paid only after the DAO's vote on its exact terms, and a
+ * top-up only to the payment key, by what an approved hire lacks. Destinations, assets, actions and owner approval
+ * would change what the agent is, and stay under `treasury`.
+ */
+export const DAO_MARKET_POLICY_FIELDS = ["limits", "budget", "max_actions_per_hour"] as const;
+/**
+ * Whether a DAO's `market` consent covers preparing this owner action on its market agent (#67, user, 2026-11-11): the
+ * `market` grant, its revocation, freeze, unfreeze, and a policy edit of `DAO_MARKET_POLICY_FIELDS` only. Each is still
+ * a proposal the DAO votes on. A freeze is the provider-side stop that holds even if the platform errs.
+ */
+export function daoMarketMayAsk(action: { type: string; label?: string; changes?: object }) {
+  if (action.type === "grant_issue") return action.label === "market";
+  if (action.type === "grant_revoke" || action.type === "agent_freeze" || action.type === "agent_unfreeze") return true;
+  if (action.type !== "policy_update") return false;
+  // A field sent as undefined leaves the policy's field as it is (owner-requests.ts), so it isn't a change.
+  const fields = Object.entries(action.changes ?? {}).filter(([, value]) => value !== undefined).map(([field]) => field);
+  return fields.length > 0 && fields.every(field => (DAO_MARKET_POLICY_FIELDS as readonly string[]).includes(field));
+}
 /** The areas a DAO may set up a hosted agent for through an app: Treasury, and a market agent whose hires it votes on (user, 2026-11-09). */
 export const DAO_SETUP_AREAS = ["treasury", "market"] as const;
 

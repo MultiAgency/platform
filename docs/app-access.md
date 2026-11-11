@@ -230,7 +230,12 @@ votes: on its Treasury proposals (`POST /apps/v1/dao-votes`, relayed to the agen
 each market hire under a consent carrying `market` (`POST /apps/v1/dao-hires` with the terms `market/quote` answered,
 the brief and how long the approval may last; `GET /apps/v1/dao-hires/<hash>` relays the signature once to
 `market/approve`, which checks the text, host and expiry and that the signing key is the agent's DAO owner as the
-provider records it, then pays the hire once; a DAO-owned market agent refuses a plain `market/hire`), and on
+provider records it, then pays the hire once; a DAO-owned market agent refuses a plain `market/hire`), on a market
+agent's own owner actions under a consent carrying `market` (0.5.7, #67, the user's decision of 2026-11-11: its `market`
+grant and that grant's revocation, freeze, unfreeze, and a policy edit of `limits`, `budget` and `max_actions_per_hour`
+only, raising, lowering or removing those caps, `daoMarketMayAsk`; a cap can't move money by itself, since every hire is paid only after its own vote and a
+top-up only to the payment key by what an approved hire lacks; other policy fields, and every owner action on an agent
+that isn't a market agent, still need `treasury`), and on
 the `treasury` grant, revoking a grant, a policy edit, freeze and unfreeze (`owner/prepare` with `signer: "dao"`, which
 answers the proposal to file; the agent submits the signature). An off-chain edit (`destinations`, `withdrawals`,
 `budget`) is a readable NEP-413 message with about 290 s to pass; an on-chain edit (actions, assets, limits, approval,

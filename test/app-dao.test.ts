@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { generateKey } from "near-kit";
+import { daoMarketMayAsk } from "../src/contract/app-access.js";
 import { consentMessage, setupMessage } from "../src/contract/app-consent.js";
 import { AppConsents, AppCredentials, sweepConsentKeys } from "../src/gateway/app-access.js";
 import { APP_ROOT, appRoutes, confirms, type HostedSetup } from "../src/gateway/app-routes.js";
@@ -1251,4 +1252,58 @@ test("a DAO sets up a market agent by vote on a host that sets them up, and crea
   const owner = { type: "near" as const, account_id: DAO, public_key: "ed25519:11111111111111111111111111111111" };
   assert.throws(() => checkHostedCreation(owner, "dao", "market", { HOSTED_OWNER: DAO, HOSTED_OWNER_KIND: "dao", TREASURY_ACCOUNT: DAO, DASHBOARD_AREA: "treasury" }));
   assert.doesNotThrow(() => checkHostedCreation(owner, "dao", "market", { HOSTED_OWNER: DAO, HOSTED_OWNER_KIND: "dao", TREASURY_ACCOUNT: DAO, DASHBOARD_AREA: "market" }));
+});
+
+// #67 (user, 2026-11-11): a DAO's `market` consent covers its market agent's own `market` grant, its revocation, freeze,
+// unfreeze and cap edits; each still a proposal the DAO votes on; nothing that changes what the agent is, and nothing
+// on an agent that isn't a market agent.
+test("a DAO's market consent prepares its market agent's grant, its revocation, freeze and cap edits, and nothing else", async t => {
+  const { port, state, staging, file, vote } = await harness(t);
+  state.setupAreas = ["treasury", "market"];
+  const setup = await call(port, "/apps/v1/dao-setups", "POST", staging, { message: setupMessage({ host: HOST, deployment: "staging", organization: "org_1",
+    owner: DAO, area: "market", expiresAt: later(3) }) });
+  vote(setup.body.request.hash);
+  state.providerId = null;
+  assert.equal((await call(port, `/apps/v1/dao-setups/${setup.body.request.hash}`, "GET", staging)).body.state, "reserved");
+  state.signature = null;
+  state.providerId = "provider-id";
+  const consented = async (agent: string, scopes: string[]) => {
+    const { request } = (await file({ agent, scopes })).body;
+    vote(request.hash);
+    assert.equal((await call(port, `/apps/v1/dao-consents/${request.hash}`, "GET", staging)).body.state, "signed", `${agent} ${scopes}`);
+    state.signature = null;
+  };
+  await consented("own-dao", ["read", "market"]);
+  state.replies["/rpc/owner/prepare"] = { status: 200, json: { correlationId: "c-1", preview: { summary: "x" }, expiresAt: later(0.007), digest: null,
+    dao: { owner: "x", transaction: { receiverId: "v1.signer", actions: [] }, proposal: null, proposalAndVote: null } } };
+  const prepare = (agent: string, action: object) => call(port, `/apps/v1/o/org_1/a/${agent}/rpc/owner/prepare`, "POST", staging, { json: { action, signer: "dao" } });
+  const reviewed = { revision: 1, digest: `sha256:${"0".repeat(64)}` };
+  const refusal = (answer: { status: number; body: { code?: string } }) => [answer.status, answer.body.code];
+  for (const action of [{ type: "grant_issue", label: "market" }, { type: "grant_revoke", grantId: "g-1" }, { type: "agent_freeze" }, { type: "agent_unfreeze" },
+    { type: "policy_update", expectedPolicy: reviewed, changes: { limits: { per_transaction: {} } } },
+    { type: "policy_update", expectedPolicy: reviewed, changes: { budget: { daily_usd: "100", weekly_usd: null, monthly_usd: "500" }, max_actions_per_hour: 20 } }])
+    assert.equal((await prepare("own-dao", action)).status, 200, JSON.stringify(action));
+  for (const action of [{ type: "grant_issue", label: "treasury" }, { type: "policy_update", expectedPolicy: reviewed, changes: { withdrawals: [{ address: "x.near" }] } },
+    { type: "policy_update", expectedPolicy: reviewed, changes: { limits: { per_transaction: {} }, assets: ["nep141:wrap.near"] } },
+    { type: "policy_update", expectedPolicy: reviewed, changes: { owner_approval: false } }])
+    assert.deepEqual(refusal(await prepare("own-dao", action)), [403, "scope"], `market doesn't cover ${JSON.stringify(action)}`);
+  // An edit of nothing is refused before any consent is consulted.
+  assert.deepEqual(refusal(await prepare("own-dao", { type: "policy_update", expectedPolicy: reviewed, changes: {} })), [403, "not_allowed"]);
+  // The same consent scope on a Treasury agent covers none of it, not even a market grant.
+  await consented("treasury", ["read", "market"]);
+  for (const action of [{ type: "agent_freeze" }, { type: "grant_revoke", grantId: "g-1" }, { type: "grant_issue", label: "market" }])
+    assert.deepEqual(refusal(await prepare("treasury", action)), [403, "scope"], `market covers a market agent's owner actions only: ${JSON.stringify(action)}`);
+});
+
+// What a market consent's cap edit may hold, below the HTTP layer (where JSON drops undefined fields): raising, lowering
+// or removing caps is covered; a field passed as undefined leaves the policy's field as it is, so it isn't a change.
+test("a market consent's policy edit may raise, lower or remove caps, and nothing else", () => {
+  for (const changes of [{ limits: {} }, { budget: { daily_usd: null, weekly_usd: null, monthly_usd: null } }, { max_actions_per_hour: null },
+    { max_actions_per_hour: 5, assets: undefined }])
+    assert.equal(daoMarketMayAsk({ type: "policy_update", changes }), true, JSON.stringify(changes));
+  for (const changes of [{}, { assets: undefined }, { destinations: [] }, { limits: {}, owner_approval: false }])
+    assert.equal(daoMarketMayAsk({ type: "policy_update", changes }), false, JSON.stringify(changes));
+  assert.equal(daoMarketMayAsk({ type: "grant_issue", label: "treasury" }), false);
+  assert.equal(daoMarketMayAsk({ type: "agent_create" }), false);
+  for (const type of ["grant_revoke", "agent_freeze", "agent_unfreeze"]) assert.equal(daoMarketMayAsk({ type }), true, type);
 });

@@ -14,7 +14,23 @@ platform-only fixes are listed separately.
 
 ## 0.5.7 (unreleased)
 
+- **A DAO's `market` consent covers its market agent's own owner actions** (platform#67; the user's decision,
+  2026-11-11): under a DAO consent carrying `market`, `owner/prepare` with `signer: "dao"` files the market agent's
+  `market` grant, the grant's revocation, freeze, unfreeze, and a policy edit of `limits`, `budget` and
+  `max_actions_per_hour` only, which may raise, lower or remove those caps (`daoMarketMayAsk`, `DAO_MARKET_POLICY_FIELDS`). Before, they needed `treasury`, so a DAO
+  with the read+market consent couldn't grant its market agent. Other policy fields, and owner actions on any agent that
+  isn't a market agent, still need `treasury`. Each is still a proposal the DAO votes on. Offline-tested
+  (`test/app-dao.test.ts`).
+- **A quote for an agent the market can't hire is refused with a code** (reclassification,
+  platform#66): `market/quote`, and the re-quote inside `market/hire`, answer `refused` with `agent_not_found`
+  (the market's `-32001`), `agent_not_hireable` (`-32004`) or `quote_refused` (`-32602`). Before, `market/quote`
+  answered `unavailable`, which tells an app to send the call again, and `market/hire` answered `refused` with
+  `hire_failed`. Any other market error answers as before. Nothing is sent. Offline-tested (`test/market-hire.test.ts`).
+
 Platform changes in this release, outside the package:
+- **The local stack's simulated provider describes a market grant as one** ("Authorize the local market hires", where it
+  said "work order payout"; platform#67's report), and the simulated market can list an agent that isn't taking calls
+  (`outcome: "closed"`, answering `-32004`).
 - **Calls carrying a signature have their own request budget** (platform#59): a setup, a consent and its nonce, an
   owner action's `owner/submit`, and the DAO request reads that relay a passed vote's signature no longer share a
   credential's hourly budget with its other calls; they draw on a second budget of the same size. Another tenant's traffic

@@ -27,7 +27,9 @@ const read = req => new Promise((resolve, reject) => {
 });
 
 /**
- * `agents`: handle → { amount (atomic USDC), windowSeconds, outcome: 'complete' | 'reject' | 'fail' | 'hold', result }.
+ * `agents`: handle → { amount (atomic USDC), windowSeconds, outcome: 'complete' | 'reject' | 'fail' | 'hold' | 'closed' | 'invalid' | 'broken', result }.
+ * A `closed` agent is listed but not taking calls: it answers `-32004`, as the market's skill documents. An `invalid` one
+ * answers the unpaid call `-32602` (the market refuses the request), a `broken` one `-32603` (an internal error).
  * `payee`: override the 402's payTo or asset (a market answering for someone else).
  */
 export async function market({ agents = {}, payee = {}, height = 1_000_000n } = {}) {
@@ -101,6 +103,9 @@ export async function market({ agents = {}, payee = {}, height = 1_000_000n } = 
         return task ? json(res, 200, { jsonrpc: '2.0', id, result: task }) : json(res, 200, { jsonrpc: '2.0', id, error: { code: -32001, message: 'task not found' } });
       }
       if (method !== 'SendMessage') return json(res, 200, { jsonrpc: '2.0', id, error: { code: -32004, message: 'not supported' } });
+      if (agents[handle].outcome === 'closed') return json(res, 200, { jsonrpc: '2.0', id, error: { code: -32004, message: 'not taking calls' } });
+      if (agents[handle].outcome === 'invalid') return json(res, 200, { jsonrpc: '2.0', id, error: { code: -32602, message: 'Invalid params' } });
+      if (agents[handle].outcome === 'broken') return json(res, 200, { jsonrpc: '2.0', id, error: { code: -32603, message: 'Internal error' } });
       const header = req.headers['x-payment'];
       if (!header) return json(res, 402, { x402Version: 2, error: 'x-payment header is required', accepts: [row(handle)] });
       const refused = refusal(handle, header);
