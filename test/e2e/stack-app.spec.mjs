@@ -299,6 +299,13 @@ test('the stack controls the Treasury agent: targets, a public balance, every pa
     const executed = await run('executePlan', { planId: plan.id });
     expect(executed.failure).toBeUndefined();
     expect(executed.events.map(e => [e.action.to, e.status]).sort()).toEqual([[ETH, 'SUCCESS'], [WNEAR, 'SUCCESS']].sort());
+
+    // The books of an agent funded (its starting deposit), shielded and swapped reconcile to zero: every balance is
+    // accounted for by the provider's own rows (simulated: the shield row's shape isn't observed).
+    const books = value(await control('reconcileBooks'));
+    expect(books.map(b => b.asset).sort()).toEqual(expect.arrayContaining([USDC, WNEAR, ETH]));
+    for (const book of books)
+      expect([book.asset, book.public.drift, book.confidential.unattributed], `${book.symbol} reconciles`).toEqual([book.asset, '0', '0']);
     expect(value(await machine.call('externalPlan', { swaps: [{ from: ETH, to: WNEAR, amount: '1000000000000000' }] })).actions[0],
       'any listed pair is quoted').toMatchObject({ from: ETH, to: WNEAR, amountOut: '1316687763713080168776371' });
 

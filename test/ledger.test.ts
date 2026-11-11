@@ -13,6 +13,16 @@ const transfer = (address = "deposit.near") => `EVENT_JSON:${JSON.stringify({ st
   data: [{ new_owner_id: address }] })}`;
 const receipt = (asset = "token.near", logs = [transfer()]) => ({ receipt: { receiver_id: asset }, execution_outcome: { outcome: { logs } } });
 const response = (...receipts: unknown[]) => ({ transactions: [{ receipts }] });
+const call = (method: string, args: object) => ({ FunctionCall: { method_name: method, args: Buffer.from(JSON.stringify(args)).toString("base64"), gas: 30_000_000_000_000, deposit: "1" } });
+/** A receipt as FastNear returns it for a call to a token contract that logs no NEP-141 event, as wrap.near doesn't. */
+const callReceipt = (asset: string, actions: unknown[], status: object = { SuccessValue: "" }, logs: string[] = []) =>
+  ({ receipt: { receiver_id: asset, receipt: { Action: { actions } } }, execution_outcome: { outcome: { logs, status } } });
+/** Observed on mainnet, 2026-11-06: a wallet wraps NEAR and sends the wNEAR to the deposit address in one receipt. */
+const wrapAndSend = (to = "deposit.near", amount = "3000", status?: object) => callReceipt("wrap.near", [
+  call("storage_deposit", { account_id: to, registration_only: true }), call("near_deposit", {}), call("ft_transfer", { amount, receiver_id: to })],
+  status, [`Deposit ${amount} NEAR to wallet.near`, `Transfer ${amount} from wallet.near to ${to}`]);
+const wnearDeposit = (request: object = { origin_asset: "nep141:wrap.near", confidential: true }) => ({
+  ...deposit(), details: { deposit_tx_hash: "tx", deposit_address: "deposit.near", deposited_amount: "3000", amount_out: "3000", confidential: true, request } });
 beforeEach(() => {
   offline();
   mock.method(api, "getHistory", async () => ({ data: [deposit()] }));
@@ -31,6 +41,35 @@ test("valid deposit evidence identifies the asset and unmatched evidence stays n
   }
 });
 
+test("a successful ft_transfer call to the deposit address identifies the asset when the token logs no event", async () => {
+  mock.method(api, "getHistory", async () => ({ data: [wnearDeposit()] }));
+  mock.method(globalThis, "fetch", async () => Response.json(response(wrapAndSend())));
+  const [row] = await ledger();
+  assert.equal(row?.assetIn, "nep141:wrap.near");
+  assert.equal(row?.assetOut, "nep141:wrap.near");
+});
+
+test("an ft_transfer call proves a deposit only when it succeeded, paid the deposit address the deposited amount, and agrees with the API's request", async () => {
+  for (const [label, history, body] of [
+    ["failed receipt", wnearDeposit(), response(wrapAndSend("deposit.near", "3000", { Failure: {} }))],
+    ["another receiver", wnearDeposit(), response(wrapAndSend("other.near"))],
+    ["another amount", wnearDeposit(), response(wrapAndSend("deposit.near", "2999"))],
+    ["ft_transfer_call, which the receiver can refund", wnearDeposit(), response(callReceipt("wrap.near", [call("ft_transfer_call", { amount: "3000", receiver_id: "deposit.near", msg: "" })]))],
+    ["the API names another asset", wnearDeposit({ origin_asset: "nep141:usdt.tether-token.near" }), response(wrapAndSend())],
+  ] as const) {
+    mock.method(api, "getHistory", async () => ({ data: [history] }));
+    mock.method(globalThis, "fetch", async () => Response.json(body));
+    const [row] = await ledger();
+    assert.equal(row?.assetIn, null, label);
+  }
+});
+
+test("an event's asset must agree with the API's request too", async () => {
+  mock.method(api, "getHistory", async () => ({ data: [{ ...deposit(), details: { ...deposit().details, request: { origin_asset: "nep141:other.near" } } }] }));
+  mock.method(globalThis, "fetch", async () => Response.json(response(receipt())));
+  assert.equal((await ledger())[0]?.assetIn, null);
+});
+
 test("invalid deposit evidence fails explicitly without leaking response contents", async () => {
   const invalid = [
     {}, { transactions: null }, { transactions: [{}] }, response(null), response({}),
@@ -45,6 +84,8 @@ test("invalid deposit evidence fails explicitly without leaking response content
     response(receipt("token.near", ['EVENT_JSON:{"standard":"nep141","event":"ft_transfer","data":{}}'])),
     response(receipt("token.near", ['EVENT_JSON:{"standard":"nep141","event":"ft_transfer","data":[{}]}'])),
     response(receipt(), receipt("token.near", ["EVENT_JSON:private-malformed"])),
+    response(callReceipt("wrap.near", [{ FunctionCall: { method_name: "ft_transfer", args: "private-malformed" } }])),
+    response(callReceipt("wrap.near", [call("ft_transfer", { amount: 3000, receiver_id: "deposit.near" })])),
   ];
   for (const body of invalid) {
     mock.method(globalThis, "fetch", async () => Response.json(body));

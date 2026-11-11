@@ -125,6 +125,18 @@ export async function provider(directory, { treasury = false, account = OWNER, p
   // funding; a Treasury one its own balances.
   const agents = new Map([[id, { id, owner, wallet, policy, revision: 1, grants, funded: BigInt(payoutFunding), ...(treasury && { treasury: treasuryState(100000000n) }) }]]);
   const requests = [], errors = [], transfers = [], intents = [], swaps = [], shields = [], deposits = [];
+  /**
+   * Funds that reached an agent's confidential balance: each is a SUCCESS deposit in its history, shaped as one was observed
+   * on staging (2026-11-11), whose transaction FastNEAR's transaction API answers with the token's NEP-141 transfer to the
+   * deposit address. The configured agent's starting funds are its first.
+   */
+  const credits = [];
+  const credit = (agent, amount, asset = USDC) => { if (BigInt(amount) > 0n) credits.push({ agent, asset, amount: String(amount), correlation_id: randomUUID(),
+    address: randomBytes(32).toString('hex'), tx: randomBytes(32).toString('hex'), at: new Date().toISOString() }); };
+  credit(id, treasury ? 100000000n : payoutFunding);
+  const depositTransactions = hashes => credits.filter(c => hashes.includes(c.tx)).map(depositTransaction);
+  /** Other simulated providers whose deposits land on this one's chain (`shareChain`): one mainnet, many agents. */
+  const peers = [];
   /** A delegate to `outlayer.near` calling `methodName` once, as the provider's NEP-366 owner intents are shaped. */
   const delegate = (methodName, args) => ({ standard: 'nep366', payload: { receiverId: 'outlayer.near', actions: [{ type: 'FunctionCall', params: { methodName,
     args, gas: '30000000000000', deposit: '0' } }] } });
@@ -136,9 +148,29 @@ export async function provider(directory, { treasury = false, account = OWNER, p
   let unavailable = false, outageRefusals = 0;
   let dropSwapAt = 0, observationGate, quoteWarnings = [];
 
+  // A swap's row and its audit events as observed on staging (2026-11-11): the row names its provider request and carries
+  // the amounts in `evidence`; the audit trail names the request's assets under that request id.
   const swapStatus = swap => ({ correlation_id: swap.correlation_id, agent_id: swap.agent, type: 'swap', status: 'SUCCESS', created_at: swap.at, updated_at: swap.at,
     failure_code: null, details: { action: 'swap', request: { origin_asset: swap.body.origin_asset, destination_asset: swap.body.destination_asset,
-      amount: swap.body.amount, min_amount_out: swap.body.min_amount_out, confidential: true }, confidential: true, amount_out: swap.amountOut } });
+      amount: swap.body.amount, min_amount_out: swap.body.min_amount_out, confidential: true }, confidential: true, amount_out: swap.amountOut,
+      provider_request_id: swap.request_id, evidence: { amount: swap.body.amount, amount_out: swap.amountOut, created_at: swap.at } } });
+  const swapEvents = swap => [
+    { type: 'confidential_swap_settled', request_id: swap.request_id, status: 'SUCCESS', settled_late: false, at: swap.at },
+    { type: 'confidential_swap', request_id: swap.request_id, chain: 'near', amount: swap.body.amount, confidential: true,
+      origin_asset: swap.body.origin_asset, destination_asset: swap.body.destination_asset, at: swap.at }];
+  // No shield is observed in a hosted agent's history (staging, 2026-11-11): this row carries what the ledger reads, its
+  // request and `amount_out`, and is not the provider's observed shape.
+  const shieldStatus = shield => ({ correlation_id: shield.correlation_id, agent_id: shield.agent, type: 'shield', status: 'SUCCESS', created_at: shield.at, updated_at: shield.at,
+    failure_code: null, details: { action: 'shield', request: { asset: shield.body.asset, amount: shield.body.amount }, amount_out: shield.body.amount } });
+  const depositStatus = c => ({ correlation_id: c.correlation_id, agent_id: c.agent, type: 'deposit', status: 'SUCCESS', created_at: c.at, updated_at: c.at,
+    failure_code: null, details: { action: 'deposit', request: { origin_asset: c.asset, confidential: true }, confidential: true, provider_request_id: null,
+      deposit_address: c.address, deposit_tx_hash: c.tx, deposited_amount: c.amount, amount_out: c.amount,
+      evidence: { deposit_address: c.address, deposit_tx_hash: c.tx, deposited_amount: c.amount, amount_out: c.amount } } });
+  /** The deposit's transaction as FastNEAR returns it: the token contract's successful `ft_transfer` and its NEP-141 event. */
+  const depositTransaction = c => ({ receipts: [{ receipt: { receiver_id: c.asset.slice('nep141:'.length), receipt: { Action: { actions: [{ FunctionCall: { method_name: 'ft_transfer',
+    args: Buffer.from(JSON.stringify({ receiver_id: c.address, amount: c.amount })).toString('base64'), gas: 30000000000000, deposit: '1' } }] } } },
+    execution_outcome: { outcome: { status: { SuccessValue: '' }, logs: [`EVENT_JSON:${JSON.stringify({ standard: 'nep141', version: '1.0.0', event: 'ft_transfer',
+      data: [{ old_owner_id: 'funder.near', new_owner_id: c.address, amount: c.amount }] })}`] } } }] });
   const status = payment => ({ correlation_id: payment.correlation, agent_id: payment.agent, type: payment.type ?? 'transfer', status: payment.status,
     created_at: payment.at, updated_at: payment.at, failure_code: payment.failure ?? null, details: { approval_id: payment.approval } });
   // A held withdrawal's approval, as observed on mainnet (2026-10-30, docs/enforcement.md): `request_data` adds `chain` and
@@ -174,8 +206,9 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         return json(res, { account_txs: daoVotes.filter(v => body.account_id === DAO && v.height >= (body.from_tx_block_height ?? 0))
           .map(v => ({ transaction_hash: v.hash })), resume_token: null });
       if (url.pathname === '/fastnear/v0/transactions')
-        return json(res, { transactions: daoVotes.filter(v => body.tx_hashes.includes(v.hash)).map(v => ({ receipts: [{ execution_outcome: { outcome: { status: {
-          SuccessValue: Buffer.from(JSON.stringify({ scheme: 'Ed25519', signature: [...v.signature] })).toString('base64') } } } }] })) });
+        return json(res, { transactions: [...daoVotes.filter(v => body.tx_hashes.includes(v.hash)).map(v => ({ receipts: [{ execution_outcome: { outcome: { status: {
+          SuccessValue: Buffer.from(JSON.stringify({ scheme: 'Ed25519', signature: [...v.signature] })).toString('base64') } } } }] })),
+          ...[{ depositTransactions }, ...peers].flatMap(p => p.depositTransactions(body.tx_hashes))] });
       if (url.pathname === '/chain' && body.method === 'status')
         return json(res, { jsonrpc: '2.0', id: body.id, result: { version: { version: 'local', build: 'local' }, chain_id: 'mainnet',
           genesis_hash: '11111111111111111111111111111111', protocol_version: 1, latest_protocol_version: 1, rpc_addr: 'local', node_public_key: PUBLIC_KEY,
@@ -245,12 +278,13 @@ export async function provider(directory, { treasury = false, account = OWNER, p
           balances: agent.treasury ? [...agent.treasury[url.searchParams.get('source') === 'public' ? 'public' : 'confidential']].map(([asset_id, balance]) => ({ asset_id, balance_raw: balance.toString() }))
             : [{ asset_id: USDC, balance_raw: url.searchParams.get('source') === 'public' ? '0' : (agent.funded - spent(agent)).toString() }] });
         if (url.pathname === '/v1/tokens') return json(res, { data: TOKENS.map(token => ({ ...token, price_updated_at: new Date().toISOString(), price_expires_at: expires })) });
-        // Provider records (ledger audit trail): none recorded by this simulator.
-        if (agent && /^\/provider\/(requests|audit|deposits|deposit_history)$/.test(route)) return json(res, { data: { events: [] } });
-        // Transfers, withdrawals and swaps, oldest first. A swap's row carries its request and `amount_out` in `details`, as the
-        // provider SDK's `ExecutionDetails` declares them (0.7.3 types; a swap row is not observed here).
-        if (agent && route === '/history') return json(res, { data: [...transfers.filter(p => p.agent === agent.id).map(status),
-          ...swaps.filter(s => s.agent === agent.id).map(swapStatus)].sort((a, b) => a.created_at.localeCompare(b.created_at)), next_cursor: null });
+        // Provider records (the ledger's audit trail): each swap's events, newest first; no other kind is recorded by this simulator.
+        if (agent && route === '/provider/audit') return json(res, { data: { events: swaps.filter(s => s.agent === agent.id).reverse().flatMap(swapEvents) } });
+        if (agent && /^\/provider\/(requests|deposits|deposit_history)$/.test(route)) return json(res, { data: { events: [] } });
+        // Deposits, transfers, withdrawals, swaps and shields, oldest first.
+        if (agent && route === '/history') return json(res, { data: [...credits.filter(c => c.agent === agent.id).map(depositStatus),
+          ...transfers.filter(p => p.agent === agent.id).map(status), ...swaps.filter(s => s.agent === agent.id).map(swapStatus),
+          ...shields.filter(s => s.agent === agent.id).map(shieldStatus)].sort((a, b) => a.created_at.localeCompare(b.created_at)), next_cursor: null });
         if (url.pathname === '/v1/status') {
           const correlation = url.searchParams.get('correlation_id');
           const payment = transfers.find(p => p.correlation === correlation);
@@ -258,7 +292,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
           const swap = swaps.find(s => s.correlation_id === correlation);
           if (swap) return json(res, swapStatus(swap));
           const shield = shields.find(s => s.correlation_id === correlation);
-          if (shield) return json(res, { correlation_id: correlation, agent_id: shield.agent, type: 'shield', status: 'SUCCESS' });
+          if (shield) return json(res, shieldStatus(shield));
           const intent = intents.find(i => i.correlation_id === correlation);
           if (intent && ownerOutcomeUnavailable) return json(res, { error: 'Local scenario withholds owner outcome' }, 503);
           if (intent) return json(res, { correlation_id: correlation, agent_id: intent.created ?? intent.agent?.id ?? id, type: intent.type, status: intent.submitted ? 'SUCCESS' : 'PENDING_SIGNATURE',
@@ -279,7 +313,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         if (BigInt(body.amount) > treasuryBalances.get(from.asset_id) || BigInt(body.min_amount_out) > amountOut) throw new Error('Infeasible swap');
         treasuryBalances.set(from.asset_id, treasuryBalances.get(from.asset_id) - BigInt(body.amount));
         treasuryBalances.set(to.asset_id, treasuryBalances.get(to.asset_id) + amountOut);
-        const swap = { correlation_id: randomUUID(), agent: agent.id, key: entry.key, body, amountOut: amountOut.toString(), at: new Date().toISOString() }; swaps.push(swap);
+        const swap = { correlation_id: randomUUID(), request_id: randomUUID(), agent: agent.id, key: entry.key, body, amountOut: amountOut.toString(), at: new Date().toISOString() }; swaps.push(swap);
         if (swaps.length === dropSwapAt) { dropSwapAt = 0; return res.destroy(); }
         return json(res, { correlation_id: swap.correlation_id });
       }
@@ -291,7 +325,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         if (!publicBalances.has(body.asset) || !/^[1-9]\d*$/.test(body.amount) || BigInt(body.amount) > publicBalances.get(body.asset)) throw new Error('Infeasible shield');
         publicBalances.set(body.asset, publicBalances.get(body.asset) - BigInt(body.amount));
         treasuryBalances.set(body.asset, treasuryBalances.get(body.asset) + BigInt(body.amount));
-        const shield = { correlation_id: randomUUID(), agent: agent.id, key: entry.key, body }; shields.push(shield);
+        const shield = { correlation_id: randomUUID(), agent: agent.id, key: entry.key, body, at: new Date().toISOString() }; shields.push(shield);
         return json(res, { correlation_id: shield.correlation_id });
       }
       if (agent && req.method === 'POST' && route === '/deposit') {
@@ -437,9 +471,13 @@ export async function provider(directory, { treasury = false, account = OWNER, p
       const target = agents.get(agent); if (!target || target.id === id) throw new Error('Fund only a created agent');
       if (target.treasury) target.treasury.confidential.set(USDC, target.treasury.confidential.get(USDC) + BigInt(amount));
       else target.funded += BigInt(amount);
+      credit(agent, amount);
     },
+    depositTransactions,
+    /** `peer`'s deposits are answered by this simulator's chain, which every agent of the stack reads. */
+    shareChain(peer) { peers.push(peer); },
     /** Simulated inbound deposit to the payout agent's own confidential balance (its one-time setup funding). */
-    fundPayout(amount) { agents.get(id).funded += BigInt(amount); },
+    fundPayout(amount) { agents.get(id).funded += BigInt(amount); credit(id, amount); },
     /** Simulated funds arriving on a Treasury agent's public balance, outside a confidential deposit: a sweep shields them. */
     fundPublic(asset, amount, agent = id) {
       const balances = agents.get(agent)?.treasury?.public;

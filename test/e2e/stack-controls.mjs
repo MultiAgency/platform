@@ -122,6 +122,8 @@ export function stackControls(stack, { owner, payees = [] }) {
       const saved = answered(await treasury.call('strategy/get'));
       return { strategy: saved.strategy, digest: saved.digest };
     },
+    /** The owner reads `portfolio`'s books through its own route (`reconcileBooks`): each balance against its record. */
+    reconcileBooks: async () => answered(await (await ownerTreasury()).call('reconcileBooks')),
     /**
      * The owner reviews `portfolio`'s saved strategy and signs a grant bound to it (`treasury:<suffix>`), through its own
      * route, with the fixture key: what an app's or a machine credential's plans need before they execute. Answers the

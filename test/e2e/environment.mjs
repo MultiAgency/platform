@@ -71,7 +71,7 @@ export async function environment(directory, { workspace = false, portfolioOwner
   const simulated = await provider(directory, { account: owner === DAO ? DAO_SIGNER : owner, payees, accounts, dao, onChainPolicyEdits, market: marketSim, ...(payoutFunding !== undefined && { payoutFunding }) });
   const portfolioDir = join(directory, 'portfolio');
   let portfolio;
-  if (workspace) { mkdirSync(portfolioDir); portfolio = await provider(portfolioDir, { treasury: true, account: portfolioOwner === DAO ? DAO_SIGNER : portfolioOwner, accounts, dao, onChainPolicyEdits }); }
+  if (workspace) { mkdirSync(portfolioDir); portfolio = await provider(portfolioDir, { treasury: true, account: portfolioOwner === DAO ? DAO_SIGNER : portfolioOwner, accounts, dao, onChainPolicyEdits }); simulated.shareChain(portfolio); }
   let executor, reviewer;
   const executorDir = join(directory, 'executor'), reviewerDir = join(directory, 'reviewer'), gatewayDir = join(directory, 'gateway');
   for (const dir of [executorDir, reviewerDir, gatewayDir]) mkdirSync(dir);

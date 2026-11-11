@@ -88,14 +88,19 @@ async function audit(id: string) {
 }
 
 const nonempty = z.string().refine(value => value.trim().length > 0);
+const functionCall = z.object({ FunctionCall: z.object({ method_name: z.string(), args: z.string() }) });
 const depositReceipt = z.object({
-  receipt: z.object({ receiver_id: nonempty }),
-  execution_outcome: z.object({ outcome: z.object({ logs: z.array(z.string()) }) }),
+  receipt: z.object({ receiver_id: nonempty, receipt: z.object({ Action: z.object({ actions: z.array(z.unknown()) }).optional() }).optional() }),
+  execution_outcome: z.object({ outcome: z.object({ logs: z.array(z.string()), status: z.unknown().optional() }) }),
 });
 const depositReceipts = z.object({ transactions: z.array(z.object({ receipts: z.array(depositReceipt) })) });
 const eventEnvelope = z.object({ standard: nonempty, event: nonempty, data: z.unknown().optional() });
 const transferData = z.array(z.object({ new_owner_id: nonempty })).min(1);
-type DepositTransfer = { address: string; asset: string };
+const transferArgs = z.object({ receiver_id: nonempty, amount: z.string().regex(/^\d+$/) });
+/** An action receipt's actions apply together: a success status means each one ran. */
+const succeeded = (status: unknown) => typeof status === "object" && status !== null && ("SuccessValue" in status || "SuccessReceiptId" in status);
+/** `amount` is known only from an `ft_transfer` call; an event's transfer is matched by address alone. */
+type DepositTransfer = { address: string; asset: string; amount?: string };
 const unavailableDeposit = () => new FastnearFailure("DepositEvidence");
 
 /**
@@ -107,6 +112,18 @@ function depositTransfers(response: unknown): DepositTransfer[] {
   if (!parsed.success) throw unavailableDeposit();
   const transfers: DepositTransfer[] = [];
   for (const receipt of parsed.data.transactions.flatMap(t => t.receipts)) {
+    // A token that logs no NEP-141 event (wrap.near) still shows its successful `ft_transfer` call. Not
+    // `ft_transfer_call`: its receiver can hand the tokens back after this receipt succeeds.
+    for (const action of receipt.receipt.receipt?.Action?.actions ?? []) {
+      const call = functionCall.safeParse(action);
+      if (!call.success || call.data.FunctionCall.method_name !== "ft_transfer") continue;
+      let raw: unknown;
+      try { raw = JSON.parse(Buffer.from(call.data.FunctionCall.args, "base64").toString("utf8")); } catch { throw unavailableDeposit(); }
+      const args = transferArgs.safeParse(raw);
+      if (!args.success) throw unavailableDeposit();
+      if (succeeded(receipt.execution_outcome.outcome.status))
+        transfers.push({ address: args.data.receiver_id, asset: `nep141:${receipt.receipt.receiver_id}`, amount: args.data.amount });
+    }
     for (const log of receipt.execution_outcome.outcome.logs) {
       if (!log.startsWith("EVENT_JSON:")) continue;
       let raw: unknown;
@@ -152,8 +169,14 @@ export async function ledger(id = agentId(), signal?: AbortSignal): Promise<Row[
     let assetOut = event?.destination_asset ?? text(request.destination_asset) ?? assetIn;
     const depositTx = field(details, "deposit_tx_hash");
     const address = field(details, "deposit_address");
-    if (e.type === "deposit" && e.status === "SUCCESS" && depositTx && address)
-      assetIn = assetOut = deposits.get(depositTx)!.find(transfer => transfer.address === address)?.asset ?? null;
+    if (e.type === "deposit" && e.status === "SUCCESS" && depositTx && address) {
+      const deposited = field(details, "deposited_amount");
+      const proven = deposits.get(depositTx)!.find(t => t.address === address && (t.amount === undefined || t.amount === deposited))?.asset ?? null;
+      // The chain names the asset; an API request that names another leaves it unresolved, never chosen.
+      const asked = details.request && typeof details.request === "object"
+        ? text((details.request as Record<string, unknown>).origin_asset) ?? text((details.request as Record<string, unknown>).asset) : null;
+      assetIn = assetOut = proven && (!asked || asked === proven) ? proven : null;
+    }
     rows.push({
       at: e.created_at,
       settledAt: e.updated_at,
