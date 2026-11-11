@@ -15,7 +15,8 @@ The owner-signed policy configures the provider controls below. The API document
 policy; independently verifying the binding from its plaintext to the signed payload remains open.
 
 - **Allowed input assets.** The provider's `assets` list restricts what may be spent. This executor
-  additionally requires swap outputs to be in the same list; that stricter check is local.
+  additionally requires swap outputs and limit-order acquired assets to be in the same list; that
+  stricter check is local.
 - **Permitted actions.** `actions`, with shield and unshield under `confidential`, and transfers only to
   `destinations`.
 - **Per-asset spending caps.** Per transaction, hour, day and month. A swap spends its input.

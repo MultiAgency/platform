@@ -14,7 +14,7 @@ import { breaksCashFloor, cashChange, cashUsd, withinRunCeiling } from "./strate
  * The one authorization rule every money action passes before it is sent. The provider enforces the
  * policy itself (identity, actions, payees, limits, budgets) when the action reaches it; this refuses
  * only what it can't see: a policy not in force, a grant for another purpose, what a swap or order acquires, a
- * public, duplicate, unfunded or over-cap payout, a changed plan, a swap under the strategy's cash floor, and, before the owner signs, a release the
+ * public, duplicate, unfunded or over-cap payout, a changed plan, a swap or resting order under the strategy's cash floor, and, before the owner signs, a release the
  * policy no longer allows. Pure: the caller reads the facts, this decides. Facts are typed per purpose, so
  * missing evidence is a type error, never a skipped rule.
  */
