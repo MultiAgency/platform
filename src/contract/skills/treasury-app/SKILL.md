@@ -71,7 +71,8 @@ between that check and the send can still refuse a swap after the claim.
 Leave `cashFloor` out for no floor: there is no default, and a strategy saved without one keeps its digest, so the
 grants that bind it stay valid. A floor is part of the strategy, so setting, changing or removing one needs a new grant.
 A server that predates the floor drops the field silently: check that the strategy `strategy/save` answers carries
-your `cashFloor`. It doesn't cover money moved any other way: the owner's own withdrawals and payments, or other agents.
+your `cashFloor`. `overview` reports the saved floor as `cashFloor` beside `target`, absent when there is none or the
+server predates the field. It doesn't cover money moved any other way: the owner's own withdrawals and payments, or other agents.
 
 ## Propose, once per requestId
 

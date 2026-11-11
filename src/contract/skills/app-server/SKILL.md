@@ -453,7 +453,7 @@ code, expire an approval and end a payout `FAILED` or `REFUNDED` (docs/testing.m
 - **Letting anyone signed in act for a DAO** (HIGH): the platform admits your app, not the member. Check
   `memberMay(...)` on every call.
 - **Preparing again after a lost prepare reply** (MEDIUM): a second creation while one is open is refused
-  `owner_action_open`. Read `owner/pending` for the open action's `correlationId` and follow it; don't wait for it to
+  `owner_action_open`, as is a second owner action of a kind while one is submitted or a DAO's awaits its vote. Read `owner/pending` for the open action's `correlationId` and follow it; don't wait for it to
   expire. A `busy` answer (another owner action preparing at that moment) can be sent again shortly.
 
 ## Completion

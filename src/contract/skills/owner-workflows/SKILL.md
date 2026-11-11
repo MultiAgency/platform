@@ -75,6 +75,11 @@ Result: `owner/submit` answers the provider status (`{ status: "SUCCESS" }` once
 `{ stage: "submitted", status }` once the outcome is recorded, `{ stage: "submitting" }` while it is still being
 reconciled (read again later), and `{ stage: "unknown" }` for a correlation id this agent does not hold.
 
+One owner action of a kind at a time: while one is submitted, or a DAO's is still open for its vote, `prepare` refuses
+another of that kind with `owner_action_open`. A freeze and an unfreeze count as one kind, and a vote counts per held
+payout (`approvalId`). A wallet's prepared intent that was never signed holds nothing. Read `owner/pending` for the open
+action's `correlationId` and follow it.
+
 A grant lasts 30 days unless `grant_issue` names an `expiresAt` (ISO timestamp, at least an hour and at most 365 days
 ahead, the provider's maximum; `MIN_GRANT_MS`, `MAX_GRANT_MS`). Outside that range `prepare` is refused, never clamped. The answer's
 `grant: { label, expiresAt }` is what the owner signs (the top-level `expiresAt` is only the signing window): show it

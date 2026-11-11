@@ -62,6 +62,15 @@ const phaseOf = (saved: Pick<Prepared, "stage" | "expiresAt">, now = Date.now())
   saved.stage === "settled" ? "settled" as const : saved.stage === "submitted" ? "submitted" as const
     : windowClosed(saved.expiresAt, now) ? "expired" as const : "open" as const;
 
+/** What one owner action holds against a second: votes per held payout, freeze and unfreeze together, every other action by its type. */
+const actionKind = (type: string, approvalId?: string) =>
+  type === "approval_vote" ? `approval_vote:${approvalId}` : type === "agent_unfreeze" ? "agent_freeze" : type;
+/** A submitted action, or a DAO's vote still open, holds its kind; a wallet's unsigned intent holds nothing. */
+const holds = (saved: Pick<Prepared, "stage" | "expiresAt" | "dao">) => {
+  const phase = phaseOf(saved);
+  return phase === "submitted" || (phase === "open" && saved.dao !== undefined);
+};
+
 /**
  * Durable prepared, submitted and settled intents. They are kept in a file per
  * instance, so a restart forgets neither a DAO vote in progress nor the grant token it would issue.
@@ -286,6 +295,10 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
   if (process.env.HOSTED_OWNER && action.type === "agent_create" && [...pending.values()].some(p => p.type === "agent_create" && p.stage !== "settled"))
     // Coded, so an app whose prepare reply was lost can tell this apart and find the open action (`owner/pending`).
     throw new ORPCError("CONFLICT", { message: "Agent creation already has an open owner action. Follow its existing record (owner/pending) before preparing another.",
+      data: { kind: "refused", code: "owner_action_open" } });
+  const kind = actionKind(action.type, action.type === "approval_vote" ? action.approvalId : undefined);
+  if ([...pending.values()].some(p => actionKind(p.type, p.paymentApproval?.approvalId) === kind && holds(p)))
+    throw new ORPCError("CONFLICT", { message: "An owner action of this kind is already submitted or awaiting the DAO's vote. Follow its existing record (owner/pending) before preparing another.",
       data: { kind: "refused", code: "owner_action_open" } });
   const vote = action.type === "approval_vote" ? await checkPaymentApproval(action) : undefined;
   const paymentApproval = vote?.binding;

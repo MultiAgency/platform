@@ -11,6 +11,7 @@ import { freshDirectory, offline } from "./fixtures/harness.js";
 import { pay } from "../src/agent.js";
 import { readOps, blocksDispatch } from "../src/ops.js";
 import { allHoldings } from "../src/holdings.js";
+import { loadStrategy, saveStrategy } from "../src/strategy.js";
 
 freshDirectory("provider-display");
 const client = createRouterClient(router);
@@ -38,6 +39,16 @@ test("dashboard excludes expired prices and preserves their timestamps", async (
   const usdc = (await client.overview()).book.find(h => h.asset === ASSETS.USDC)!;
   assert.equal(usdc.usd, null);
   assert.equal((usdc as unknown as Record<string, unknown>).priceUpdatedAt, "2020-01-01T00:00:00Z");
+});
+
+test("the overview reports the saved strategy's cash floor beside its target, and nothing when there is none", async () => {
+  const before = await client.overview();
+  assert.equal("cashFloor" in before, false);
+  const floor = { usd: 250, assets: [ASSETS.USDC] };
+  saveStrategy({ ...loadStrategy(), cashFloor: floor });
+  const overview = await client.overview();
+  assert.deepEqual(overview.cashFloor, floor);
+  assert.deepEqual(overview.target, before.target, "the floor sits beside the target, which it doesn't change");
 });
 
 test("RPC errors retain exact provider codes and allowlisted budget or retry metadata", async () => {

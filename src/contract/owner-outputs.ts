@@ -191,11 +191,12 @@ const holding = z.looseObject({
   asset: z.string(), symbol: z.string(), decimals: z.number(), price: z.number(),
   public: z.bigint(), confidential: z.bigint(), usd: z.number(),
 });
+/** The strategy's cash floor, loosely. Absent: no floor, or a server that predates the floor and dropped it. */
+const cashFloor = z.looseObject({ usd: z.number(), assets: z.array(z.string()) }).optional();
 /** A loose copy of the strategy: Strategy itself is a stripping z.object. */
 const strategy = z.looseObject({ targetBps: z.record(z.string(), z.number()), minLegUsd: z.number(), maxCostBps: z.number(),
   autopilot: z.looseObject({ everyMin: z.number(), maxUsd: z.number() }),
-  /** Absent: no floor, or a server that predates the floor and dropped it. */
-  cashFloor: z.looseObject({ usd: z.number(), assets: z.array(z.string()) }).optional() });
+  cashFloor });
 /** strategy-controls.ts snapshot. */
 const strategySnapshot = z.looseObject({ strategy, digest: z.string(), on: z.boolean() });
 /** autopilot.ts status. */
@@ -258,13 +259,14 @@ const unmanagedHolding = z.looseObject({
   price: z.number().nullable(), priceUpdatedAt: z.string().nullable(), priceExpiresAt: z.string().nullable(),
   usd: z.number().nullable(),
 });
-/** rpc/observations.ts overview. `area` is absent unless DASHBOARD_AREA is configured. */
+/** rpc/observations.ts overview. `area` is absent unless DASHBOARD_AREA is configured; `cashFloor` unless the strategy sets one. */
 export const overviewOutput = z.looseObject({
   agentId: z.string(),
   area: area.optional(),
   book: z.array(managedHolding),
   unmanaged: z.array(unmanagedHolding),
   target: z.record(z.string(), z.number()),
+  cashFloor,
   rebalance: z.looseObject({ minLegUsd: z.number(), maxCostBps: z.number() }),
   policy: policyView,
   digest: z.string().nullable(),

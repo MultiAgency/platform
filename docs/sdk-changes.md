@@ -38,6 +38,15 @@ platform-only fixes are listed separately.
   vote; with other terms it is refused `request_conflict`, a new `AppGatewayCode` (**Breaking for exhaustive switches**).
   Before, each filing made a new proposal, even for a hire
   already paid (passing it moved nothing). One that lapsed unsigned is filed anew. Offline-tested (`test/app-dao.test.ts`).
+- **One owner action of a kind at a time** (addition): `owner/prepare` refuses a second owner action of a kind with
+  `code: "owner_action_open"` while one is submitted, or a DAO's is still open and unexpired, as it already did for a
+  hosted agent's creation. A freeze and an unfreeze hold each other; a vote is held only by a vote on the same held
+  payout (`approvalId`); every other action by its type. A wallet's prepared intent that was never signed holds nothing,
+  and a settled or expired one holds nothing. Find the open one with `owner/pending`. Offline-tested
+  (`test/owner-action-kinds.test.ts`).
+- **`overview` reports the strategy's cash floor** (addition): `cashFloor: { usd, assets }` beside `target`, absent when
+  the saved strategy has none. The output schema is loose and the field optional, so an older server's answer still
+  parses. Offline-tested (`test/provider-display.test.ts`).
 - **Docs:** the app-server skill says how a DAO hire filing shortens `validUntil` (the earliest of the request, the
   consent's expiry and `MAX_HIRE_APPROVAL_MS`) and that the answer carries the date the DAO votes on (platform#70).
 
