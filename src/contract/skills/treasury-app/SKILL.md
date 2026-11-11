@@ -198,7 +198,7 @@ completes the action, so a slower DAO can't freeze its agent by vote. The DAO's 
 (`/confirm/dao/stop/<dao>/<agent>`) ends app consents and turns autopilot off, but neither freezes the agent nor
 revokes the grant: under a consent the DAO votes later, an app can turn autopilot on again.
 
-## Resting limit orders (0.5.7 candidate, offline-tested)
+## Resting limit orders (0.5.8 candidate, offline-tested)
 
 Read `app.capabilities()` with the app server's service credential and offer order controls only when it advertises
 `treasury-limit-orders-v1` and a distinct owner consent carries both `treasury` and `treasury-orders`. The headless

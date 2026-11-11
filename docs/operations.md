@@ -56,8 +56,8 @@ The separate Treasury limit-order feature writes additive records beneath `.prop
 the exact owner-approved order, one placement identity, complete fill and payout observations, and a one-way
 cancellation claim. Preserve the whole `.proposals/` tree and `.ops/` journal together, after stopping the executor.
 The new `limit_order` and `limit_order_cancel` journal methods make a host that has attempted either action
-incompatible with the 0.5.6 reader; its older reader refuses the journal rather than silently discarding the send.
-Do not roll that agent back to 0.5.6 after an order attempt. A host with only new proposal records has not crossed the
+incompatible with the tagged 0.5.7 reader; it refuses the journal rather than silently discarding the send.
+Do not roll that agent back to 0.5.7 after an order attempt. A host with only new proposal records has not crossed the
 journal boundary, but its older build ignores those proposals; keep them intact and do not resend their `requestId`s
 until the compatible build returns. See [limit orders](limit-orders.md).
 

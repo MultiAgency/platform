@@ -2,8 +2,8 @@
 
 The platform pins `@near-intents-agent-api/sdk` to **0.8.2** in `package.json` and `pnpm-lock.yaml`. Its release-age
 exception is scoped to that exact package version. Node 24 is required. The tagged 0.5.6 dependency update converted
-no existing state and exposed no new spending capability. A separate Treasury [limit-order feature](limit-orders.md)
-is in progress after that release.
+no existing state and exposed no new spending capability. The tagged 0.5.7 SDK also lacks order routes. A separate
+Treasury [limit-order feature](limit-orders.md) is in progress for SDK 0.5.8.
 
 ## Source review (2026-11-10)
 
@@ -42,10 +42,10 @@ that read schema. Policy reads and owner previews now retain the `limit_order` a
 setting. Unrelated policy edits preserve both. An older app SDK can reject a policy containing this action; consumers
 with exhaustive action switches need to handle the additional value. This changes evidence reading, not authorization.
 
-In the tagged 0.5.6 release, default Treasury, Payables and Market policies omit limit orders and native signing;
-the router, app scopes and dispatch path expose no order or native-signing operation. The separate limit-order change
-now adds an owner-signed per-order permission, an explicit `treasury-orders` app consent, an opt-in policy action,
-guarded placement through `dispatch`, and retained fill/cancellation observations. This change is in progress and
+In the tagged 0.5.6 and 0.5.7 releases, default Treasury, Payables and Market policies omit limit orders and native
+signing; the router, app scopes and dispatch path expose no order or native-signing operation. The unreleased 0.5.8
+limit-order change adds an owner-signed per-order permission, an explicit `treasury-orders` app consent, an opt-in
+policy action, guarded placement through `dispatch`, and retained fill/cancellation observations. This change is in progress and
 has focused offline tests only; it has not been placed on mainnet through the platform. Native signing remains outside
 this change and has no fill/cancellation lifecycle or cumulative accounting here. See [Treasury limit orders](limit-orders.md)
 for the exact boundaries and evidence.

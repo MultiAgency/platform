@@ -26,6 +26,16 @@ platform-only fixes are listed separately.
   (a provider `FAILED` isn't proof nothing moved); a refund doesn't. The confirm page shows it beside the terms. It refuses
   nothing. Optional, so older apps ignore it. Offline-, browser- and stack-tested.
 
+- **Treasury limit orders** (addition): a dedicated `treasury-orders` consent and SDK contract cover quotes, exact
+  owner approval, guarded placement, live status reads and one-way cancellation. Order views include digests of saved
+  approval or rejection signatures so a DAO vote relay can reconcile a lost HTTP answer without signing or sending
+  again. This feature is absent from the tagged 0.5.7 package. Its platform path has offline tests; Treasury app
+  integration with the final package and live order lifecycle checks remain release gates. See
+  [limit orders](limit-orders.md).
+- **App host capability discovery** (addition): `appClient.capabilities()` reads the authenticated
+  `GET /apps/v1/capabilities` route, including `treasury-limit-orders-v1` when the host can serve Treasury order routes.
+  It grants no consent and does not verify an active agent release or provider support. Headless `/gw/me` remains absent.
+
 Platform changes in this release, outside the package:
 - **The books attribute a wNEAR deposit** (staging, 2026-11-11): a deposit's asset was proven only by a NEP-141
   `ft_transfer` event to the deposit address, and wrap.near logs none, so a staging agent's 3 wNEAR deposit (wrapped and
@@ -39,6 +49,9 @@ Platform changes in this release, outside the package:
   audit events, and shields in `/history`, each shaped as observed on staging except the shield row (none observed).
   A funded, shielded and swapped stack agent reconciles to zero (`test/e2e/stack-app.spec.mjs`), read through the new
   `reconcileBooks` stack control.
+- **The signature request budget also covers order approval**: `limitOrders/approve` and `limitOrders/reject`, and
+  `GET /apps/v1/dao-limit-orders/<hash>` when relaying a passed vote's signature, use the separate budget introduced
+  in 0.5.7. Offline-tested (`test/app-access.test.ts`).
 
 ## 0.5.7 (2026-11-11)
 
@@ -77,14 +90,6 @@ Platform changes in this release, outside the package:
   parses. Offline-tested (`test/provider-display.test.ts`).
 - **Docs:** the app-server skill says how a DAO hire filing shortens `validUntil` (the earliest of the request, the
   consent's expiry and `MAX_HIRE_APPROVAL_MS`) and that the answer carries the date the DAO votes on (platform#70).
-- **Treasury limit orders** (addition): a dedicated `treasury-orders` consent and SDK contract cover quotes, exact
-  owner approval, guarded placement, live status reads and one-way cancellation. Order views include digests of saved
-  approval or rejection signatures so a DAO vote relay can reconcile a lost HTTP answer without signing or sending
-  again. This feature is absent from the tagged 0.5.6 package. Its platform path has offline tests; Treasury app release
-  integration and live order lifecycle checks remain release gates. See [limit orders](limit-orders.md).
-- **App host capability discovery** (addition): `appClient.capabilities()` reads the authenticated
-  `GET /apps/v1/capabilities` route, including `treasury-limit-orders-v1` when the host can serve Treasury order routes.
-  It grants no consent and does not verify an active agent release or provider support. Headless `/gw/me` remains absent.
 
 
 Platform changes in this release, outside the package:
@@ -92,7 +97,7 @@ Platform changes in this release, outside the package:
   said "work order payout"; platform#67's report), and the simulated market can list an agent that isn't taking calls
   (`outcome: "closed"`, answering `-32004`).
 - **Calls carrying a signature have their own request budget** (platform#59): a setup, a consent and its nonce, an
-  owner action's `owner/submit`, a limit order's approval or rejection, and the DAO request reads that relay a passed vote's signature no longer share a
+  owner action's `owner/submit`, and the DAO request reads that relay a passed vote's signature no longer share a
   credential's hourly budget with its other calls; they draw on a second budget of the same size. Another tenant's traffic
   can't refuse them with a 429 inside the signature's window, and they still can't exceed a limit of their own. Each 429
   is logged with its budget and, when the path names one, its Organization (at most once a minute per credential and

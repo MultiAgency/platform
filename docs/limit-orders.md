@@ -1,9 +1,9 @@
 # Treasury limit orders
 
-**Status (2026-11-11): separate feature in progress.** The tagged SDK 0.5.6 release does not expose limit-order
-spending. The new Treasury path has focused offline tests, but no order has been placed, filled, paid out, or canceled
-on mainnet through this platform. The production provider did not support the limit-order routes in the read-only
-check. Do not treat a dry preview or placement `SUCCESS` as a completed trade.
+**Status (2026-11-11): unreleased SDK 0.5.8 feature in progress.** The tagged and published SDK 0.5.7 release does
+not expose limit-order spending. The new Treasury path has focused offline tests, but no order has been placed, filled,
+paid out, or canceled on mainnet through this platform. The production provider did not support the limit-order routes
+in the read-only check. Do not treat a dry preview or placement `SUCCESS` as a completed trade.
 
 ## Evidence and provider meaning
 
@@ -90,8 +90,8 @@ owner-approved proposal, one-way claim, and matching provider order ID. Missing 
 
 Order proposal, approval, claim, placement, cancellation and observation records live under
 `.proposals/limit-orders/<agentId>/`, beside the existing Treasury proposals. New `limit_order` and
-`limit_order_cancel` journal methods are incompatible with older readers. Keep executors stopped and preserve all
-state directories and settings for rollback as in [operations](operations.md); an older host cannot be assumed to
+`limit_order_cancel` journal methods are incompatible with the tagged 0.5.7 reader. Keep executors stopped and
+preserve all state directories and settings for rollback as in [operations](operations.md); an older host cannot be assumed to
 read records from this feature. DAO order votes also add `limit_order` requests to `.app-access/dao-requests/`;
 a pre-feature gateway may refuse those records during rollback. An attempted DAO vote relay stays retained if its
 agent receipt remains unknown, so preserve its claim and reconcile it before removing old gateway state.
@@ -100,11 +100,11 @@ agent receipt remains unknown, so preserve its claim and reconcile it before rem
 
 ### Treasury app consumer handoff
 
-The consumer has been implemented and tested locally in a separate, uncommitted Treasury checkout. It uses an
-unpublished, provisional SDK 0.5.7 tarball built before this platform branch's latest rebase. The app keeps SDK 0.4.0
-for legacy consumers and uses the provisional package through a separate alias. It still needs verification against a
-fresh package from the final platform candidate, a reviewed portable release dependency, and its own commit and
-release checks. The tagged 0.5.6 SDK does not contain these routes.
+The consumer has been implemented and tested locally in a separate, uncommitted Treasury checkout. Its last reported
+test run used an unpublished, provisional SDK 0.5.7 tarball from the pre-release feature branch. That tarball is not
+the tagged and published SDK 0.5.7 package, which lacks these routes. The app keeps SDK 0.4.0 for legacy consumers and
+uses the provisional package through a separate alias. It still needs verification against a fresh SDK 0.5.8 package
+from the final platform candidate, a reviewed portable release dependency, and its own commit and release checks.
 
 The current consumer discovers `treasury-limit-orders-v1` through `/gw/me`, which a headless platform host returns
 404. It therefore refuses every order control on the deployed API hosts. The consumer must switch to the SDK's
@@ -132,9 +132,10 @@ partial fills and payouts, deduplicated unchanged reads, and rejection of mismat
 provider and do not establish live provider behavior. Gateway tests also cover DAO vote receipts, lost relay replies,
 concurrent polls, credential revocation during filing, and malformed successful responses. Missing local order files
 block later sends and agent release in offline faults; recovery still polls unrelated unknown operations before
-surfacing the missing evidence. Earlier platform offline, typecheck, evidence and packed SDK consumer checks passed
-before this branch's latest rebase; a frozen candidate and Bun check from the final commit are still required. The
-separate Treasury checkout reports offline and browser checks against its provisional package; it still needs the
-rebuilt SDK package. No cross-repository end-to-end order flow has been run. Live placement, cancellation, payout
-behavior, the production route, and the deployed provider's policy enforcement remain unverified. Native EVM/Solana
-`sign-intent` is a separate design with different protections and is not enabled by this order path.
+surfacing the missing evidence. Earlier platform offline, typecheck, evidence, candidate and Bun consumer checks passed
+on a pre-version commit; they do not validate the final SDK 0.5.8 tree. A fresh candidate and Bun check from that
+final commit are still required. The separate Treasury checkout reports offline and browser checks against its
+provisional package; it still needs the rebuilt SDK package. No cross-repository end-to-end order flow has been run.
+Live placement, cancellation, payout behavior, the production route, and the deployed provider's policy enforcement
+remain unverified. Native EVM/Solana `sign-intent` is a separate design with different protections and is not enabled
+by this order path.

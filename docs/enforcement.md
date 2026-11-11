@@ -1202,7 +1202,7 @@ required for restoration, and old consents stay ended. Lifecycle and money locks
 fencing. Provider archive/restore refusal semantics remain per pinned docs (`ce381df`), with no mainnet observation;
 DAO release and incomplete-transition rollback are not covered. See [agent release](agent-release.md) for tests and limits.
 
-## Treasury limit orders (separate feature in progress)
+## Treasury limit orders (unreleased 0.5.8 feature in progress)
 
 The owner must sign a policy revision enabling `limit_order` and a deviation ceiling, then sign each immutable
 order's exact terms. A dedicated `treasury-orders` app consent and live Treasury grant are also required by this

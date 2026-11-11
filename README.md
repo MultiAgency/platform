@@ -168,11 +168,12 @@ Each line is a gap; the linked page says how the rest is known. The
   configuration (`deploy/platform.json`) doesn't set up Treasury agents yet; staging's does. A proposal's approval is the platform's check, not the provider's: whoever holds
   the treasury grant can swap within the policy without it. Held swaps aren't used: what their vote commits to is
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
-- Treasury limit orders are a separate feature in progress, behind an owner-signed policy opt-in, one exact owner
-  signature per order and a new `treasury-orders` app consent. The default policy still leaves them off. Its local
+- Treasury limit orders are an unreleased 0.5.8 feature in progress, behind an owner-signed policy opt-in, one exact
+  signature from the owner per order and a new `treasury-orders` app consent. The default policy still leaves them off. Its local
   placement, cancellation and recovery paths have offline tests. A Treasury app consumer has been implemented and
-  tested locally in a separate, uncommitted checkout; it still needs authenticated capability discovery, integration
-  with a final SDK package and release checks.
+  tested locally in a separate, uncommitted checkout against a provisional tarball; it still needs authenticated
+  capability discovery, integration with the final 0.5.8 SDK package and release checks. The tagged and published
+  0.5.7 SDK does not contain these order routes.
   No live placement, fill or payout check has been completed. The demo provider answered authenticated dry previews
   on 2026-11-10; production did not expose these routes in that read-only check ([limit orders](docs/limit-orders.md)).
 - Whether a linked DAO is confidential (`treasury/get`) relies on Trezu's convention: its confidential setup registers

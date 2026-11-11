@@ -24,7 +24,7 @@ the chain reports removed; exits non-zero if any lookup went unanswered).
 
 | Request | Result |
 | --- | --- |
-| `GET /apps/v1/capabilities` | `{ capabilities: [...] }`: app route groups this host advertises for the calling deployment. `treasury-limit-orders-v1` means the platform can serve the order API for a Treasury area; it grants no consent and says nothing about an active agent release or deployed provider support. Requires the service credential; headless `/gw/me` still answers 404. |
+| `GET /apps/v1/capabilities` (unreleased 0.5.8) | `{ capabilities: [...] }`: app route groups this host advertises for the calling deployment. `treasury-limit-orders-v1` means the platform can serve the order API for a Treasury area; it grants no consent and says nothing about an active agent release or deployed provider support. Requires the service credential; headless `/gw/me` still answers 404. |
 | `GET /apps/v1/agents/<agent>` | `{ agent, owner, agentId, created, host, deployment, signer }`: what the owner's consent must name (`signer` is `wallet` or `dao`; `agentId` null and `created` false before the agent exists) |
 | `POST /apps/v1/setup` with a signed setup text | `201 { agent, consent }`: reserves and starts this owner's hosted agent for the area, and a setup consent (below) |
 | `GET /apps/v1/agents?organization=<org>[&owner=][&area=]` | `{ agents: [{ agent, organization, owner, area }] }`: the hosted agents this deployment's setups reserved for that Organization on this host, from the registry; how an app whose setup reply was lost learns the name (below) |
@@ -223,7 +223,7 @@ purpose `treasury`, so `maxUsd: 0` doesn't stop them. Scopes are separate: a con
 reachable. Each
 consent, call and revocation is appended to `.app-access/access-YYYY-MM.jsonl`, one file per month (UTC; builds before 0.5.3 wrote one `access.jsonl`).
 
-The separate limit-order feature adds `treasury-orders`, which requires `treasury` in the same consent and covers only
+The unreleased 0.5.8 limit-order feature adds `treasury-orders`, which requires `treasury` in the same consent and covers only
 `limitOrders/quote`, `create`, `get`, `list`, `approve`, `reject`, `place`, `cancel` and `refresh`. Existing `treasury`
 or `treasury-execute` consents alone do not acquire these routes. The owner must separately sign the `limit_order`
 policy opt-in and each exact order's NEP-413 text; the gateway checks the current owner's signing key before relaying
@@ -496,9 +496,10 @@ outcome; the same request may be sent again once it clears. A 429 that isn't the
 keeps its earlier kind: `refused` on the app routes, `unavailable` or `unknown` on agent calls.
 
 From 0.5.7, calls on the path of an owner's or a DAO's signature with a short window draw on a second budget of the same
-size, not the shared one: `POST /apps/v1/setup`, `/consents` and `/consent-nonces`, an agent's `owner/submit` and
-`limitOrders/approve` or `limitOrders/reject`, and the DAO request reads that relay a passed vote's signature
-(`GET /apps/v1/dao-{setups,consents,votes,hires,limit-orders}/<hash>`). Ordinary
+size, not the shared one: `POST /apps/v1/setup`, `/consents` and `/consent-nonces`, an agent's `owner/submit`, and the
+DAO request reads that relay a passed vote's signature
+(`GET /apps/v1/dao-{setups,consents,votes,hires}/<hash>`). The unreleased 0.5.8 order feature also puts
+`limitOrders/approve`, `limitOrders/reject` and `GET /apps/v1/dao-limit-orders/<hash>` on that budget. Ordinary
 traffic can't use it up and waste a signature, and those calls can't be used to get around the limit, since they count
 against their own. A credential's busiest hour can therefore reach twice its limit. Each 429 adds a `rate_limited` line to the
 access log with the deployment, the credential, which budget, and the Organization when the path names one; at most
