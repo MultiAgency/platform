@@ -36,6 +36,18 @@ export const confirms = new AppConfirms(ROOT);
 export const APP_ROOT = ROOT;
 /** Each credential's requests in the hour, held to its own limit (`perHour`, which the operator sets). */
 const mayUse = hourlyLimit(DEFAULT_REQUESTS_PER_HOUR);
+/**
+ * Calls on the path of an owner's or a DAO's signature with a short window (a setup, a consent and the nonce asked just
+ * before it is signed, an owner action's submission, and the DAO request reads that relay a passed vote's signature). They draw on a budget of their
+ * own, the same size as the credential's: ordinary traffic can't use it up and waste a signature, and they still can't
+ * be used to get around the limit (#59).
+ */
+const SIGNED = /^\/apps\/v1\/(?:setup|consents|consent-nonces|o\/[A-Za-z0-9_-]{1,128}\/a\/[a-z0-9-]{1,32}\/rpc\/owner\/submit)$/;
+const RELAYS = /^\/apps\/v1\/dao-(?:setups|consents|votes|hires)\/[a-f0-9]{64}$/;
+const budgetOf = (method: string | undefined, pathname: string) =>
+  method === "POST" && SIGNED.test(pathname) || method === "GET" && RELAYS.test(pathname) ? "signed" as const : "shared" as const;
+/** When each credential's budget last logged a 429: at most one line a minute, so a flood can't grow the log. */
+const limitLogged = new Map<string, number>();
 const publicConsent = ({ message: _m, nonce: _n, signature: _s, ...record }: ConsentRecord) => record;
 
 const FOLLOW_CREATION = new Set(["owner/status", "owner/actions", "owner/pending"]);
@@ -112,8 +124,15 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   if (!credential) { json(res, 401, { error: "Invalid, expired or revoked app credential" }); return true; }
   // The SDK reads this as `rate_limited` (#15): refused before forwarding, so the same request may be sent once it clears.
   const now = Date.now();
-  if (!mayUse(credential.id, now, credential.perHour)) {
-    const after = mayUse.retryAfterSeconds(credential.id, now, credential.perHour);
+  const budget = budgetOf(req.method, pathname), key = budget === "signed" ? `${credential.id}:signed` : credential.id;
+  if (!mayUse(key, now, credential.perHour)) {
+    const after = mayUse.retryAfterSeconds(key, now, credential.perHour);
+    if (now - (limitLogged.get(key) ?? 0) >= 60_000) {
+      if (limitLogged.size > 10_000) limitLogged.clear();
+      limitLogged.set(key, now);
+      appendSynced(accessLog(ROOT), { at: new Date(now).toISOString(), deployment: credential.deployment, credential: credential.id,
+        event: "rate_limited", budget, organization: pathname.match(/^\/apps\/v1\/o\/([A-Za-z0-9_-]{1,128})\//)?.[1] ?? null });
+    }
     json(res, 429, { error: "Request limit reached", retryAfterSeconds: after }, { "retry-after": String(after) }); return true;
   }
   const url = new URL(req.url ?? "/", "http://gateway");
