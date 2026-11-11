@@ -53,7 +53,7 @@ the found DAO signature once after checking the agent and key again. This is an 
 gateway records a relay only when the agent returns the matching order and a digest of that exact saved signature.
 It durably claims the one allowed relay before the HTTP call. If the reply is lost, later polls reread the agent's
 receipt without submitting the owner signature again; an unproven claim stays unresolved for review. The current
-Treasury app consumer still needs its own DAO member and vote flow.
+Treasury app checkout has a local DAO member and vote flow, tested offline; it has not been released.
 
 ## Placement, observation, and recovery
 
@@ -100,26 +100,29 @@ agent receipt remains unknown, so preserve its claim and reconcile it before rem
 
 ### Treasury app consumer handoff
 
-The Treasury app checkout is owned by another active session. Its server needs to request a **new** consent carrying
-both `treasury` and `treasury-orders`; an older Treasury consent has no order authority. Keep the app service
-credential on the server and use `appClient(...).agent(organization, agent).call(...)` for the nine `limitOrders/*`
-procedures. A host with the Treasury area provides the `treasury-limit-orders-v1` owner-app capability; its manifest
-entry grants no consent. The current app's connected state hides the consent form once Treasury access exists, so its UI must
-offer the separate order consent explicitly. The existing app is an uncommitted SDK 0.4.0 candidate; it must take
-the new contract from a later feature package, not treat the tagged 0.5.6 package as containing these routes.
+The consumer has been implemented and tested locally in a separate, uncommitted Treasury checkout. It uses an
+unpublished, provisional SDK 0.5.7 tarball built before this platform branch's latest rebase. The app keeps SDK 0.4.0
+for legacy consumers and uses the provisional package through a separate alias. It still needs verification against a
+fresh package from the final platform candidate, a reviewed portable release dependency, and its own commit and
+release checks. The tagged 0.5.6 SDK does not contain these routes.
 
-Save the app's `requestId` and exact terms before `limitOrders/create`; retry only that same body if its answer is
-lost. Read the saved proposal by ID and show `limitOrderText(view, "approve")` from the SDK contract before asking
-the current wallet owner to sign it. Relay the signature to `limitOrders/approve`, then call `limitOrders/place` once.
-If placement's answer is lost, follow `get` and `refresh` by ID; never create a second request to compensate.
-For a DAO owner, `appClient(...).daoLimitOrders.file({ organization, agent, order: id, verdict })` files the exact
-vote, and `.state(hash)` follows its one-time relay; the app must separately gate its member role and voting UI.
-Cancellation is a separate one-time request. After an ambiguous cancel reply, use `refresh` to follow fills and
-payouts, never another cancel POST. The UI should label `resting`, `partially_filled`, `cancel_requested`,
-`payout_failed` and `unknown` distinctly, and show `completed` only after the provider's final payout read.
+The current consumer discovers `treasury-limit-orders-v1` through `/gw/me`, which a headless platform host returns
+404. It therefore refuses every order control on the deployed API hosts. The consumer must switch to the SDK's
+authenticated `appClient.capabilities()` (`GET /apps/v1/capabilities`) and be retested with the final tarball before
+release. The advertised capability means that the host has the app route; it does not grant consent, prove the active
+agent release supports it, or establish provider order support.
 
-The app integration points are `app/server.ts`, `app/treasury-app.ts` and `web/src/proposals/` in the Treasury
-checkout. Its other active session should own those edits and tests.
+The app session reports a separate consent carrying both `treasury` and `treasury-orders`, available even after the
+ordinary Treasury connection. Its server holds the app credential and calls the nine `limitOrders/*` methods through
+the SDK client. A host with the Treasury area advertises the `treasury-limit-orders-v1` app capability; that
+manifest entry grants no consent. The app reports that it saves `requestId` and exact terms before create and retries
+only the same body after a lost answer. It shows the SDK's `limitOrderText(view, "approve")` for the current wallet
+owner to sign, then attempts placement once. After an uncertain placement reply it follows `get` and `refresh`, with
+no replacement order. Its DAO flow files an exact vote with `daoLimitOrders.file`, follows `.state(hash)`, and checks
+current member roles before offering the voting transaction. Cancellation is claimed once and followed through
+`refresh` after an ambiguous reply. The UI keeps resting, partial fill, cancellation requested, failed payout and
+unknown states separate; it shows completion only after final payout evidence. These are local consumer test claims,
+not deployed or live provider observations.
 
 Focused offline tests in `test/limit-order-terms.test.ts`, `test/limit-order-store.test.ts`,
 `test/limit-order-dispatch.test.ts`, `test/limit-order-observe.test.ts` and the service/cancellation suites cover exact
@@ -129,9 +132,9 @@ partial fills and payouts, deduplicated unchanged reads, and rejection of mismat
 provider and do not establish live provider behavior. Gateway tests also cover DAO vote receipts, lost relay replies,
 concurrent polls, credential revocation during filing, and malformed successful responses. Missing local order files
 block later sends and agent release in offline faults; recovery still polls unrelated unknown operations before
-surfacing the missing evidence. The full offline suite passed 1,326/1,326 on this tree;
-typecheck, evidence checks and the packed 0.5.7 SDK's Node and Bun 1.4.2 consumer checks passed, including the
-existing 21 skill examples. Browser and end-to-end order flows still need the Treasury app consumer and a later
-release candidate. Live placement, cancellation, payout behavior, the
-production route, and the deployed provider's policy enforcement remain unverified. Native EVM/Solana `sign-intent`
-is a separate design with different protections and is not enabled by this order path.
+surfacing the missing evidence. Earlier platform offline, typecheck, evidence and packed SDK consumer checks passed
+before this branch's latest rebase; a frozen candidate and Bun check from the final commit are still required. The
+separate Treasury checkout reports offline and browser checks against its provisional package; it still needs the
+rebuilt SDK package. No cross-repository end-to-end order flow has been run. Live placement, cancellation, payout
+behavior, the production route, and the deployed provider's policy enforcement remain unverified. Native EVM/Solana
+`sign-intent` is a separate design with different protections and is not enabled by this order path.

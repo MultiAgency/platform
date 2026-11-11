@@ -188,6 +188,13 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   };
   const ownerStopped = () => json(res, 409, { code: "owner_stopped", error: "The owner stopped or released this agent, and this text may have been signed before that. Nothing was stored; ask the platform for a consent nonce and ask the owner to sign the text with it." });
   const stoppedAnswer = () => json(res, 409, { code: "dao_stopped", error: "The DAO stopped this agent after this consent was filed. Nothing was stored; file a new consent for the DAO's vote." });
+  // Capability discovery is credentialed but grants no owner authority. It names only app routes this host can serve,
+  // not an active agent release, the provider's deployed routes, or a live consent.
+  if (pathname === "/apps/v1/capabilities") {
+    if (req.method !== "GET") { json(res, 405, { code: "invalid_request", error: "Use GET" }); return true; }
+    const treasury = options.setupAreas?.includes("treasury") || selected.some(a => a.area === "treasury" && reachable(a, credential.deployment));
+    json(res, 200, { capabilities: treasury ? ["treasury-limit-orders-v1"] : [] }); return true;
+  }
   /** A DAO's agent for this app and Organization, with live DAO consents carrying the requested scope. Orders need both Treasury scopes. */
   const daoAgent = async (name: string, organization: string, scope: "treasury" | "treasury-orders" | "market" = "treasury") => {
     const agent = selected.find(a => a.name === name && reachable(a, credential.deployment, organization));

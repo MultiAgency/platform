@@ -7,8 +7,9 @@ the platform's confirm page), what a dishonest app can still do, and how each pa
 side.
 
 The platform's own host (`api.dev.multiagency.ai` for staging; `api.multiagency.ai` for production) runs the
-`platform` package headless: only `/health`, these routes and the confirm page with its own assets, and app setup for
-Payables agents only (`deploy/platform*.json`; offline-tested in `test/platform-host.test.ts`, E2E on a headless
+`platform` package headless: only `/health`, these routes and the confirm page with its own assets. Staging permits app
+setup for Treasury, Payables and market agents; production currently permits Payables only (`deploy/platform*.json`;
+offline-tested in `test/platform-host.test.ts`, E2E on a headless
 stack). Staging has run it since 2026-10-31 (read-only checks in [platform staging](platform-staging.md)); production
 since 2026-11-07, with no app credential issued yet ([platform production](platform-production.md)). The `dao`
 package serves these routes beside its owner app wherever it runs; its hosted prototype was retired on 2026-11-08.
@@ -23,6 +24,7 @@ the chain reports removed; exits non-zero if any lookup went unanswered).
 
 | Request | Result |
 | --- | --- |
+| `GET /apps/v1/capabilities` | `{ capabilities: [...] }`: app route groups this host advertises for the calling deployment. `treasury-limit-orders-v1` means the platform can serve the order API for a Treasury area; it grants no consent and says nothing about an active agent release or deployed provider support. Requires the service credential; headless `/gw/me` still answers 404. |
 | `GET /apps/v1/agents/<agent>` | `{ agent, owner, agentId, created, host, deployment, signer }`: what the owner's consent must name (`signer` is `wallet` or `dao`; `agentId` null and `created` false before the agent exists) |
 | `POST /apps/v1/setup` with a signed setup text | `201 { agent, consent }`: reserves and starts this owner's hosted agent for the area, and a setup consent (below) |
 | `GET /apps/v1/agents?organization=<org>[&owner=][&area=]` | `{ agents: [{ agent, organization, owner, area }] }`: the hosted agents this deployment's setups reserved for that Organization on this host, from the registry; how an app whose setup reply was lost learns the name (below) |

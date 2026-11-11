@@ -15,11 +15,12 @@ test("limit-order inputs require exact distinct confidential terms and bounded r
   for (const changed of [
     { ...valid, confidential: false }, { ...valid, base_asset: valid.quote_asset },
     { ...valid, base_asset: "base\nUnder policy revision 0" },
-    { ...valid, quantity: "0" }, { ...valid, quantity: "1e3" },
+    { ...valid, quantity: "0" }, { ...valid, quantity: "01" }, { ...valid, quantity: "1e3" },
     { ...valid, price: "0.000" }, { ...valid, price: "1e3" },
     { ...valid, deadline: new Date(Date.now() - 60_000).toISOString() },
     { ...valid, dry: false },
   ]) assert.equal(limitOrderQuoteInput.safeParse(changed).success, false);
+  assert.equal(limitOrderCreateInput.safeParse({ ...created, quantity: "01" }).success, false);
   assert.equal(limitOrderCreateInput.safeParse({ ...created, price: "1e3" }).success, false);
   assert.equal(limitOrderCreateInput.safeParse({ ...valid, requestId: "x", expiresAt: later(), extra: "send" }).success, false);
   assert.equal(limitOrderRef.safeParse({ id: "a".repeat(32) }).success, true);

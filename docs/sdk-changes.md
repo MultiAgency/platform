@@ -82,6 +82,9 @@ Platform changes in this release, outside the package:
   approval or rejection signatures so a DAO vote relay can reconcile a lost HTTP answer without signing or sending
   again. This feature is absent from the tagged 0.5.6 package. Its platform path has offline tests; Treasury app release
   integration and live order lifecycle checks remain release gates. See [limit orders](limit-orders.md).
+- **App host capability discovery** (addition): `appClient.capabilities()` reads the authenticated
+  `GET /apps/v1/capabilities` route, including `treasury-limit-orders-v1` when the host can serve Treasury order routes.
+  It grants no consent and does not verify an active agent release or provider support. Headless `/gw/me` remains absent.
 
 
 Platform changes in this release, outside the package:

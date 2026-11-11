@@ -28,10 +28,12 @@ sources:
 Read getting-started and owner-workflows first. `appClient` runs on your server with the deployment's service credential
 (`tap_…`), issued by the platform operator: a server secret, never sent to a browser. A call reaches an agent only
 under a live owner consent for that Organization and agent, and only within the consent's scopes: `read`, `owner`,
-`payout`, and for Treasury `treasury`, `treasury-execute` and the separate `treasury-orders` (see treasury-app). No production MultiAgency host serves the `/apps/v1` routes yet; the operator runs them on a staging host for
-its own tests. Until a production host does, build against the SDK repository's local stack
-(`pnpm test:e2e:stack --app <deployment>`). Use only `/apps/v1` and the confirm page on the platform's host: it serves
-nothing else (no sign-in or owner page), and setup there is for Payables agents only.
+`payout`, and for Treasury `treasury`, `treasury-execute` and the separate `treasury-orders` (see treasury-app).
+The staging and production platform API hosts are headless: use `/apps/v1` and the confirm page, not owner sign-in
+or `/gw/me`. The checked-in staging config permits setup for Treasury, Payables and market agents; production
+currently permits Payables only. Build and test with the SDK repository's local stack
+(`pnpm test:e2e:stack --app <deployment>`). `app.capabilities()` reads the authenticated host's advertised app
+routes; a capability grants neither owner consent nor provider support.
 
 The local stack serves HTTPS with its own self-signed certificate, written to `<stack dir>/environment/localhost.crt`
 (the stack prints `<stack dir>/state.json` when ready). Trust that certificate only, never turn verification off. In

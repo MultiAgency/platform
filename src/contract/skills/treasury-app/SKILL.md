@@ -200,6 +200,11 @@ revokes the grant: under a consent the DAO votes later, an app can turn autopilo
 
 ## Resting limit orders (0.5.7 candidate, offline-tested)
 
+Read `app.capabilities()` with the app server's service credential and offer order controls only when it advertises
+`treasury-limit-orders-v1` and a distinct owner consent carries both `treasury` and `treasury-orders`. The headless
+platform host has no `/gw/me`; a capability advertises its app route, not consent, an active agent release, or
+deployed provider support. Keep the credential on the app server.
+
 Use `treasury-orders` only when the owner wants to sign **each exact order**. The provider SDK 0.8.2 interprets
 `quantity` as atomic base units and `price` as human quote units per whole base unit. Provide an explicit deadline
 between one minute and seven days ahead, and an owner approval expiry no later than that deadline. A dry

@@ -169,7 +169,8 @@ function call(port: number, path: string, method = "GET", token?: string, body?:
 async function routeHarness(t: import("node:test").TestContext) {
   const cwd = process.cwd(), dir = mkdtempSync(join(tmpdir(), "app-routes-")); process.chdir(dir);
   const state = { providerId: "provider-id" as string | null, dao: false, keys: (async () => "FullAccess") as KeyStateLookup,
-    setup: undefined as HostedSetup | undefined, agentDown: false, stopping: false, reply: { status: 200, body: '{"json":{"ok":true}}' } };
+    setup: undefined as HostedSetup | undefined, setupAreas: [] as string[], agentDown: false, stopping: false,
+    reply: { status: 200, body: '{"json":{"ok":true}}' } };
   const forwarded: { headers: Record<string, unknown>; path: string; body: string }[] = [];
   const upstream = createServer((req, res) => { let body = ""; req.on("data", chunk => body += chunk); req.on("end", () => {
     forwarded.push({ headers: req.headers, path: req.url!, body }); res.writeHead(state.reply.status, { "content-type": "application/json" }); res.end(state.reply.body);
@@ -179,7 +180,8 @@ async function routeHarness(t: import("node:test").TestContext) {
   const server = createServer(async (req, res) => { try {
     if (await confirmRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, confirms, APP_ROOT, [agent], dir, () => state.stopping)) return;
     if (!await appRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, [agent], () => state.stopping,
-      { keyState: (account, key) => state.keys(account, key), nonceSecret: "c".repeat(32), ...(state.setup && { setup: state.setup }) })) { res.writeHead(404); res.end("{}"); }
+      { keyState: (account, key) => state.keys(account, key), nonceSecret: "c".repeat(32), setupAreas: state.setupAreas,
+        ...(state.setup && { setup: state.setup }) })) { res.writeHead(404); res.end("{}"); }
   } catch (e) { sendFailure(res, e); } });
   const port = await listen(server);
   t.after(async () => { await close(server); await close(upstream); process.chdir(cwd); rmSync(dir, { recursive: true, force: true }); });
@@ -202,6 +204,28 @@ async function routeHarness(t: import("node:test").TestContext) {
 
 /** A refusal's status, `code` and `access`, which an app decides by. */
 const denial = (answer: { status: number; body: { code?: string; access?: string } }) => [answer.status, answer.body.code, answer.body.access];
+
+test("authenticated app capability discovery names only available host route groups", async t => {
+  const { port, state, agent, staging, production } = await routeHarness(t);
+  const path = "/apps/v1/capabilities";
+  assert.equal((await call(port, path)).status, 401);
+  assert.equal((await call(port, path, "GET", staging, undefined, { origin: "https://app.test" })).status, 403);
+  assert.equal((await call(port, path, "GET", staging, undefined, { cookie: "session=1" })).status, 403);
+  assert.equal((await call(port, path, "POST", staging, {})).status, 405);
+  const initial = await call(port, path, "GET", staging);
+  assert.deepEqual([initial.status, initial.body], [200, { capabilities: [] }]);
+  const client = appClient({ base: `http://127.0.0.1:${port}`, credential: staging, fetch: httpFetch });
+  assert.deepEqual(await client.capabilities(), { ok: true, value: { capabilities: [] } });
+  state.setupAreas.push("treasury");
+  assert.deepEqual((await call(port, path, "GET", staging)).body, { capabilities: ["treasury-limit-orders-v1"] });
+  assert.deepEqual(await client.capabilities(), { ok: true, value: { capabilities: ["treasury-limit-orders-v1"] } });
+  state.setupAreas.length = 0;
+  Object.assign(agent, { area: "treasury", deployment: "staging", organization: "org_1" });
+  assert.deepEqual((await call(port, path, "GET", staging)).body, { capabilities: ["treasury-limit-orders-v1"] });
+  assert.deepEqual((await call(port, path, "GET", production)).body, { capabilities: [] }, "another deployment sees no agent-derived capability");
+  const malformed = appClient({ base: "https://platform.test", credential: staging, fetch: async () => Response.json({ capabilities: [1] }) });
+  assert.deepEqual(await malformed.capabilities(), { ok: false, kind: "unavailable", httpStatus: 200 });
+});
 
 test("the app route needs the deployment's credential and a live owner consent, re-checks ownership, and forwards only reads", async t => {
   const { port, state, forwarded, agent, staging, production, rpc, consent } = await routeHarness(t);

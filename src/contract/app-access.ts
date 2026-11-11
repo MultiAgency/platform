@@ -122,6 +122,8 @@ export const daoScopesCover = (scopes: readonly AppScope[], path: string) =>
 /** `GET /apps/v1/agents/<agent>`: what the owner's consent must name. */
 export const appAgent = z.looseObject({ agent: z.string(), owner: z.string(), agentId: z.string().nullable(), created: z.boolean(),
   host: z.string(), deployment: z.string(), signer: AppSigner.optional() });
+/** `GET /apps/v1/capabilities`: app routes this host can serve, before consent or provider checks. */
+export const appCapabilities = z.looseObject({ capabilities: z.array(z.string()) });
 /** A stored consent as the platform shows it: never its message, nonce or signature. Times are epoch milliseconds. */
 export const appConsentView = z.looseObject({ id: z.string(), deployment: z.string(), host: z.string(), organization: z.string(),
   owner: z.string(), agent: z.string(), agentId: z.string(), scopes: z.array(AppScope), expiresAt: z.number(), createdAt: z.number(),

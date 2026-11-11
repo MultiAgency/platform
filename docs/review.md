@@ -58,8 +58,10 @@ The canonical list is the README's [Not done yet](../README.md#not-done-yet). Th
 The tagged 0.5.6 SDK uses provider SDK 0.8.2, with policy evidence compatibility tested for `limit_order` and unchanged
 refusal/idempotency behavior. A later, separate Treasury limit-order feature is in progress with local order routes,
 owner signatures, a dedicated app consent and offline recovery tests; it is not part of that tag. No live order was
-placed by this platform, the Treasury app consumer is unfinished, and production provider support was absent in a
-read-only check. Native signing remains out of scope. See [limit orders](limit-orders.md) and
+placed by this platform. The Treasury app consumer is implemented and tested in a separate, uncommitted checkout against
+a provisional SDK package; its headless-host capability discovery, final package integration and release checks remain.
+Production provider support was absent
+in a read-only check. Native signing remains out of scope. See [limit orders](limit-orders.md) and
 [provider SDK upgrade](provider-sdk-082.md).
 
 ## Checking it yourself

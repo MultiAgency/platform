@@ -9,7 +9,7 @@ import { proposalSignature } from "./treasury-proposals.js";
  */
 // Asset identifiers become part of the owner's signed text; control characters could disguise a line.
 const asset = z.string().min(1).max(256).regex(/^[\x21-\x7e]+$/);
-const positiveAtomic = z.string().regex(/^[0-9]{1,65}$/).refine(value => /[1-9]/.test(value), "Amount must be positive");
+const positiveAtomic = z.string().regex(/^[1-9][0-9]{0,64}$/, "Amount must be a positive atomic integer");
 const positiveDecimal = z.string().max(40).regex(/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/)
   .refine(value => /[1-9]/.test(value), "Price must be positive");
 const deadline = z.iso.datetime().refine(value => Date.parse(value) > Date.now(), "Deadline must be in the future");
