@@ -13,6 +13,7 @@ import { MARKET_USDC, market } from "./e2e/market.mjs";
 const sim = await market({ agents: {
   writer: { amount: "500000", windowSeconds: 600, outcome: "complete", result: "the article" },
   refuser: { amount: "500000", windowSeconds: 600, outcome: "reject" },
+  closed: { amount: "500000", windowSeconds: 600, outcome: "closed" },
 } });
 const secretKey = generateKey().secretKey;
 const KEY = Buffer.from(parseKey(secretKey).publicKey.data).toString("hex");
@@ -282,3 +283,17 @@ test("a hire exactly at the full ceiling can use retained funds plus a shortfall
   assert.deepEqual(withdrawals.map(w => w.amount), ["250000"]);
   assert.equal(sim.chain.accounts.get(KEY)!.transfers.length, 1);
 });
+
+// #66: an agent the market doesn't list, or one not taking calls, is refused with a code, never `unavailable`, which
+// tells an app to send the same call again.
+test("a quote for an unlisted agent, or one not taking calls, is refused with a code and sends nothing", async () => {
+  const code = (error: unknown) => (error as { data?: { code?: string } }).data?.code;
+  await assert.rejects(quoteHire({ handle: "nosuchagent", brief: BRIEF }), (error: unknown) => code(error) === "agent_not_found");
+  await assert.rejects(quoteHire({ handle: "closed", brief: BRIEF }), (error: unknown) => code(error) === "agent_not_hireable");
+  sim.register(KEY);
+  const approved = { ...(await quoteHire({ handle: "writer", brief: BRIEF })), handle: "nosuchagent" };
+  await assert.rejects(hire(APP, { requestId: "h-gone", brief: BRIEF, approved }), (error: unknown) => code(error) === "agent_not_found");
+  assert.equal(withdrawals.length, 0);
+  assert.equal(readOps().length, 0);
+});
+

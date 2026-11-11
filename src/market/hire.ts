@@ -14,7 +14,7 @@ import { hireText, type marketApproveInput } from "../contract/market.js";
 import type { z } from "zod";
 import { refreshOperation } from "../recover.js";
 import { requestKey } from "../payout-requests.js";
-import { challenge, getTask, message, payees, TERMINAL } from "./client.js";
+import { challenge, getTask, MarketRpcError, message, payees, TERMINAL } from "./client.js";
 import { latestTasks, recordTask } from "./evidence.js";
 import { paymentKey } from "./payment-key.js";
 import { readChainView } from "./resolution.js";
@@ -43,10 +43,27 @@ function checkBrief(brief: string) {
 }
 
 /** The terms an owner or a DAO approves: the agent's price and window, paid to the payee the market publishes. Moves nothing. */
+/**
+ * The unpaid call's challenge, or a refusal an app shouldn't send again (#66). Per the market's x402-caller skill 0.2.0:
+ * `-32001`, no such listed agent; `-32004`, not taking calls or no active price; `-32602`, a request the market refuses
+ * (paying one's own agent, say). Nothing was sent. Only `-32603` (no reachable backend, "retry in a few minutes") and
+ * transport failures stay retryable.
+ */
+async function challengeOf(handle: string, params: ReturnType<typeof message>) {
+  try { return await challenge(handle, params); }
+  catch (error) {
+    if (!(error instanceof MarketRpcError)) throw error;
+    if (error.code === -32001) throw refused("agent_not_found", `${handle} isn't a listed agent on the market. Nothing was sent.`);
+    if (error.code === -32004) throw refused("agent_not_hireable", `${handle} isn't taking calls, or has no price. Nothing was sent.`);
+    if (error.code === -32602) throw refused("quote_refused", `The market refused this request (${error.message}). Nothing was sent.`);
+    throw error;
+  }
+}
+
 export async function quoteHire(input: { handle: string; brief: string }): Promise<HireTerms> {
   checkBrief(input.brief);
   const quote = quoteTerms({ handle: input.handle, brief: input.brief, maxWindowSeconds: MAX_WINDOW_SECONDS,
-    challenge: await challenge(input.handle, message(crypto.randomUUID(), input.brief)), payees: await payees() });
+    challenge: await challengeOf(input.handle, message(crypto.randomUUID(), input.brief)), payees: await payees() });
   if ("refused" in quote) throw refused(quote.refused.code, `${quote.refused.message}. Nothing was sent.`);
   return quote.terms;
 }
@@ -132,7 +149,7 @@ export async function hire(actor: string | undefined, input: HireInput, approval
       // The quote as it stands now: a price, payee or window that changed since approval is refused before anything moves.
       const messageId = crypto.randomUUID();
       const quote = quoteTerms({ handle: input.approved.handle, brief: input.brief, maxWindowSeconds: MAX_WINDOW_SECONDS,
-        challenge: await challenge(input.approved.handle, message(messageId, input.brief)), payees: await payees() });
+        challenge: await challengeOf(input.approved.handle, message(messageId, input.brief)), payees: await payees() });
       if ("refused" in quote) throw refused(quote.refused.code, `${quote.refused.message}. Nothing was sent.`);
       if (!sameTerms(input.approved, quote.terms)) throw refused("quote_changed", "The agent's terms changed since they were approved. Nothing was sent.");
       // The owner registers the key on USDC once (user decision, 2026-11-09): a withdrawal to an unregistered account fails.

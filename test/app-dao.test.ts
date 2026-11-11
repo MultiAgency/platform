@@ -1252,3 +1252,40 @@ test("a DAO sets up a market agent by vote on a host that sets them up, and crea
   assert.throws(() => checkHostedCreation(owner, "dao", "market", { HOSTED_OWNER: DAO, HOSTED_OWNER_KIND: "dao", TREASURY_ACCOUNT: DAO, DASHBOARD_AREA: "treasury" }));
   assert.doesNotThrow(() => checkHostedCreation(owner, "dao", "market", { HOSTED_OWNER: DAO, HOSTED_OWNER_KIND: "dao", TREASURY_ACCOUNT: DAO, DASHBOARD_AREA: "market" }));
 });
+
+// #67 (user, 2026-11-11): a DAO's `market` consent covers its market agent's own `market` grant, its revocation, freeze,
+// unfreeze and cap edits, each still a proposal the DAO votes on; nothing that changes what the agent is, and nothing
+// on an agent that isn't a market agent.
+test("a DAO's market consent prepares its market agent's grant, freeze and cap edits, and nothing else", async t => {
+  const { port, state, staging, file, vote } = await harness(t);
+  state.setupAreas = ["treasury", "market"];
+  const setup = await call(port, "/apps/v1/dao-setups", "POST", staging, { message: setupMessage({ host: HOST, deployment: "staging", organization: "org_1",
+    owner: DAO, area: "market", expiresAt: later(3) }) });
+  vote(setup.body.request.hash);
+  state.providerId = null;
+  assert.equal((await call(port, `/apps/v1/dao-setups/${setup.body.request.hash}`, "GET", staging)).body.state, "reserved");
+  state.signature = null;
+  state.providerId = "provider-id";
+  const consented = async (agent: string, scopes: string[]) => {
+    const { request } = (await file({ agent, scopes })).body;
+    vote(request.hash);
+    assert.equal((await call(port, `/apps/v1/dao-consents/${request.hash}`, "GET", staging)).body.state, "signed", `${agent} ${scopes}`);
+    state.signature = null;
+  };
+  await consented("own-dao", ["read", "market"]);
+  state.replies["/rpc/owner/prepare"] = { status: 200, json: { correlationId: "c-1", preview: { summary: "x" }, expiresAt: later(0.007), digest: null,
+    dao: { owner: "x", transaction: { receiverId: "v1.signer", actions: [] }, proposal: null, proposalAndVote: null } } };
+  const prepare = (agent: string, action: object) => call(port, `/apps/v1/o/org_1/a/${agent}/rpc/owner/prepare`, "POST", staging, { json: { action, signer: "dao" } });
+  const reviewed = { revision: 1, digest: `sha256:${"0".repeat(64)}` };
+  for (const action of [{ type: "grant_issue", label: "market" }, { type: "grant_revoke", grantId: "g-1" }, { type: "agent_freeze" }, { type: "agent_unfreeze" },
+    { type: "policy_update", expectedPolicy: reviewed, changes: { limits: { per_transaction: {} } } },
+    { type: "policy_update", expectedPolicy: reviewed, changes: { budget: { daily_usd: "100", weekly_usd: null, monthly_usd: "500" }, max_actions_per_hour: 20 } }])
+    assert.equal((await prepare("own-dao", action)).status, 200, JSON.stringify(action));
+  for (const action of [{ type: "grant_issue", label: "treasury" }, { type: "policy_update", expectedPolicy: reviewed, changes: { withdrawals: [{ address: "x.near" }] } },
+    { type: "policy_update", expectedPolicy: reviewed, changes: { limits: { per_transaction: {} }, assets: ["nep141:wrap.near"] } },
+    { type: "policy_update", expectedPolicy: reviewed, changes: { owner_approval: false } }])
+    assert.equal((await prepare("own-dao", action)).status, 403, `market doesn't cover ${JSON.stringify(action)}`);
+  // The same consent scope on a Treasury agent covers none of it.
+  await consented("treasury", ["read", "market"]);
+  assert.equal((await prepare("treasury", { type: "agent_freeze" })).status, 403, "market covers a market agent's owner actions only");
+});

@@ -139,6 +139,26 @@ export function appMayAskDao(action: { type: string; label?: string; owner?: unk
 }
 export type AppDaoAction = Of<"agent_freeze"> | Of<"agent_unfreeze"> | (Of<"grant_issue"> & { label: "treasury" | "market" }) | Of<"grant_revoke"> | Of<"policy_update">
   | { type: "agent_create"; role?: "treasury" | "market" };
+/**
+ * The policy fields a DAO's `market` consent may ask the DAO to change on its market agent: its caps only (user,
+ * 2026-11-11). A cap can't move money by itself: every hire is paid only after the DAO's vote on its exact terms, and a
+ * top-up only to the payment key, by what an approved hire lacks. Destinations, assets, actions and owner approval
+ * would change what the agent is, and stay under `treasury`.
+ */
+export const DAO_MARKET_POLICY_FIELDS = ["limits", "budget", "max_actions_per_hour"] as const;
+/**
+ * Whether a DAO's `market` consent covers preparing this owner action on its market agent (#67): the `market` grant and
+ * its revocation, freeze and unfreeze, and a policy edit of `DAO_MARKET_POLICY_FIELDS` only. Each is still a proposal
+ * the DAO votes on.
+ */
+export function daoMarketMayAsk(action: { type: string; label?: string; changes?: object }) {
+  if (action.type === "grant_issue") return action.label === "market";
+  if (action.type === "grant_revoke" || action.type === "agent_freeze" || action.type === "agent_unfreeze") return true;
+  if (action.type !== "policy_update") return false;
+  // A field sent as undefined leaves the policy's field as it is (owner-requests.ts), so it isn't a change.
+  const fields = Object.entries(action.changes ?? {}).filter(([, value]) => value !== undefined).map(([field]) => field);
+  return fields.length > 0 && fields.every(field => (DAO_MARKET_POLICY_FIELDS as readonly string[]).includes(field));
+}
 /** The areas a DAO may set up a hosted agent for through an app: Treasury, and a market agent whose hires it votes on (user, 2026-11-09). */
 export const DAO_SETUP_AREAS = ["treasury", "market"] as const;
 
