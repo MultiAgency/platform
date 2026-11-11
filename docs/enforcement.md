@@ -229,10 +229,11 @@ are covered in the Treasury app's `test/browser/strategy.cjs`; they are not depl
 
 ## Recovery limitation
 
-**Provider SDK 0.8.2 (0.5.6 candidate, 2026-11-10).** The dependency and lockfile pin 0.8.2 exactly. Official SDK source
-`416597b0c63a426b225b98b6d175c03bfb6a7947` adds limit-order methods and signed 1Click quote inputs for native EVM/Solana
-sign-intent; the platform exposes neither feature. Policy reads/previews accept the provider's `limit_order` action
-and price-deviation setting without changing its signed policy or dropping that evidence during unrelated edits.
+**Provider SDK 0.8.2 (introduced in SDK 0.5.6, 2026-11-10).** The dependency and lockfile pin 0.8.2 exactly.
+Official SDK source `416597b0c63a426b225b98b6d175c03bfb6a7947` adds limit-order methods and signed 1Click
+quote inputs for native EVM/Solana sign-intent. The tagged 0.5.6 and 0.5.7 platform releases expose neither
+feature; the unreleased 0.5.8 path adds limit orders only. Policy reads/previews accept the provider's `limit_order`
+action and price-deviation setting without changing its signed policy or dropping that evidence during unrelated edits.
 The transport and existing money methods remain compatible in offline tests. A lost reply still makes one transport
 attempt with the original idempotency key. New documented errors, including `invalid_address` at 409 and limit-order
 price errors, do not become proven non-execution automatically: attempted sends remain unresolved under the existing

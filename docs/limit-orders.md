@@ -139,10 +139,10 @@ partial fills and payouts, deduplicated unchanged reads, and rejection of mismat
 provider and do not establish live provider behavior. Gateway tests also cover DAO vote receipts, lost relay replies,
 concurrent polls, credential revocation during filing, and malformed successful responses. Missing local order files
 block later sends and agent release in offline faults; recovery still polls unrelated unknown operations before
-surfacing the missing evidence. Earlier platform offline, typecheck, evidence, candidate and Bun consumer checks passed
-on a pre-version commit; they do not validate the final SDK 0.5.8 tree. A fresh candidate and Bun check from that
-final commit are still required. The separate Treasury checkout reports offline and browser checks against its
-provisional package; it still needs the rebuilt SDK package. No cross-repository end-to-end order flow has been run.
+surfacing the missing evidence. A source-frozen platform candidate and Bun consumer check on the final commit are
+release gates; [PR #78](https://github.com/MultiAgency/platform/pull/78) identifies the latest completed run. The
+separate Treasury checkout reports offline and browser checks against its provisional package; it still needs the
+rebuilt SDK package. No cross-repository end-to-end order flow has been run.
 Live placement, cancellation, payout behavior, the production route, and the deployed provider's policy enforcement
 remain unverified. Native EVM/Solana `sign-intent` is a separate design with different protections and is not enabled
 by this order path.
