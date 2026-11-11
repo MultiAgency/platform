@@ -209,6 +209,11 @@ Each line is a gap; the linked page says how the rest is known. The
   revised or submission-attempted invoices and doesn't resolve unknown outcomes.
 - The local duplicate check covers only a manual payout matching a held one, and a payout request may opt out of it
   (`allowDuplicateHeld`, 0.5.5); provider replay deduplication is unverified.
+- The books count a shield from its history row's `amount_out`. No hosted agent's history shows a shield (staging,
+  2026-11-11), so that row's shape is unobserved: the stack's simulated shield row carries what the books read, and a
+  real one that differs leaves the shielded amount unattributed. A deposit's asset is proven on chain (a NEP-141 transfer
+  event, or a successful `ft_transfer` call of the deposited amount, to the deposit address); one proven neither way is
+  left unattributed.
 - The auto-execute ceiling compares exact decimal sums; raw-amount conversion, valuations and the plan-preview total
   still use floating point. Provider caps and the USD budget are unaffected.
 

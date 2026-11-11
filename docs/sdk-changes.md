@@ -26,6 +26,20 @@ platform-only fixes are listed separately.
   (a provider `FAILED` isn't proof nothing moved); a refund doesn't. The confirm page shows it beside the terms. It refuses
   nothing. Optional, so older apps ignore it. Offline-, browser- and stack-tested.
 
+Platform changes in this release, outside the package:
+- **The books attribute a wNEAR deposit** (staging, 2026-11-11): a deposit's asset was proven only by a NEP-141
+  `ft_transfer` event to the deposit address, and wrap.near logs none, so a staging agent's 3 wNEAR deposit (wrapped and
+  sent in one transaction, 2026-11-06) read as unattributed in `reconcileBooks`. A successful `ft_transfer` call of the
+  deposited amount to the deposit address now proves it too (not `ft_transfer_call`, whose receiver can return the
+  tokens), and either proof must agree with the asset the API's request names, or the deposit stays unattributed.
+  Offline-tested against the observed transaction's receipts (`test/ledger.test.ts`); after deploy, that agent's wNEAR
+  should read 0 unattributed.
+- **The stack's simulated provider has a real agent's rows**: its starting and later funds as deposits (with the
+  token's transfer on the stack's one chain), each swap's provider request with its amounts in `evidence` and its
+  audit events, and shields in `/history`, each shaped as observed on staging except the shield row (none observed).
+  A funded, shielded and swapped stack agent reconciles to zero (`test/e2e/stack-app.spec.mjs`), read through the new
+  `reconcileBooks` stack control.
+
 ## 0.5.7 (2026-11-11)
 
 - **A DAO's `market` consent covers its market agent's own owner actions** (platform#67; the user's decision,

@@ -293,7 +293,9 @@ a sweep shields), `setPrice` (`asset`, a positive decimal USD `price`: a listed 
 valuation), `setTargets` (`targetBps` and any other strategy fields: the owner signs in with the fixture key and
 saves `portfolio`'s strategy through `strategy/save`, which turns autopilot off; answers the strategy and its digest),
 `authorizeStrategy` (the owner signs, with the fixture key and through its own route, a grant bound to the saved
-strategy, which an app's or a machine credential's plans need; answers the digest it binds), `signOwner`
+strategy, which an app's or a machine credential's plans need; answers the digest it binds), `reconcileBooks` (the owner
+reads `portfolio`'s books through its own route: each balance against the provider's rows, which a machine credential's
+read scope doesn't reach), `signOwner`
 (`message`, `recipient`, `nonce`: the owner's NEP-413 signature from the fixture key, standing in for the wallet an app
 asks; never the platform sign-in text), `signPayee` (`account`, one of the stack's `--payee` or `--builder` accounts, and `message`,
 `recipient`, `nonce`: that payee's NEP-413 signature over an app's own text, likewise), `signOwnerDelegate` (`receiverId`, `actions`: the owner's NEP-366 signature over a
