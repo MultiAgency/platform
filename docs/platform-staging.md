@@ -198,7 +198,15 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 - what the provider answers for a DAO-owned hosted agent
 
 **Before starting**
-- **Staging runs 0.5.6's `platform` package (commit `f7caad4`, #61).** Since 2026-11-10 (checked at 22:38Z): candidate
+- **Staging runs 0.5.7's `platform` package (commit `cc90604`, #77).** Since 2026-11-11 (deployed 13:45Z, checked at
+  15:57Z): candidate `23e51842`, Railway deployment `70b2f02e`, package manifest `sha256:b7c36778…` (created 13:40:52Z),
+  with `deploy/platform-staging.json`; the image digest isn't recorded. It brings the 0.5.7 changes listed in
+  [SDK changes](sdk-changes.md), among them a DAO's `market` consent covering its market agent's owner actions, one
+  requestId per DAO hire, the signed-call request budget and per-Organization fair share (#59), one owner action of a
+  kind at a time, and the cash floor in `overview`. The platform smoke checks passed (18 of 18), and its confirm page's
+  6 assets were each fetched and byte-equal to the package's. Nothing on it has been exercised yet beyond those
+  read-only checks.
+- **Before that, 0.5.6's `platform` package (commit `f7caad4`, #61).** Since 2026-11-10 (checked at 22:38Z): candidate
   `36a66cb4`, Railway deployment `ffcb4120`, image `sha256:d5201b74…` (base `node:24.22.0-slim`), with
   `deploy/platform-staging.json`. It brings the 0.5.6 changes listed in [SDK changes](sdk-changes.md), among them market
   hires, recoverable hosted-agent release and the provider SDK 0.8.2. The platform smoke checks passed (18 of 18), and its
