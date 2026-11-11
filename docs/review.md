@@ -49,6 +49,8 @@ The canonical list is the README's [Not done yet](../README.md#not-done-yet). Th
 - Payables still carries its own copy of the money path, so a fix here doesn't reach it.
 - One executor per agent is a single-host lease, not distributed fencing.
 - A provider `FAILED` status is treated as terminal; it isn't verified to make a replacement payment safe.
+- A second payout of an invoice already paid, under a new `requestId`, reaches the owner's vote as a new payout; only the
+  app deriving the `requestId` from its own records, or the owner, stops it ([crash test](crash-test.md)).
 - A proposal's approval is the platform's check, not the provider's: whoever holds the treasury grant can swap within
   the policy without it.
 - The autopilot hasn't run unattended for days on mainnet.

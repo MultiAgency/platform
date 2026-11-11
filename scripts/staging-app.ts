@@ -423,7 +423,7 @@ var runs = {
     return daoOwner({ type: "policy_update", expectedPolicy: { revision: overview.value.policy.revision, digest: overview.value.digest }, changes: changes });
   },
   /**
-   * An on-chain policy edit: USDC's hourly limit. `limits` replaces the policy's limits whole, so every other limit is sent
+   * An on-chain policy edit: USDC's hourly limit. "limits" replaces the policy's limits whole, so every other limit is sent
    * as it stands. A delegate action, 600 s to pass.
    */
   daoLimit: async function () {

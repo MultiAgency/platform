@@ -10,7 +10,7 @@ metadata:
   purpose: 'An app server''s access to agents: credential, consents, relayed owner actions, and payout requests by requestId with recovery by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.5.7'
+  library_version: '0.5.8'
 requires:
   - getting-started
   - owner-workflows
@@ -265,6 +265,12 @@ Write the `requestId` (1–64 of `[A-Za-z0-9_-]`) and the exact terms to your da
 one request at most once per deployment, Organization, agent and `requestId`. Never send the same payout under a new `requestId` until
 the first is `refused`, `failed` with `neverExecuted: true`, or `failed` and checked by a person.
 
+Derive the `requestId`, payee and amount in your code from your own record of what is owed (an order, an agreement, an
+invoice you accepted), never from what a model or an incoming message proposes. A model that may call `payouts/request` names
+which obligation to pay; your code supplies the terms. A text that says a payment failed, is pending, or must be sent again
+under a new `requestId` then leads only to asking again under the same one, which sends nothing new. Without this, models
+told so in tool results sent a second payment under a new `requestId` (crash test, 2026-11-10/11, simulated provider).
+
 ```ts
 import { appClient } from "@multiagency/sdk";
 
@@ -437,6 +443,8 @@ code, expire an approval and end a payout `FAILED` or `REFUNDED` (docs/testing.m
   can send payouts without another signature. An app asks only for consent and setup texts.
 - **Sending the credential to a browser** (CRITICAL): whoever holds it acts within every consent the deployment holds.
 - **A new requestId after `unknown`** (CRITICAL): the first may have been sent. Read `payouts/status`.
+- **Letting a model choose the `requestId`, payee or amount** (CRITICAL): a lie in what it reads becomes a second or wrong
+  payment. Your code derives them from your own record of the obligation.
 - **Treating `rate_limited` as a refusal or as `unknown`** (HIGH): the app credential's hourly request limit (1,200 by
   default, set by the operator, shared by every owner and Organization of the deployment) refused the call before anything happened. Send the same call again after `retryAfterSeconds`; don't
   tell an owner they lack access, and don't cache it as an answer.

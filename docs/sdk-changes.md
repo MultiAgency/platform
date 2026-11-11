@@ -14,6 +14,12 @@ platform-only fixes are listed separately.
 
 ## 0.5.8 (unreleased)
 
+- **The `app-server` skill says to derive a payout's `requestId`, payee and amount in code** (docs): from the app's own
+  record of what is owed, never from what a model or an incoming message proposes, and lists a model choosing them as a
+  critical mistake. In the [crash test](crash-test.md), models given the SDK call without the skill sent a second payment
+  under a new `requestId` when a tool result said the first had failed or was pending (14 of 46 runs, simulated provider).
+  No API change.
+
 Platform changes in this release, outside the package:
 - **The books attribute a wNEAR deposit** (staging, 2026-11-11): a deposit's asset was proven only by a NEP-141
   `ft_transfer` event to the deposit address, and wrap.near logs none, so a staging agent's 3 wNEAR deposit (wrapped and
@@ -65,6 +71,7 @@ Platform changes in this release, outside the package:
   parses. Offline-tested (`test/provider-display.test.ts`).
 - **Docs:** the app-server skill says how a DAO hire filing shortens `validUntil` (the earliest of the request, the
   consent's expiry and `MAX_HIRE_APPROVAL_MS`) and that the answer carries the date the DAO votes on (platform#70).
+
 
 Platform changes in this release, outside the package:
 - **The local stack's simulated provider describes a market grant as one** ("Authorize the local market hires", where it
