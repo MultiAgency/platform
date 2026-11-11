@@ -31,9 +31,13 @@ platform-only fixes are listed separately.
   `cancelMayResume` is true only when the platform's matching claim and journal prove no cancellation POST began;
   otherwise the app reads status and never repeats the POST. Order views also include digests of saved approval or
   rejection signatures so a DAO vote relay can reconcile a lost HTTP answer without signing or sending again. This
-  feature is absent from the tagged 0.5.7 package. Its platform path has offline tests; Treasury app
-  integration with the final package and live order lifecycle checks remain release gates. See
-  [limit orders](limit-orders.md).
+  feature is absent from the tagged 0.5.7 package. Its platform path has offline tests. Treasury app
+  [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11), observed at signed commit `4793aea` on
+  2026-11-11, tested the prior SDK candidate from `8b2da58`
+  (SHA-256 `8559e5fb37a576ea1a99924d0bfc7223aee2e8965b8ea4a3b24cb1d8530def50`): 929/929 offline tests
+  and 90/90 browser scenarios. This change note ships inside the package, so a later SDK commit requires a new
+  candidate and final-package app retest. App release, hosted route and live order lifecycle checks remain open.
+  See [limit orders](limit-orders.md).
 - **App host capability discovery** (addition): `appClient.capabilities()` reads the authenticated
   `GET /apps/v1/capabilities` route, including `treasury-limit-orders-v1` when the host can serve Treasury order routes.
   It grants no consent and does not verify an active agent release or provider support. Headless `/gw/me` remains absent.
