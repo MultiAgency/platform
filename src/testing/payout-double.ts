@@ -176,7 +176,8 @@ export const payoutDouble: PayoutDoubleFactory = (options = {}) => {
     const answered = await handler.handle(call, { prefix });
     if (answered.matched) return answered.response;
     unmodelled.push(procedure);
-    return json(501, { error: `payoutDouble doesn't model ${procedure}` });
+    // Refused before anything, with a code, as the gateway refuses: never a 5xx the client reads as "send again" (#69).
+    return json(400, { error: `payoutDouble doesn't model ${procedure}`, code: "not_modelled" });
   };
 
   const find = (requestId: string) => {

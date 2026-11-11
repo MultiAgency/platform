@@ -26,6 +26,20 @@ platform-only fixes are listed separately.
   (the market's `-32001`), `agent_not_hireable` (`-32004`) or `quote_refused` (`-32602`). Before, `market/quote`
   answered `unavailable`, which tells an app to send the call again, and `market/hire` answered `refused` with
   `hire_failed`. Any other market error answers as before. Nothing is sent. Offline-tested (`test/market-hire.test.ts`).
+- **A prepare refused because an owner action is open says so** (addition, platform#70): a hosted agent's creation
+  asked for while one is still open is refused `code: "owner_action_open"` (was an uncoded refusal); find the open one
+  with `owner/pending`. Another owner action preparing a delegate at that moment answers `busy` (was an uncoded
+  refusal), so retry shortly. Offline-tested (`test/owner-action-open.test.ts`).
+- **`payoutDouble` refuses what it doesn't model** (platform#69): an unmodelled procedure, `market/*` among them, is
+  refused with `code: "not_modelled"` (was HTTP 501, which the client read as `unavailable` or `unknown`, telling a test
+  to send it again). `double.unmodelled()` still lists them. Offline-tested (`test/payout-double.test.ts`).
+- **One requestId, one DAO hire** (platform#70): `daoHires.file` for a `requestId` already filed with the same terms
+  answers that request (200, both `transactions` null, no new proposal) while it is relayed, signed or still within its
+  vote; with other terms it is refused `request_conflict`, a new `AppGatewayCode` (**Breaking for exhaustive switches**).
+  Before, each filing made a new proposal, even for a hire
+  already paid (passing it moved nothing). One that lapsed unsigned is filed anew. Offline-tested (`test/app-dao.test.ts`).
+- **Docs:** the app-server skill says how a DAO hire filing shortens `validUntil` (the earliest of the request, the
+  consent's expiry and `MAX_HIRE_APPROVAL_MS`) and that the answer carries the date the DAO votes on (platform#70).
 
 Platform changes in this release, outside the package:
 - **The local stack's simulated provider describes a market grant as one** ("Authorize the local market hires", where it

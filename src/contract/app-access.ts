@@ -255,5 +255,6 @@ export const appConsentNonce = z.looseObject({ nonce: z.string(), issuedAt: z.nu
 export const APP_GATEWAY_CODES = ["invalid_request", "not_found", "signature_invalid", "browser", "dao_owned", "not_dao", "confirm_page",
   "not_created", "already_created", "agent_changed", "owner_changed", "consent_ended", "consent_revoked", "no_consent", "scope", "setup_key",
   "signed_expired", "vote_lapsed", "dao_stopped", "owner_stopped", "not_owner", "not_allowed", "setup_unavailable", "access_ended", "proposal_unanswered",
-  "proposal_not_open", "expires_too_soon", "setup_failed", "agent_refused", "too_many_consents", "dao_requests_limited", "brief_mismatch", "agent_released"] as const;
+  "proposal_not_open", "expires_too_soon", "setup_failed", "agent_refused", "too_many_consents", "dao_requests_limited", "brief_mismatch", "agent_released",
+  "request_conflict"] as const;
 export type AppGatewayCode = (typeof APP_GATEWAY_CODES)[number];

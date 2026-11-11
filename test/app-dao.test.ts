@@ -1206,6 +1206,9 @@ test("a DAO approves a market hire from the platform's own text, and the platfor
   assert.match(pending.description, /Approve market hire h-1/);
   assert.match(pending.description, /Hire writer\.market\.near\.ai for 0\.5 USDC, paid over x402/);
   assert.equal(filed.body.transactions.proposal.receiverId, DAO);
+  // Filed again while its vote is open: the same request, and no second proposal for the DAO to vote on (#70).
+  const pendingAgain = await ask();
+  assert.deepEqual([pendingAgain.status, pendingAgain.body.request.hash, pendingAgain.body.transactions], [200, pending.hash, { proposal: null, proposalAndVote: null }]);
 
   state.replies["/rpc/market/approve"] = { status: 200, json: { requestId: "h-1", state: "paid", code: null, taskId: "t-1", taskState: "TASK_STATE_COMPLETED" } };
   const stateOf = () => call(port, `/apps/v1/dao-hires/${pending.hash}`, "GET", staging);
@@ -1225,6 +1228,11 @@ test("a DAO approves a market hire from the platform's own text, and the platfor
   assert.match(sent.signed.message, /^Approve market hire h-1\n/);
   assert.equal((await stateOf()).body.state, "relayed");
   assert.equal(forwarded.length, before + 1, "relayed once");
+  // A paid hire's requestId: the same terms answer the paid request; other terms are refused, and nothing is filed (#70).
+  const paidAgain = await ask();
+  assert.deepEqual([paidAgain.status, paidAgain.body.request.hash, paidAgain.body.transactions], [200, pending.hash, { proposal: null, proposalAndVote: null }]);
+  const other = await ask({ approved: { ...approved, amount: "600000" } });
+  assert.deepEqual([other.status, other.body.code], [409, "request_conflict"]);
   assert.equal((await call(port, `/apps/v1/dao-hires/${pending.hash}`, "GET", production)).status, 404);
 });
 

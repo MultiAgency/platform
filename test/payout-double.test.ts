@@ -244,8 +244,11 @@ test("the double's held list and overview read as the platform's schemas, and it
   assert.deepEqual(await calls.call("held"), { ok: true, value: [] }, "once voted, the held list reads the provider and drops it");
   assert.deepEqual(double.requests().map(r => [r.requestId, r.status, r.providerStatus]), [["r-1", "PROCESSING", "PROCESSING"]]);
 
-  assert.deepEqual(await calls.call("deposit"), { ok: false, kind: "unknown", procedure: "deposit", identity: {}, httpStatus: 501 });
-  assert.deepEqual(double.unmodelled(), ["deposit"]);
+  // A procedure the double doesn't model is a coded refusal, never `unknown` or `unavailable`, which would tell a test to send it again (#69).
+  assert.deepEqual(await calls.call("deposit"), { ok: false, kind: "refused", status: 400, error: "payoutDouble doesn't model deposit", code: "not_modelled" });
+  assert.deepEqual(await calls.call("market/quote", { handle: "writer", brief: "x" }),
+    { ok: false, kind: "refused", status: 400, error: "payoutDouble doesn't model market/quote", code: "not_modelled" });
+  assert.deepEqual(double.unmodelled(), ["deposit", "market/quote"]);
   const stranger = appClient({ base: double.base, credential: "tap_other", fetch: double.fetch });
   assert.deepEqual(await stranger.agent("org_1", "payout").call("held"), { ok: false, kind: "session", status: 401, error: "The app credential is invalid, expired or revoked", source: "gateway" });
   const reader = payoutDouble({ scopes: ["read"] });
