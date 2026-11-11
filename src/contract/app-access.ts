@@ -195,9 +195,11 @@ export const appDaoVoteState = z.discriminatedUnion("state", [
 export const appDaoHireRequest = z.looseObject({ id: z.string(), dao: z.string(), organization: z.string(), agent: z.string(),
   agentId: z.string(), requestId: z.string(), approved: z.looseObject({}), validUntil: z.string(), votingUntil: z.number(), hash: z.string(), description: z.string() });
 export const appDaoHireFiled = z.looseObject({ request: appDaoHireRequest,
-  transactions: z.looseObject({ proposal: memberTransaction.nullable(), proposalAndVote: memberTransaction.nullable() }) });
+  transactions: z.looseObject({ proposal: memberTransaction.nullable(), proposalAndVote: memberTransaction.nullable() }),
+  /** A repeated filing carries no proposal unless the caller explicitly opts into recovery after checking the DAO. */
+  repeated: z.boolean().optional() });
 export const appDaoHireState = z.discriminatedUnion("state", [
-  z.looseObject({ state: z.literal("pending"), request: appDaoHireRequest }),
+  z.looseObject({ state: z.literal("pending"), request: appDaoHireRequest, hireState: z.enum(["funding", "funding_review"]).optional() }),
   z.looseObject({ state: z.literal("relayed"), request: appDaoHireRequest, hireState: z.string() }),
 ]);
 /**
@@ -251,10 +253,13 @@ export const appConsentNonce = z.looseObject({ nonce: z.string(), issuedAt: z.nu
  * - `setup_failed`: the agent couldn't be set up (the message says why).
  * - `agent_refused`: the agent refused the DAO's signed verdict while its proposal is open; reading the vote again
  *   relays the same signature, so it may succeed once the agent's state allows it.
+ * - `agent_answer_unverified`: a DAO hire relay returned no valid recorded hire state; reading again keeps its
+ *   signed approval available for the same request instead of marking it relayed.
+ * - `request_conflict`: this DAO hire request ID already names different terms; use a new ID for new work.
  */
 export const APP_GATEWAY_CODES = ["invalid_request", "not_found", "signature_invalid", "browser", "dao_owned", "not_dao", "confirm_page",
   "not_created", "already_created", "agent_changed", "owner_changed", "consent_ended", "consent_revoked", "no_consent", "scope", "setup_key",
   "signed_expired", "vote_lapsed", "dao_stopped", "owner_stopped", "not_owner", "not_allowed", "setup_unavailable", "access_ended", "proposal_unanswered",
   "proposal_not_open", "expires_too_soon", "setup_failed", "agent_refused", "too_many_consents", "dao_requests_limited", "brief_mismatch", "agent_released",
-  "request_conflict"] as const;
+  "request_conflict", "agent_answer_unverified"] as const;
 export type AppGatewayCode = (typeof APP_GATEWAY_CODES)[number];

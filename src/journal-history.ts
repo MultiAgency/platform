@@ -15,6 +15,15 @@ const safeAgent = z.string().regex(/^[a-zA-Z0-9_-]{1,200}$/, "Invalid agent ID")
 const request = z.object({ request: z.record(z.string(), z.unknown()), kind: id, method: z.enum(OPERATION_METHODS).optional(), planId: id.optional() });
 const UNEXPORTED = new Set<string>(["withdraw", "x402"]);
 const projectable = (method: string | undefined): JournalRecord["method"] => method && UNEXPORTED.has(method) ? undefined : method as JournalRecord["method"];
+// The public record format has no market-binding or landing record. Recognize only their isolated v3 envelopes;
+// report the omission explicitly, without exporting private terms or treating either payload as settlement evidence.
+// This observational reader does not validate the payload's journal relationships or destination proof.
+const marketMetadata = z.union([
+  z.strictObject({ at: z.string().min(1), idempotencyKey: id, kind: z.literal("market-binding"), journalVersion: z.literal(3),
+    binding: z.record(z.string(), z.unknown()) }),
+  z.strictObject({ at: z.string().min(1), idempotencyKey: id, kind: z.literal("market-landing"), journalVersion: z.literal(3),
+    marketLanding: z.record(z.string(), z.unknown()) }),
+]);
 
 /** Pure parsing of a bounded, agent-scoped journal snapshot. Never return raw input in errors. */
 export function parseJournalHistory(agentId: string, source: string): JournalHistory {
@@ -30,6 +39,12 @@ export function parseJournalHistory(agentId: string, source: string): JournalHis
       const raw = JSON.parse(lines[index]!);
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error();
       const idempotencyKey = id.parse(raw.idempotencyKey);
+      if (raw.journalVersion === 3 || raw.kind === "market-binding" || raw.kind === "market-landing" ||
+          "binding" in raw || "marketLanding" in raw) {
+        const metadata = marketMetadata.parse(raw);
+        gaps.push({ code: "market_metadata_not_exported", line, ref: metadata.kind });
+        continue;
+      }
       const tags = ["request", "submissionState", "correlation_id", "refused"].filter((key) => key in raw);
       // Historical authorization snapshots are metadata the fold skips: neither a record nor a gap.
       if (!tags.length && "authorization" in raw) continue;

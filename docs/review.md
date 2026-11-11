@@ -55,7 +55,7 @@ The canonical list is the README's [Not done yet](../README.md#not-done-yet). Th
   the policy without it.
 - The autopilot hasn't run unattended for days on mainnet.
 
-The 0.5.6 candidate uses provider SDK 0.8.2, with policy evidence compatibility tested for `limit_order` and unchanged
+The 0.5.6 release uses provider SDK 0.8.2, with policy evidence compatibility tested for `limit_order` and unchanged
 refusal/idempotency behavior. This adds no order execution or native signing route. The dependency review uses pinned
 public source and official skills; the deployed provider version remains unverified. See
 [provider SDK upgrade](provider-sdk-082.md).
@@ -71,7 +71,7 @@ public source and official skills; the deployed provider version remains unverif
   on request.
 
 
-The 0.5.6 [hosted-agent release candidate](agent-release.md) has offline/stack checks of archive/restore relaying,
+The 0.5.6 [hosted-agent release](agent-release.md) has offline/stack checks of archive/restore relaying,
 executor refusal, capacity recovery, consent termination, retained identity, child shutdown, registry crash points and
 an older registry reader. External archive/restore behaviour is per pinned provider docs; no platform mainnet release
 is recorded. An incomplete transition needs recovery before rollback; DAO release remains unavailable.
@@ -81,3 +81,16 @@ funds, before funding and again before signing (`test/market-hire.test.ts`, `tes
 Cumulative caps and budgets still account for provider withdrawals. Downgrade below 0.5.6 is unsupported after shared
 market records exist: the previous reader rejects a market reservation and prevents the whole gateway starting,
 including Treasury and Payables (`test/market-rollback.test.ts`). See [market](market.md#rollback) and [operations](operations.md).
+
+The unreleased 0.5.8 market funding-binding candidate records the caller, request ID, approved terms and payment key
+before a top-up. Deterministic funding stages and final destination-receipt checks keep an unproved or still-owned
+credit reserved to its hire (`test/market-binding-journal.test.ts`, `test/market-funding-proof.test.ts`; the 0.5.8
+candidate passed the full offline suite, browser checks and narrow stack E2E on 2026-11-11). The full E2E suite with
+the Treasury skill fixture was not run. The public journal-history export reports version 3 binding and landing
+metadata as `market_metadata_not_exported` gaps, without exposing its private payload or treating it as payment
+evidence (`test/journal-history.test.ts`, offline-tested). A 0.5.6 reader rejects the first version 3 journal line
+(`test/market-binding-rollback.test.ts`); the released 0.5.7 reader uses the same journal version. Submitted 0.5.6 or
+0.5.7 top-ups cannot be retroactively bound and block new hires on
+their old key. No supported fresh-key recovery or automatic clearance exists yet; hashless or unavailable receipt
+evidence also needs reviewed recovery. This candidate is not ready for a market-agent rollout. See
+[market](market.md#rollback) and [operations](operations.md).

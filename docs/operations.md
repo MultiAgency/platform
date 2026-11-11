@@ -46,8 +46,10 @@ open proposals wait unexecuted). Builds before 0.5.3 kept every agent's proposal
 the hosted agents of one host. From 0.5.3 those stay where they are, never moved: each agent reads its own there (by the
 agent id each records) and writes their approval and final record beside them, and writes new proposals in its own
 directory. A market agent's settings file also holds its payment key, `MARKET_PAYMENT_KEY` ([agent market](market.md)),
-written once at reservation: it may hold USDC or an outstanding payment authorization, so never delete, replace or
-regenerate it, and keep it as secret as the grant token beside it. Rolling back to a build before 0.5.3 reads the older proposals as before, but not the newer ones: those wait
+written once at reservation: it may hold USDC or an outstanding payment authorization, so never delete or regenerate
+the existing key during recovery, and keep it as secret as the grant token beside it. A separately reviewed fresh-key
+recovery must preserve the old key and records. Rolling back to a build before 0.5.3 reads the older proposals as
+before, but not the newer ones: those wait
 unexecuted, and a `requestId` an app sends again then makes a new proposal there, which needs the owner's approval
 again. Rolling forward, an agent's own directory wins over such a duplicate. Stop writers before copying state; never start the destination before stopping the
 source. The lease coordinates processes on one host only.
@@ -332,6 +334,36 @@ canonical list and every instance settings file, including payment keys, and rec
 build. Do not delete entries, strip new fields/scopes or restore older shared state to force a downgrade. No downgrade
 conversion has been tested; one needs a separate compatibility review and a state-preserving procedure.
 
+The unreleased 0.5.8 market funding binding adds version 3 lines to the same `.ops/<agent>.jsonl`: a durable request
+binding before any top-up and a landing marker only after an exact destination receipt is final and included in a later final
+chain view. A 0.5.6 reader rejects a journal with either line (`test/market-binding-rollback.test.ts`), and the
+released 0.5.7 reader uses the same journal version. After the first version 3 line, recover that market executor on
+a compatible 0.5.8-or-later build. Do not remove or rewrite the lines to force a downgrade.
+The original bond for a DAO hire proposal is in a private `.app-access/dao-requests/<hash>.proposal-bond` sidecar
+written before its request JSON. Keep it in the full state backup. The released 0.5.7 gateway ignores the sidecar and
+can read the strict request JSON; a lost filing answer can be reconstructed from the sidecar by the 0.5.8 gateway.
+Before starting a 0.5.8 market executor, stop all executors sharing its state and inspect every legacy 0.5.6 or 0.5.7
+`market-topup` line, which did not bind a requestId. Reconcile its provider correlation and status, on-chain credit,
+retained payment-key balance and any outstanding x402 payment. A submitted legacy unbound top-up makes the new
+executor refuse further hires and sends to that key with `legacy_funding_review_required`, even if the provider
+calls the top-up terminal; a new binding cannot retrospectively prove it. Back up the full canonical state list
+above and all instance settings, including the old key, together. New hires require a separately designed and
+reviewed procedure to provision an isolated fresh key after the old funds and any pending payment are accounted for.
+No supported fresh-key recovery route, automatic rotation, clearance, migration or state-preserving downgrade
+conversion exists.
+Rollout remains held until the stopped-writer audit establishes which market keys have submitted 0.5.6 or 0.5.7
+unbound top-ups and pending x402 payments, and confirms that the provider route supplies a destination transaction
+with a final receipt the executor can verify. Any affected key needs a separate reviewed recovery design.
+For new top-ups, provider `SUCCESS` without an independently verified final destination receipt does not release the
+key-wide reservation. Even after proof, landed funds remain reserved to the original request until its x402 payment
+is recorded or the binding is terminally closed; an expired DAO approval needs a fresh vote with the same ID and
+terms. A final verified USDC shortfall closes that binding with `funding_shortfall` but retains the credit for
+operator inspection before a new request. A hashless route, failed/refunded provider result, fee shortfall, or delayed
+reconciliation after ordinary RPC loses receipt history can require reviewed recovery with archival evidence. Preserve the
+binding, stage operation and settings; do not infer that no funds moved from a terminal provider status or that a
+balance increase belongs to a specific stage. A locally proven never-submitted or refused stage closes its binding's
+reservation; a provider `FAILED` or `REFUNDED` after submission does not.
+
 **Deploy on Railway** (`Dockerfile.payouts`, selected by `railway.json`, one replica, one executor host per agent):
 
 1. Move the payout executor and its persistent state together. Any other instance of this agent, such
@@ -521,7 +553,7 @@ automatically. Separate Agent API reads and the ten-second status diagnostic ret
 bounds. Public history still cannot establish confidential settlement or authorize a replay.
 
 
-## Hosted-agent release (0.5.6 candidate)
+## Hosted-agent release (0.5.6)
 
 Preserve `.hosted/released.json`, every `.hosted/<name>.env` including `RELEASED_AT`, `RELEASED_ARCHIVE`, grant tokens
 and market payment keys, and both `registry.json` and `apps.json`, alongside every state directory listed above.

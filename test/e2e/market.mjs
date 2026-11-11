@@ -14,6 +14,11 @@ import { listen } from './provider.mjs';
 
 export const MARKET_USDC = '17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1';
 export const MARKET_PAYEE = 'ea667f5f496e60033bf8075cce4793efdeba28d74d116ef95848324347f539fc';
+const MARKET_USDC_ASSET = `nep141:${MARKET_USDC}`;
+const WNEAR_ASSET = 'nep141:wrap.near';
+const FUNDING_SIGNER = 'bridge.near';
+const FUNDING_PUBLIC_KEY = 'ed25519:11111111111111111111111111111111';
+const hash = () => createHash('sha256').update(randomUUID()).digest('hex').replaceAll('0', '1');
 
 /** How many blocks the market's view of the chain trails the final block. */
 const MARKET_LAG_BLOCKS = 2n;
@@ -33,8 +38,9 @@ const read = req => new Promise((resolve, reject) => {
  * `payee`: override the 402's payTo or asset (a market answering for someone else).
  */
 export async function market({ agents = {}, payee = {}, height = 1_000_000n } = {}) {
-  const chain = { height, accounts: new Map(), registered: new Set() };
+  const chain = { height, accounts: new Map(), registered: new Set(), funding: new Map() };
   const tasks = new Map(), headers = new Set(), calls = [];
+  let mismatchNextReceipt = false;
   // Keys in the order mainnet sends them (2026-11-09): `accepted` must repeat the row exactly, so a client that reorders
   // it fails here as it would there.
   const row = handle => ({ amount: agents[handle].amount, asset: payee.asset ?? MARKET_USDC, maxTimeoutSeconds: agents[handle].windowSeconds + 600,
@@ -43,6 +49,60 @@ export async function market({ agents = {}, payee = {}, height = 1_000_000n } = 
     if (!chain.accounts.has(id)) chain.accounts.set(id, { nonce: null, publicKey: null, balance: 0n, transfers: [] });
     return chain.accounts.get(id);
   };
+
+  /** A simulated final chain credit, separate from the provider's successful withdrawal status. */
+  function fundWithdrawal({ recipient, asset, amount }) {
+    if (asset !== WNEAR_ASSET && asset !== MARKET_USDC_ASSET) throw new Error(`Unsupported market funding asset: ${asset}`);
+    const destinationTxHash = hash(), blockHash = hash(), receiptId = hash();
+    const receiptRecipient = mismatchNextReceipt ? 'other.near' : recipient;
+    mismatchNextReceipt = false;
+    const native = asset === WNEAR_ASSET;
+    const receiverId = native ? receiptRecipient : MARKET_USDC;
+    const actions = native
+      ? [{ CreateAccount: {} }, { Transfer: { deposit: amount } }]
+      : [{ FunctionCall: { method_name: 'ft_transfer', args: Buffer.from(JSON.stringify({ receiver_id: receiptRecipient, amount })).toString('base64'),
+        gas: 30_000_000_000_000, deposit: '1' } }];
+    const logs = native ? [] : [`EVENT_JSON:${JSON.stringify({ standard: 'nep141', version: '1.0.0', event: 'ft_transfer',
+      data: [{ old_owner_id: FUNDING_SIGNER, new_owner_id: receiptRecipient, amount }] })}`];
+    const outcome = (id, executorId, status, receiptIds, eventLogs = []) => ({ id, block_hash: blockHash, proof: [],
+      outcome: { logs: eventLogs, receipt_ids: receiptIds, gas_burnt: 0, tokens_burnt: '0', executor_id: executorId, status } });
+    const transaction = { signer_id: FUNDING_SIGNER, public_key: FUNDING_PUBLIC_KEY, nonce: chain.funding.size + 1,
+      receiver_id: receiverId, actions, signature: 'ed25519:simulated', hash: destinationTxHash };
+    const receipt = { predecessor_id: FUNDING_SIGNER, receiver_id: receiverId, receipt_id: receiptId,
+      receipt: { Action: { signer_id: FUNDING_SIGNER, signer_public_key: FUNDING_PUBLIC_KEY, gas_price: '0',
+        output_data_receivers: [], input_data_ids: [], actions } } };
+    const status = { final_execution_status: 'FINAL', status: { SuccessValue: '' }, transaction,
+      transaction_outcome: outcome(destinationTxHash, FUNDING_SIGNER, { SuccessReceiptId: receiptId }, [receiptId]),
+      receipts: [receipt], receipts_outcome: [outcome(receiptId, receiverId, { SuccessValue: '' }, [], logs)] };
+    chain.height += 1n;
+    chain.funding.set(destinationTxHash, { signer: FUNDING_SIGNER, blockHash, height: chain.height, status });
+    // A deliberately mismatched receipt still credits the key in this simulator. It must never satisfy proof.
+    const holder = account(recipient);
+    holder.nonce ??= 0n;
+    if (!native) holder.balance += BigInt(amount);
+    return { amountOut: amount, destinationTxHash };
+  }
+
+  /** The provider's shared RPC and FastNEAR fixtures read only these synthetic final withdrawals. */
+  function proofRequest({ id, method, params }) {
+    if (method === 'EXPERIMENTAL_tx_status') {
+      const tx = chain.funding.get(params?.tx_hash);
+      if (!tx || params.sender_account_id !== tx.signer || params.wait_until !== 'FINAL') return null;
+      return { jsonrpc: '2.0', id, result: tx.status };
+    }
+    if (method !== 'block') return null;
+    const tx = [...chain.funding.values()].find(item => item.blockHash === params?.block_id);
+    if (!tx) return null;
+    const blockHash = tx.blockHash;
+    const header = { height: Number(tx.height), epoch_id: blockHash, next_epoch_id: blockHash, hash: blockHash,
+      prev_hash: blockHash, prev_state_root: blockHash, chunk_receipts_root: blockHash, chunk_headers_root: blockHash,
+      chunk_tx_root: blockHash, outcome_root: blockHash, chunks_included: 0, challenges_root: blockHash,
+      timestamp: 0, timestamp_nanosec: '0', random_value: blockHash, validator_proposals: [], chunk_mask: [],
+      gas_price: '0', total_supply: '0', challenges_result: [], last_final_block: blockHash,
+      last_ds_final_block: blockHash, next_bp_hash: blockHash, block_merkle_root: blockHash,
+      approvals: [], signature: 'ed25519:simulated', latest_protocol_version: 1 };
+    return { jsonrpc: '2.0', id, result: { author: 'validator.near', header, chunks: [] } };
+  }
 
   /** Applies a signed delegate action as the chain would: once, before its expiry, with a fresh nonce and the funds. */
   function relay(signedDelegateAction) {
@@ -171,7 +231,11 @@ export async function market({ agents = {}, payee = {}, height = 1_000_000n } = 
   }
   const port = await listen(server);
   return {
-    chainRequest,
+    chainRequest, proofRequest,
+    indexedFunding(hash) {
+      const tx = chain.funding.get(hash);
+      return tx ? { transaction: { hash, signer_id: tx.signer } } : null;
+    },
     url: `http://127.0.0.1:${port}`,
     rpc: `http://127.0.0.1:${port}/chain`,
     calls, tasks, chain,
@@ -181,6 +245,8 @@ export async function market({ agents = {}, payee = {}, height = 1_000_000n } = 
       holder.nonce ??= 0n;
       holder.balance += BigInt(amount);
     },
+    fundWithdrawal,
+    mismatchNextFundingReceipt() { mismatchNextReceipt = true; },
     advance(blocks) { chain.height += BigInt(blocks); },
     /** The owner's one-time registration of an account on USDC (storage_deposit). */
     register(accountId) { chain.registered.add(accountId); },

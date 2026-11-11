@@ -21,6 +21,7 @@ links to them instead of copying schemas. Skills grant no authority.
 
 ## Coverage and batch history
 
+- 2026-11-11, version 0.5.8 (unreleased): app-server explains bound market funding states, same-ID DAO vote renewal, and explicit proposal recovery only after checking the DAO. It also says payout identities and terms come from the app's own records, never model output. The other four skills advance their library version with the package. The packed consumer check validates and runs their examples against stand-ins.
 - 2026-10-18, version 1.6.0, first batch: the three skills above. Checked by typechecking and running every example against the packed tarball in an isolated consumer (`scripts/verify-skills.mjs`), and by `intent validate` inside the packed package.
 - 2026-10-18, version 0.0.1 (the 1.6.0 batch, renumbered when the package versioning reset): getting-started names the wire constants to compare against (`supplier-*-v1` capability ids, `PAYEE_ROLE`); examples unchanged.
 - 2026-10-19, version 0.1.0: version only. The release's changes (shared payouts, required `approvedAmount`, retryable local refusals) are owner compensation procedures, which these skills don't cover; examples unchanged.

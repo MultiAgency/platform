@@ -13,7 +13,8 @@ Object.assign(process.env, { MARKET_URL: sim.url, NEAR_RPC_URL: sim.rpc, AGENT_G
 const { api } = await import("../src/api.js");
 const { dispatch } = await import("../src/agent.js");
 const { acquireMoneyLock, stopSending, resumeSendingForTests } = await import("../src/lock.js");
-const { readOps } = await import("../src/ops.js");
+const { readOps, recordMarketBinding } = await import("../src/ops.js");
+const { requestKey } = await import("../src/request-key.js");
 const { ASSETS, marketPolicy } = await import("../src/policy.js");
 const { challenge, message, payees } = await import("../src/market/client.js");
 const { readChainView } = await import("../src/market/resolution.js");
@@ -53,6 +54,10 @@ for (const fault of faults) test(`x402 signing followed by ${fault.name} never c
     asset: ASSETS.USDC, amount: quote.terms.amount, payer: account, publicKey, nonce: (view.keyNonce! + 1n).toString(),
     maxBlockHeight: paymentExpiry(view.height, quote.terms).toString(), balanceAtSigning: view.balance.toString() } };
   const lock = await acquireMoneyLock();
+  const requestId = crypto.randomUUID();
+  const bindingKey = requestKey("app:test:org", requestId);
+  recordMarketBinding({ idempotencyKey: bindingKey, actor: "app:test:org", requestId,
+    brief, approved: quote.terms, paymentAccount: account, publicKey });
   const delegate = TransactionBuilder.prototype.delegate;
   let signedCount = 0;
   t.mock.method(TransactionBuilder.prototype, "delegate", async function(this: TransactionBuilder, ...args: Parameters<typeof delegate>) {
@@ -63,7 +68,8 @@ for (const fault of faults) test(`x402 signing followed by ${fault.name} never c
   });
   const callsBefore = sim.calls.filter(c => c.payment !== null).length;
   try {
-    await assert.rejects(dispatch(lock, "market-hire", action, undefined, undefined, undefined, undefined, undefined, { hire: quote.terms }));
+    await assert.rejects(dispatch(lock, "market-hire", action, undefined, undefined, undefined, bindingKey, undefined,
+      { hire: quote.terms, bindingKey }));
     assert.equal(signedCount, 1, "the fault is injected only after the real signer completed");
     assert.equal(sim.calls.filter(c => c.payment !== null).length, callsBefore, "the signed header must never be sent");
     assert.equal(sim.chain.accounts.get(account)!.transfers.length, 0);

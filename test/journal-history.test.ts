@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseJournalHistory, readJournalHistory } from "../src/journal-history.js";
 import { JournalHistorySchema } from "../src/contract/run-log-schema.js";
+import { briefDigest } from "../src/market/x402.js";
+import { requestKey } from "../src/request-key.js";
 
 const row = { at: "2026-01-01T00:00:00Z", idempotencyKey: "k", correlation_id: "op", status: "SENT" };
 test("raw reader preserves line order, duplicates and source gaps without exposing raw payloads", () => {
@@ -45,7 +47,7 @@ test("line limits and unsupported record shapes remain explicit gaps", () => {
   assert.equal(parseJournalHistory("agent", JSON.stringify({ idempotencyKey: "k", submissionState: "other" })).gaps[0]?.code, "malformed_line");
 });
 
-test("every line shape the journal reader folds projects as a record, never a malformed gap", () => {
+test("every legacy or v2 operation line shape projects without a malformed gap", () => {
   const at = "2026-01-01T00:00:00Z";
   const source = [
     { at, idempotencyKey: "w", kind: "payout", request: {}, method: "withdraw", journalVersion: 2 },
@@ -65,6 +67,50 @@ test("every line shape the journal reader folds projects as a record, never a ma
     { line: 3, idempotencyKey: "n", type: "status", correlationId: "op-n", status: undefined, method: undefined },
     { line: 5, idempotencyKey: "x", type: "request", correlationId: undefined, status: undefined, method: undefined },
   ]);
+});
+
+const marketKey = requestKey("app:fixture:acme", "hire-1");
+const marketBinding = {
+  at: "2026-11-11T00:00:00Z", idempotencyKey: marketKey, kind: "market-binding", journalVersion: 3,
+  binding: { actor: "app:fixture:acme", requestId: "hire-1", brief: "Private market brief",
+    approved: { handle: "writer", brief: briefDigest("Private market brief"), network: "near:mainnet",
+      asset: "a".repeat(64), payTo: "private-payee.near", amount: "500000", maxTimeoutSeconds: 900 },
+    paymentAccount: "private-payment.near", publicKey: `ed25519:${"A".repeat(43)}` },
+};
+const marketLanding = {
+  at: "2026-11-11T00:00:01Z", idempotencyKey: marketKey, kind: "market-landing", journalVersion: 3,
+  marketLanding: { stage: "usdc", correlationId: "funding-op", destinationTxHash: "private-destination-hash", finalHeight: "123" },
+};
+
+test("v3 market metadata remains an explicit export gap without becoming payment evidence or corrupting adjacent history", () => {
+  const source = [marketBinding, { ...row, idempotencyKey: `${marketKey}:market-usdc` }, marketLanding]
+    .map(line => JSON.stringify(line)).join("\n");
+  const history = parseJournalHistory("agent", source);
+  assert.deepEqual(history.gaps, [
+    { code: "market_metadata_not_exported", line: 1, ref: "market-binding" },
+    { code: "market_metadata_not_exported", line: 3, ref: "market-landing" },
+  ]);
+  assert.deepEqual(history.records.map(({ line, type, status }) => ({ line, type, status })), [
+    { line: 2, type: "status", status: "SENT" },
+  ], "a binding or landing is neither an operation request nor a payment status");
+  assert.doesNotThrow(() => JournalHistorySchema.parse(history), "the public record schema remains compatible");
+  assert.doesNotMatch(JSON.stringify(history), /Private market brief|private-payee|private-payment|private-destination-hash/);
+});
+
+for (const [name, line] of Object.entries({
+  "unknown version": { ...marketBinding, journalVersion: 4 },
+  "missing binding": { ...marketBinding, binding: undefined },
+  "non-object binding": { ...marketBinding, binding: [] },
+  "mixed payment": { ...marketBinding, request: {} },
+  "mixed submission": { ...marketLanding, submissionState: "SUBMISSION_ATTEMPTED" },
+  "mixed outcome": { ...marketLanding, correlation_id: "funding-op", status: "SUCCESS" },
+  "mixed refusal": { ...marketLanding, refused: "never_submitted" },
+  "mixed metadata": { ...marketBinding, authorization: { version: 1 } },
+  "both metadata kinds": { ...marketBinding, marketLanding: marketLanding.marketLanding },
+})) test(`invalid v3 market metadata (${name}) stays a malformed gap`, () => {
+  assert.deepEqual(parseJournalHistory("agent", JSON.stringify(line)), {
+    agentId: "agent", records: [], gaps: [{ code: "malformed_line", line: 1 }],
+  });
 });
 
 test("legacy lines that each project two records stay within the record limit and say so", () => {

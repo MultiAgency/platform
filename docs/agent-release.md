@@ -1,4 +1,4 @@
-# Releasing a hosted agent (0.5.6 candidate)
+# Releasing a hosted agent (0.5.6 released)
 
 Built and tested offline with simulated provider, chain and wallet evidence. No archive, restore or hosted release has
 been observed on mainnet through this platform. Provider behaviour below is per Agent API skills at `0b81bba6` (read 2026-11-10)

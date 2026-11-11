@@ -4,11 +4,18 @@ import { z } from "zod";
 import { AgentApiError } from "@near-intents-agent-api/sdk";
 import { agentId } from "./env.js";
 import { OPERATION_METHODS } from "./contract/owner-outputs.js";
+import { hireTerms, marketBrief, payoutRequestId } from "./contract/inputs.js";
 import { appendSynced, mkdirSynced } from "./synced.js";
 import { claimInvoiceSubmission, invoiceOperations, recordInvoiceOperation, type PaymentState } from "./invoice-store.js";
 import { isTerminal } from "./operation-status.js";
+import { requestKey } from "./request-key.js";
+import { briefDigest, OPEN_ACCOUNT_WNEAR, PaymentRow, sameTerms, termsOf, type X402Request } from "./market/x402.js";
+import { ASSETS } from "./policy.js";
+import type { HireTerms } from "./market/x402.js";
 
 export { isTerminal };
+
+const nonempty = z.string().min(1);
 
 /**
  * The append-only log of one agent's money actions, `.ops/<agent id>.jsonl`. A request line is
@@ -58,6 +65,54 @@ export type Op = Context & {
   refused?: string;
 };
 
+/** A market hire is bound before funding. These records are not money operations. */
+export type MarketStage = "open" | "usdc";
+export type MarketLanding = { correlationId: string; destinationTxHash: string; finalHeight: string };
+export type MarketBinding = {
+  at: string;
+  idempotencyKey: string;
+  actor: string;
+  requestId: string;
+  brief: string;
+  approved: HireTerms;
+  paymentAccount: string;
+  publicKey: string;
+  landed: Partial<Record<MarketStage, MarketLanding>>;
+  /** Terminal refusal written with the final USDC landing when delivered funds cannot cover the hire. */
+  refused?: "funding_shortfall";
+};
+
+const boundX402Request = z.object({
+  handle: nonempty, brief: marketBrief, messageId: nonempty, row: PaymentRow,
+  asset: nonempty, amount: z.string().regex(/^[1-9][0-9]*$/),
+  payer: nonempty, publicKey: nonempty, nonce: z.string().regex(/^[1-9][0-9]*$/),
+  maxBlockHeight: z.string().regex(/^[1-9][0-9]*$/), balanceAtSigning: z.string().regex(/^[0-9]+$/),
+});
+
+function matchesBoundPayment(binding: MarketBinding, line: { kind: string; method?: Method; journalVersion?: 2;
+  request: Record<string, unknown> }): boolean {
+  if (line.kind !== "market-hire" || line.method !== "x402" || line.journalVersion !== 2) return false;
+  const request = boundX402Request.safeParse(line.request);
+  if (!request.success || request.data.brief !== binding.brief || request.data.payer !== binding.paymentAccount ||
+      request.data.publicKey !== binding.publicKey || request.data.row.scheme !== "exact" ||
+      request.data.asset !== `nep141:${request.data.row.asset}` || request.data.amount !== request.data.row.amount) return false;
+  return sameTerms(binding.approved, termsOf(request.data as X402Request));
+}
+
+function matchesBoundStage(binding: MarketBinding, stage: MarketStage, line: { kind: string; method?: Method;
+  journalVersion?: 2; request: Record<string, unknown> }): boolean {
+  const asset = stage === "open" ? ASSETS.wNEAR : ASSETS.USDC;
+  return !binding.refused && line.journalVersion === 2 && line.kind === "market-topup" && line.method === "withdraw" &&
+    line.request.asset === asset && line.request.chain === "near" && line.request.recipient === binding.paymentAccount &&
+    line.request.confidential === true && line.request.memo === undefined &&
+    typeof line.request.amount === "string" && /^[1-9][0-9]*$/.test(line.request.amount) &&
+    (stage !== "open" || line.request.amount === OPEN_ACCOUNT_WNEAR) &&
+    (stage !== "usdc" || BigInt(line.request.amount) <= BigInt(binding.approved.amount));
+}
+
+/** Fixed identities ensure a retry follows a recorded funding stage instead of submitting a new withdrawal. */
+export const marketStageKey = (bindingKey: string, stage: MarketStage) => `${bindingKey}:market-${stage}`;
+
 /** Outcome proven: settled terminally, or refused before anything was sent. */
 export const isResolved = (op: Op) => op.refused !== undefined || (op.status !== undefined && isTerminal(op.status));
 
@@ -86,6 +141,20 @@ export function submittedSwapValues(ops: readonly Op[], planId: string): readonl
 }
 
 export function record(line: Line) {
+  if ("request" in line) {
+    const bindings = readMarketBindings();
+    const boundPayment = bindings.find(binding => binding.idempotencyKey === line.idempotencyKey);
+    if (boundPayment && !matchesBoundPayment(boundPayment, line))
+      throw new Error("Market payment differs from its binding");
+    const stage = /^(.*):market-(open|usdc)$/.exec(line.idempotencyKey);
+    if (stage) {
+      const binding = bindings.find(binding => binding.idempotencyKey === stage[1]);
+      if (!binding || !matchesBoundStage(binding, stage[2] as MarketStage, line))
+        throw new Error("Market funding stage differs from its binding");
+    }
+    const binding = boundPayment ?? (stage && bindings.find(binding => binding.idempotencyKey === stage[1]));
+    if (binding?.refused) throw new Error("Market binding is refused; no further operation may be prepared");
+  }
   if ("request" in line && line.journalVersion === 2 && readOps().some((op) => op.idempotencyKey === line.idempotencyKey))
     throw new Error("Operation identity already recorded");
   if ("submissionState" in line) {
@@ -112,7 +181,6 @@ export function settle(correlationId: string, status: string) {
   if (op) record({ idempotencyKey: op.idempotencyKey, correlation_id: correlationId, status });
 }
 
-const nonempty = z.string().min(1);
 const identity = { idempotencyKey: nonempty, at: z.string().optional() };
 // Unknown metadata is ignored. Known lifecycle fields cannot be silently discarded
 // by matching a different record shape.
@@ -125,7 +193,30 @@ const preparationLine = z.object({ ...identity, ...noOutcome, at: z.string(), ki
     policyRevision: z.number().nullable().optional(), policyDigest: z.string().nullable().optional(),
     usdIn: z.number().nullable().optional(), planId: z.string().optional() });
 const outcome = { ...identity, ...noOutcome, request: z.never().optional(), journalVersion: z.never().optional(), authorization: z.never().optional() };
+// A 0.5.7 reader accepts only journalVersion 2 and therefore refuses an agent whose market binding exists.
+// The new reader keeps this intent separate from Op[], so it cannot be retired as a never-submitted money action.
+const marketBindingLine = z.strictObject({
+  at: nonempty, idempotencyKey: nonempty, kind: z.literal("market-binding"), journalVersion: z.literal(3),
+  binding: z.strictObject({ actor: nonempty, requestId: payoutRequestId, brief: marketBrief, approved: hireTerms,
+    paymentAccount: nonempty, publicKey: nonempty }),
+}).superRefine((line, context) => {
+  if (line.idempotencyKey !== requestKey(line.binding.actor, line.binding.requestId))
+    context.addIssue({ code: "custom", message: "binding identity does not match its caller and request ID" });
+  if (briefDigest(line.binding.brief) !== line.binding.approved.brief)
+    context.addIssue({ code: "custom", message: "binding brief does not match its approved digest" });
+});
+const marketLandingLine = z.strictObject({
+  at: nonempty, idempotencyKey: nonempty, kind: z.literal("market-landing"), journalVersion: z.literal(3),
+  marketLanding: z.strictObject({ stage: z.enum(["open", "usdc"]), correlationId: nonempty,
+    destinationTxHash: nonempty, finalHeight: z.string().regex(/^[1-9][0-9]*$/),
+    bindingRefusal: z.literal("funding_shortfall").optional() }),
+}).superRefine((line, context) => {
+  if (line.marketLanding.bindingRefusal && line.marketLanding.stage !== "usdc")
+    context.addIssue({ code: "custom", message: "only a USDC landing may refuse a binding" });
+});
 const journalLine = z.union([
+  marketBindingLine,
+  marketLandingLine,
   preparationLine,
   // Legacy snapshots could combine the request and its observed provider identity.
   preparationLine.extend({ journalVersion: z.never().optional(), correlation_id: nonempty, status: nonempty.optional() }),
@@ -152,10 +243,12 @@ const outgoing = (ops: readonly Op[]) => {
   return out;
 };
 
-export function readOps(): Op[] {
+function readJournal(): { ops: Map<string, Op>; bindings: Map<string, MarketBinding> } {
   const log = opsLog();
   const ops = new Map<string, Op>();
+  const bindings = new Map<string, MarketBinding>();
   const correlations = new Map<string, string>();
+  const landedTransactions = new Set<string>();
   for (const [index, text] of (existsSync(log) ? readFileSync(log, "utf8") : "").split("\n").entries()) {
     if (!text.trim()) continue;
     const invalid = (reason: string): never => { throw new Error(`Invalid operation journal at line ${index + 1}: ${reason}; restore or investigate before sending`); };
@@ -164,7 +257,43 @@ export function readOps(): Op[] {
     const parsed = journalLine.safeParse(raw);
     if (!parsed.success) invalid("unsupported record shape");
     const line = parsed.data!;
+    if ("binding" in line) {
+      if (bindings.has(line.idempotencyKey)) invalid("duplicate market binding");
+      if (ops.has(line.idempotencyKey) || ops.has(marketStageKey(line.idempotencyKey, "open")) ||
+          ops.has(marketStageKey(line.idempotencyKey, "usdc"))) invalid("market binding followed its money operation");
+      bindings.set(line.idempotencyKey, { at: line.at, idempotencyKey: line.idempotencyKey,
+        ...line.binding, landed: {} });
+      continue;
+    }
+    if ("marketLanding" in line) {
+      const binding = bindings.get(line.idempotencyKey);
+      if (!binding) invalid("market landing without binding");
+      const { stage, correlationId, destinationTxHash, finalHeight } = line.marketLanding;
+      if (binding!.refused) invalid("market binding was already refused");
+      if (binding!.landed[stage]) invalid("duplicate market landing");
+      if (landedTransactions.has(destinationTxHash)) invalid("market destination transaction reused for another funding stage");
+      const op = ops.get(marketStageKey(line.idempotencyKey, stage));
+      if (!op || op.kind !== "market-topup" || op.method !== "withdraw" || op.submissionState !== "SUBMISSION_ATTEMPTED" ||
+          op.correlationId !== correlationId || op.status !== "SUCCESS" || op.request.recipient !== binding!.paymentAccount)
+        invalid("market landing has no matching successful submitted top-up");
+      if (line.marketLanding.bindingRefusal && ops.has(line.idempotencyKey))
+        invalid("market binding refusal contradicts payment preparation");
+      binding!.landed[stage] = { correlationId, destinationTxHash, finalHeight };
+      landedTransactions.add(destinationTxHash);
+      if (line.marketLanding.bindingRefusal) binding!.refused = line.marketLanding.bindingRefusal;
+      continue;
+    }
     if (line.request !== undefined) {
+      const stage = /^(.*):market-(open|usdc)$/.exec(line.idempotencyKey);
+      if (stage) {
+        const binding = bindings.get(stage[1]!);
+        if (!binding || !matchesBoundStage(binding, stage[2] as MarketStage, line))
+          invalid("market funding stage differs from its binding");
+      }
+      const bound = bindings.get(line.idempotencyKey);
+      if (bound?.refused) invalid("market binding was refused before payment preparation");
+      if (bound && !matchesBoundPayment(bound, line))
+        invalid("market payment differs from its binding");
       if (ops.has(line.idempotencyKey)) invalid("duplicate preparation");
       ops.set(line.idempotencyKey, { ...line, ...("journalVersion" in line && line.journalVersion === 2 && { submissionState: "PREPARED" as const }) });
       if (line.correlation_id === undefined) continue;
@@ -196,11 +325,62 @@ export function readOps(): Op[] {
       Object.assign(existing, { correlationId: line.correlation_id, status: line.status });
     }
   }
+  return { ops, bindings };
+}
+
+/** Market hire identity is durable from the first top-up, separately from money-operation projection. */
+export function readMarketBindings(): MarketBinding[] {
+  return [...readJournal().bindings.values()].sort((a, b) => a.at.localeCompare(b.at));
+}
+
+/** Every operation in the log, oldest first, folded with outcomes and invoice operations. */
+export function readOps(): Op[] {
+  const { ops } = readJournal();
   for (const op of invoiceOperations()) {
     if (ops.has(op.idempotencyKey)) throw new Error("Operation exists in both stores; reconcile before executing");
     ops.set(op.idempotencyKey, op);
   }
   return [...ops.values()].sort((a, b) => a.at.localeCompare(b.at));
+}
+
+/** Write the exact hire identity before any funding. Caller holds the money lock. */
+export function recordMarketBinding(input: Omit<MarketBinding, "at" | "landed" | "refused">) {
+  const line = { at: new Date().toISOString(), idempotencyKey: input.idempotencyKey, kind: "market-binding" as const,
+    journalVersion: 3 as const, binding: { actor: input.actor, requestId: input.requestId, brief: input.brief,
+      approved: input.approved, paymentAccount: input.paymentAccount, publicKey: input.publicKey } };
+  if (!marketBindingLine.safeParse(line).success) throw new Error("Market binding identity or terms are invalid");
+  if (readMarketBindings().some(binding => binding.idempotencyKey === input.idempotencyKey))
+    throw new Error("Market binding identity already recorded");
+  const prior = readOps();
+  if (prior.some(op => op.idempotencyKey === input.idempotencyKey ||
+      op.idempotencyKey === marketStageKey(input.idempotencyKey, "open") ||
+      op.idempotencyKey === marketStageKey(input.idempotencyKey, "usdc")))
+    throw new Error("Market binding followed its money operation");
+  appendSynced(opsLog(), line);
+}
+
+/** Record only a verified, final destination receipt for this exact submitted funding stage. Caller holds the lock. */
+export function recordMarketLanding(input: { bindingKey: string; stage: MarketStage; correlationId: string;
+  destinationTxHash: string; finalHeight: string; bindingRefusal?: "funding_shortfall" }) {
+  const line = { at: new Date().toISOString(), idempotencyKey: input.bindingKey, kind: "market-landing" as const,
+    journalVersion: 3 as const, marketLanding: { stage: input.stage, correlationId: input.correlationId,
+      destinationTxHash: input.destinationTxHash, finalHeight: input.finalHeight,
+      ...(input.bindingRefusal && { bindingRefusal: input.bindingRefusal }) } };
+  if (!marketLandingLine.safeParse(line).success) throw new Error("Market landing evidence is invalid");
+  const binding = readMarketBindings().find(binding => binding.idempotencyKey === input.bindingKey);
+  if (!binding) throw new Error("Market landing has no binding or stage operation");
+  if (binding.refused) throw new Error("Market binding was already refused");
+  if (binding.landed[input.stage]) throw new Error("Market landing already recorded");
+  if (readMarketBindings().some(item => Object.values(item.landed).some(landing =>
+    landing?.destinationTxHash === input.destinationTxHash)))
+    throw new Error("Market destination transaction already proved another funding stage");
+  if (input.bindingRefusal && readOps().some(op => op.idempotencyKey === input.bindingKey))
+    throw new Error("Market binding refusal contradicts payment preparation");
+  const op = readOps().find(op => op.idempotencyKey === marketStageKey(input.bindingKey, input.stage));
+  if (!op || op.kind !== "market-topup" || op.method !== "withdraw" || op.submissionState !== "SUBMISSION_ATTEMPTED" ||
+      op.correlationId !== input.correlationId || op.status !== "SUCCESS" || op.request.recipient !== binding.paymentAccount)
+    throw new Error("Market landing has no matching submitted successful stage operation or correlation");
+  appendSynced(opsLog(), line);
 }
 
 /** A send or approval this server holds before anything reaches the provider. */

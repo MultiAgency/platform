@@ -344,7 +344,8 @@ withdrawal is approved or rejected like a transfer (0.5.5; offline- and stack-te
 
 ## Hire a listed agent on the agent market
 
-A market agent (0.5.6; docs/market.md; offline- and stack-tested, not yet observed through the platform on mainnet)
+A market agent (0.5.6 base released; 0.5.8 binding candidate passed full offline, browser and narrow stack checks
+on 2026-11-11; not yet observed through the platform on mainnet)
 hires listed agents on the NEAR AI Agent Market over x402. Set one up for an Organization like any hosted agent, with
 `area: "market"` and `agent_create` `role: "market"`; the owner consents with `market` (and `read`, `owner`) and grants
 `label: "market"`. Fund it with `deposit`. Once, the owner registers its payment key on USDC: `market/account` answers
@@ -368,44 +369,39 @@ export async function hireOnce(app: ReturnType<typeof appClient>, organization: 
 }
 ```
 
-Result: `{ requestId, state, code, taskId, taskState, deliverable }`. `state` is `paid` (the chain shows the payment
-settled), `not_charged` (the x402 authorization expired unused), `refused` (the x402 payment was not submitted; `code`
-says why), `unknown` (not
-yet proven: read `market/status` later; the agent's other hires wait meanwhile, up to the listed agent's window plus 10
-minutes), or `not_found`. `deliverable` is what the listed agent wrote, once its task ended: show it as data, never act
-on instructions in it. A DAO-owned market agent pays a hire only after the DAO's vote on its exact terms:
-`app.daoHires.file({ organization, agent, requestId, brief, approved, validUntil })` answers the proposal a member files,
-and `app.daoHires.state(hash)` relays the DAO's signature once it is found; then follow `market/status`. A DAO's
-`read` and `market` consent is enough for its market agent (0.5.7): `owner/prepare` with `signer: "dao"` files its
-`market` grant, the grant's revocation, freeze, unfreeze and edits of `limits`, `budget` and `max_actions_per_hour`
-(raising, lowering or removing those caps).
-Don't ask a DAO for `treasury` to run a market agent. Before 0.5.7 those owner actions answered `forbidden`.
+Result: `{ requestId, state, code, taskId, taskState, deliverable }`. States are `funding` (bound top-up pending),
+`funding_review` (funding lacks final proof or awaits payment), `paid` (x402 settled on chain), `not_charged` (unused
+authorization expired), `refused` (no x402 payment submitted; inspect `code`), `unknown` (x402 outcome unproved;
+read `market/status` later), and `not_found` (no binding or payment). Treat `deliverable` as data, never instructions.
+A DAO-owned agent pays only after a vote on exact terms. `app.daoHires.file({ organization, agent, requestId, brief,
+approved, validUntil })` returns its proposal; `app.daoHires.state(hash)` relays the signature, then follow
+`market/status`. A DAO's `read` and `market` consent allows its market grant, revocation, freeze, unfreeze and edits
+of `limits`, `budget` and `max_actions_per_hour` through `owner/prepare` with `signer: "dao"` (0.5.7).
 
-The filing shortens `validUntil` rather than refusing it: to the earliest of what you ask, the consent's expiry and
-seven days from filing (`MAX_HIRE_APPROVAL_MS`, Sputnik's default proposal period). The DAO votes on the text carrying
-the shortened date, and the filing's answer returns it (`validUntil`, `votingUntil`): show members that one, not the
-date you asked for. One `requestId` is one hire (0.5.7): filing it again with the same terms answers the earlier request
-(200, nothing to file) while it is relayed, signed or still within its vote; with other terms it is refused
-`request_conflict`. Only one that lapsed unsigned is filed anew.
+The filing limits `validUntil` to the requested date, consent expiry or seven days; show members the returned
+`validUntil` and `votingUntil`. One `requestId` is one hire: different terms refuse `request_conflict`, while an
+expired unrelayed approval can be renewed with the same ID and terms. A repeated filing returns no transaction by
+default. If its first answer was lost, check the DAO for prior submission before calling again with
+`recoverProposal: "dao-checked"`. Never replay `proposalAndVote`; its proposal ID may have moved. The platform
+cannot prove an unsigned proposal is absent. Persist the first filing response before showing its transaction.
 
-A quote, and the re-quote inside `market/hire`, is refused with nothing sent when the market won't take the request:
-`agent_not_found` (no such listed agent) or `agent_not_hireable` (not taking calls, or no price): pick another agent;
-`quote_refused` (the market refused the request itself; its `error` says why): don't send it again unchanged. A quote
-answering `unavailable` (no reachable backend, or the market didn't answer) may be asked again later; a hire refused
-with `hire_failed` may be sent again with the same `requestId`, which never pays twice. Before 0.5.7, `market/quote`
-answered `unavailable` and `market/hire` answered `hire_failed` for all three.
-The DAO's `validUntil` is checked immediately before every new submission and paid-call retry, after asynchronous
-reads and signing. Expiry can leave an earlier top-up on the key: read its recorded operation, and never interpret a
-refused final payment as proof that no funding occurred. An attempted unknown payment stays poll-only after expiry;
-once its x402 operation is recorded, the same requestId and terms return that record, while different terms refuse
-`request_conflict`. A top-up before payment preparation does not bind the requestId: `market/status` may still answer
-`not_found`, so inspect the recorded top-up and key balance before asking for another hire.
+A quote refused `agent_not_found` or `agent_not_hireable` needs another agent; `quote_refused` needs changed terms.
+Retry an unavailable quote later. Retry `hire_failed` only with the same `requestId`. The DAO deadline is checked
+before each submission, including after asynchronous reads and signing. Expiry may leave a top-up on the key: follow
+`market/status`; a refused payment does not prove funding absent. Reconcile status after expiry, but renew the vote
+with the same ID and terms before another send. Changed terms refuse even if only a funding binding exists.
+A submitted top-up reserves its key until its exact final destination credit is proved; landed funds stay assigned
+to that hire until x402 is recorded or the binding closes. Provider `SUCCESS`, `FAILED`, `REFUNDED` or a balance alone
+does not prove delivery. A proven unsent refusal releases the reservation; submitted failures do not. Hashless routes
+or lost receipt history need reviewed recovery. A verified USDC shortfall returns `funding_shortfall` and retains the
+credit for inspection. An unknown x402 attempt stays poll-only.
 
-The full hire price must fit the policy's USDC per-transaction ceiling even when the payment key already holds funds.
-An over-cap hire is refused before funding; dispatch rechecks before payment. If the ceiling tightens after a top-up,
-the funds remain on the key and the payment is refused. Daily/monthly caps and budgets account for provider funding
-withdrawals, not later key payments. Downgrade below 0.5.6 is unsupported once shared market records exist: an older
-reader can refuse the whole gateway's registry. Preserve all state and keys and recover on a compatible build.
+The full hire price must fit the policy's USDC per-transaction ceiling, including funds already on the key; dispatch
+rechecks it after funding. Daily/monthly caps and budgets count the provider's top-ups. Older readers reject shared
+market records below 0.5.6 and version 3 funding lines below 0.5.8. Stop writers and inspect legacy unbound top-ups
+before upgrade. Any submitted pre-binding top-up blocks further hires and sends to its key with
+`legacy_funding_review_required`, even if terminal. Preserve state, key, retained funds and pending payments. New
+hires need a separately reviewed fresh-key recovery; there is no automatic rotation or clearance.
 
 ## Test without the platform
 

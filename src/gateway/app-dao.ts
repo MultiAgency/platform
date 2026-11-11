@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
-import { readdirSync, rmSync } from "node:fs";
+import { readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import lockfile from "proper-lockfile";
 import { z } from "zod";
 import { DAO_CONSENT_SCOPES, DAO_SETUP_AREAS } from "../contract/app-access.js";
 import { AppScope, parseConsentMessage, parseSetupMessage, UNBORN_AGENT } from "../contract/app-consent.js";
@@ -55,6 +56,8 @@ const VoteRequest = z.strictObject({ ...common, kind: z.literal("proposal"), pro
  */
 const HireRequest = z.strictObject({ ...common, kind: z.literal("hire"), requestId: z.string(), approved: hireTerms, brief: z.string(),
   validUntil: z.string(), under: hex64, relayed: z.strictObject({ at: z.number().int(), state: z.string() }).nullable() });
+/** Kept out of the strict request JSON so an earlier 0.5.7 gateway can read that record after rollback. */
+const HireProposalBond = z.strictObject({ version: z.literal(1), id: hex64, bond: z.string().regex(/^\d+$/) });
 /** A DAO's setup of a hosted agent; `consent` and `agent` once the signature was found and the agent reserved. */
 const SetupRequest = z.strictObject({ ...common, kind: z.literal("setup"), area: z.enum(DAO_SETUP_AREAS),
   consent: hex64.nullable(), reserved: z.string().nullable() });
@@ -73,6 +76,8 @@ export type DaoVoteRequest = z.infer<typeof VoteRequest>;
 export type DaoSetupRequest = z.infer<typeof SetupRequest>;
 export type DaoStopRequest = z.infer<typeof StopRequest>;
 export type DaoHireRequest = z.infer<typeof HireRequest>;
+/** A same-ID filing could not be serialized; the app may retry its unchanged request. */
+export class DaoHireFilingUnavailable extends Error {}
 /**
  * What differs between kinds of DAO request. `admitted`: counted against its deployment's request limits (a stop has no
  * deployment: its page limits opens and files one stop at a time per agent). `honouredLate`: a passed vote is honoured
@@ -309,7 +314,37 @@ type DaoFollowed<R extends DaoRequest> = { state: "signed"; record: R; signature
 export class DaoRequests {
   private readonly dir: string;
   constructor(private readonly root: string, private readonly votes: DaoVotes = chainDaoVotes) { this.dir = join(root, "dao-requests"); }
+  /** Serialize the lookup and filing for one app hire across gateway processes sharing this state directory. */
+  async withHireFiling<T>(deployment: string, organization: string, agent: string, requestId: string,
+    run: (assertHeld: () => void) => Promise<T>): Promise<T> {
+    privateDirectory(this.dir);
+    const name = createHash("sha256").update(JSON.stringify([deployment, organization, agent, requestId])).digest("hex");
+    let held = true;
+    let unlock: () => Promise<void>;
+    try {
+      unlock = await lockfile.lock(join(this.dir, `.hire-${name}`), { realpath: false, stale: 60_000, update: 10_000,
+        retries: { retries: 100, minTimeout: 100, maxTimeout: 100 }, onCompromised: () => { held = false; } });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ELOCKED") throw new DaoHireFilingUnavailable("A DAO hire filing is in progress; retry the same requestId and terms.");
+      throw error;
+    }
+    const assertHeld = () => { if (!held) throw new DaoHireFilingUnavailable("The DAO hire filing lock was lost; retry the same requestId and terms."); };
+    try { return await run(assertHeld); }
+    finally { if (held) { held = false; await unlock(); } }
+  }
   read(id: string) { return hex64.safeParse(id).success ? readRecord(join(this.dir, `${id}.json`), Request) : null; }
+  /** The original bond for replaying a lost hire filing reply; absent on requests filed by older gateways. */
+  hireProposalBond(id: string): string | null {
+    if (!hex64.safeParse(id).success) return null;
+    try {
+      const parsed = HireProposalBond.parse(JSON.parse(readFileSync(join(this.dir, `${id}.proposal-bond`), "utf8")));
+      if (parsed.id !== id) throw new Error("DAO hire proposal bond names another request");
+      return parsed.bond;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw new DaoHireFilingUnavailable(`The DAO hire proposal bond for ${id} is unreadable; inspect the retained request before filing a proposal.`);
+    }
+  }
   private list() {
     let files: string[];
     try { files = readdirSync(this.dir).filter(file => file.endsWith(".json")); }
@@ -334,6 +369,7 @@ export class DaoRequests {
       const last = Math.max(r.votingUntil, r.kind === "stop" ? r.done?.at ?? 0 : r.signature ? r.expiresAt : 0);
       if (!finished(r, now) || now - last < DAO_REQUEST_RETENTION_MS) return true;
       rmSync(join(this.dir, `${r.id}.json`), { force: true });
+      if (r.kind === "hire") rmSync(join(this.dir, `${r.id}.proposal-bond`), { force: true });
       return false;
     });
   }
@@ -358,8 +394,8 @@ export class DaoRequests {
    * and its access log line (`log`). Nothing is filed while the gateway is stopping. Its vote must pass before what it signs
    * expires, and within Sputnik's default proposal period. `now` fixes the filing's time; otherwise each step reads the clock.
    */
-  async file<F extends DaoFiling>(filing: F, { bond, stopping, log, now }: { bond: string; stopping: () => boolean;
-    log: (record: FiledAs<F>) => Record<string, unknown>; now?: number }): Promise<DaoFiled<FiledAs<F>>> {
+  async file<F extends DaoFiling>(filing: F, { bond, stopping, log, now, assertHeld }: { bond: string; stopping: () => boolean;
+    log: (record: FiledAs<F>) => Record<string, unknown>; now?: number; assertHeld?: () => void }): Promise<DaoFiled<FiledAs<F>>> {
     const at = () => now ?? Date.now();
     const admitted = RULES[filing.kind].admitted && "deployment" in filing ? filing.deployment : null;
     if (admitted !== null) this.admit(admitted, at());
@@ -369,10 +405,20 @@ export class DaoRequests {
     try { [since, next] = await Promise.all([this.votes.latestBlock(), this.votes.nextProposalId(filing.dao).catch(() => null)]); }
     catch { return { state: "unreadable" }; }
     if (stopping()) return { state: "stopping" };
+    assertHeld?.();
     const createdAt = at();
     if (admitted !== null) this.admit(admitted, createdAt);
     const votingUntil = Math.min(filing.expiresAt, createdAt + MAX_PROPOSAL_MS);
     const filed = { version: 1 as const, id, nonce: nonce.toString("base64"), since, createdAt, votingUntil }, f: DaoFiling = filing;
+    assertHeld?.();
+    // Durable before the request JSON: a visible hire can always recover its original proposal bond. The 0.5.7 reader
+    // ignores this non-JSON sidecar, while a failed JSON write leaves only an inert orphan sidecar.
+    if (f.kind === "hire") {
+      privateDirectory(this.dir);
+      writeAtomic(join(this.dir, `${id}.proposal-bond`),
+        JSON.stringify(HireProposalBond.parse({ version: 1, id, bond })) + "\n", 0o600);
+    }
+    assertHeld?.();
     const record = this.write((f.kind === "consent" ? { ...f, ...filed, description: daoConsentDescription({ ...f, ...filed }), consent: null }
       : f.kind === "proposal" ? { ...f, ...filed, description: daoVoteDescription({ ...f, ...filed }), relayed: null }
       : f.kind === "setup" ? { ...f, ...filed, description: daoSetupDescription({ ...f, ...filed }), consent: null, reserved: null }
