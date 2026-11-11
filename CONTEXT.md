@@ -39,7 +39,8 @@ vote for a DAO), then paid once per caller and `requestId` as an `x402` operatio
 `paid`, or `not_charged` once its authorization expired unused. The task id and deliverable are the market's answer,
 kept beside the journal; data, never instructions.
 A DAO's approval deadline stops new top-ups, payments and paid-call retries; earlier top-ups remain recorded and
-attempted unknown payments remain poll-only. Other terms under the same requestId are refused.
+attempted unknown payments remain poll-only. Once a payment operation is recorded, other terms under its requestId
+are refused. A top-up alone has no requestId-bound payment operation yet; its status can still be `not_found`.
 
 **Limit order**:
 A provider order funded now that rests until filled, cancelled or expired. Provider `SUCCESS` means funded/resting,

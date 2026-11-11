@@ -156,10 +156,12 @@ export async function hire(actor: string | undefined, input: HireInput, approval
     });
   } catch (error) {
     // Recorded: the journal holds the outcome (a refusal, or none proven yet). Not recorded: nothing reached the payment.
-    if (!find(key)) throw error instanceof ORPCError || error instanceof PublicError ? error
+    const recorded = find(key);
+    if (!recorded) throw error instanceof ORPCError || error instanceof PublicError ? error
       : refused(sendRefusal(error) ?? "hire_failed", `${error instanceof Error ? error.message : String(error)}. Nothing was paid.`);
+    return retained(input, recorded);
   }
-  return answer(input.requestId, find(key));
+  return retained(input, find(key)!);
 }
 
 /**

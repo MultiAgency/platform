@@ -47,9 +47,9 @@ beforeEach(context => {
   } }));
 });
 
-async function approval(requestId: string, handle = "writer", brief = BRIEF): Promise<z.infer<typeof marketApproveInput>> {
+async function approval(requestId: string, handle = "writer", brief = BRIEF, validForMs = 1_000): Promise<z.infer<typeof marketApproveInput>> {
   const approved = await quoteHire({ handle, brief });
-  const validUntil = new Date(Date.now() + 1_000).toISOString();
+  const validUntil = new Date(Date.now() + validForMs).toISOString();
   const text = hireText({ requestId, agentId: process.env.AGENT_ID!, deployment: "covenant", organization: "acme", approved, validUntil });
   const nonce = crypto.getRandomValues(new Uint8Array(32));
   const signer = new Near({ network: "mainnet", privateKey: daoKey as `ed25519:${string}`, defaultSignerId: owner.account_id });
@@ -128,6 +128,66 @@ test("DAO approval expiring during final delegate signing prevents the claim and
   assert.equal(signed, 1);
   assert.equal(paidCalls(), 0);
   assert.equal(readOps().find(op => op.method === "x402")?.submissionState, "PREPARED");
+});
+
+test("a market grant expiring during delegate signing prevents the payment", async t => {
+  sim.fund(key, "500000");
+  const input = await approval("grant-signing", "writer", BRIEF, 10_000);
+  const grant = fixtureGrant("market"), expiresAt = Date.now() + 1_000;
+  grant.expires_at = new Date(expiresAt).toISOString();
+  grant.owner_message.expires_at_ms = expiresAt;
+  t.mock.method(api, "listGrants", async () => [grant]);
+  const delegate = TransactionBuilder.prototype.delegate;
+  t.mock.method(TransactionBuilder.prototype, "delegate", async function(this: TransactionBuilder, ...args: Parameters<typeof delegate>) {
+    const value = await delegate.apply(this, args);
+    t.mock.timers.tick(2_000);
+    return value;
+  });
+  const result = await attempt(input) as { state: string; code: string };
+  assert.equal(result.state, "refused");
+  assert.equal(result.code, "grant_missing");
+  assert.equal(paidCalls(), 0);
+  const op = readOps().find(op => op.method === "x402");
+  assert.equal(op?.submissionState, "PREPARED");
+  assert.equal(op?.refused, "grant_missing");
+});
+
+test("a local signer failure before the claim is recorded as never submitted", async t => {
+  sim.fund(key, "500000");
+  const input = await approval("signer-failure");
+  t.mock.method(TransactionBuilder.prototype, "delegate", async () => { throw new Error("local signer failed"); });
+  const result = await attempt(input) as { state: string; code: string };
+  assert.equal(result.state, "refused");
+  assert.equal(result.code, "never_submitted");
+  assert.equal(paidCalls(), 0);
+  const op = readOps().find(op => op.method === "x402");
+  assert.equal(op?.submissionState, "PREPARED");
+  assert.equal(op?.refused, "never_submitted");
+});
+
+test("expiry during the durable claim refuses a never-posted payment without blocking later sends", async t => {
+  sim.fund(key, "500000");
+  const input = await approval("claim-boundary");
+  const deadline = Date.parse(input.validUntil);
+  let crossed = false;
+  t.mock.method(Date, "now", () => {
+    if (readOps().some(op => op.method === "x402" && op.submissionState === "SUBMISSION_ATTEMPTED")) {
+      crossed = true;
+      return deadline + 1;
+    }
+    return deadline - 1;
+  });
+  const result = await attempt(input) as { state: string; code: string };
+  assert.equal(crossed, true, "the clock crossed only after the submission claim was durable");
+  assert.equal(result.state, "refused");
+  assert.equal(result.code, "approval_expired");
+  assert.equal(paidCalls(), 0);
+  const op = readOps().find(op => op.method === "x402");
+  assert.equal(op?.submissionState, "SUBMISSION_ATTEMPTED");
+  assert.equal(op?.refused, "approval_expired");
+  assert.equal((await hireStatus(APP, input.requestId)).state, "refused");
+  const { acquireMoneyLock } = await import("../src/lock.js");
+  await (await acquireMoneyLock()).release();
 });
 
 test("an expired approval's already attempted unknown payment remains poll-only", async t => {

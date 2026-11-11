@@ -367,7 +367,9 @@ and `app.daoHires.state(hash)` relays the DAO's signature once it is found; then
 The DAO's `validUntil` is checked immediately before every new submission and paid-call retry, after asynchronous
 reads and signing. Expiry can leave an earlier top-up on the key: read its recorded operation, and never interpret a
 refused final payment as proof that no funding occurred. An attempted unknown payment stays poll-only after expiry;
-the same requestId and terms return its record, while different terms refuse `request_conflict`.
+once its x402 operation is recorded, the same requestId and terms return that record, while different terms refuse
+`request_conflict`. A top-up before payment preparation does not bind the requestId: `market/status` may still answer
+`not_found`, so inspect the recorded top-up and key balance before asking for another hire.
 
 The full hire price must fit the policy's USDC per-transaction ceiling even when the payment key already holds funds.
 An over-cap hire is refused before funding; dispatch rechecks before payment. If the ceiling tightens after a top-up,

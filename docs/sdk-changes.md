@@ -50,8 +50,9 @@ platform-only fixes are listed separately.
   DAO's proposal from `hireText` and relay its signature once to `market/approve` (`marketApproveInput`), which no app
   scope reaches. New refusal code `brief_mismatch`. Capability `market-hire-v1`. A DAO's approval deadline stops
   every new top-up/payment submission and paid-call retry; attempted unknown payments remain poll-only. Earlier
-  top-ups stay recorded if the final payment is refused. Reusing a requestId with different terms refuses
-  `request_conflict`. Signing is followed by fresh lock, shutdown and durable release checks before submission.
+  top-ups stay recorded if the final payment is refused. Once an x402 payment is recorded, reusing its requestId
+  with different terms refuses `request_conflict`; a top-up alone does not yet bind that ID. Signing is followed by
+  fresh lock, shutdown, durable release and market-grant-expiry checks before submission.
 - **A journal operation may be `x402`** (`OPERATION_METHODS`): a market hire's payment. An SDK before 0.5.6 refuses a
   market agent's journal reads (`activity`, `unresolved`) and owner outputs naming `area: "market"`; no other agent's.
 - **`payoutDouble` answers with the platform's own code** (no API change): the journal's answer to a payout request
