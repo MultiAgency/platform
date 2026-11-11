@@ -105,18 +105,18 @@ agent receipt remains unknown, so preserve its claim and reconcile it before rem
 
 ### Treasury app consumer handoff
 
-The consumer has been implemented and tested locally in a separate, uncommitted Treasury checkout. Its last reported
-test run used an unpublished, provisional SDK 0.5.7 tarball from the pre-release feature branch. That tarball is not
-the tagged and published SDK 0.5.7 package, which lacks these routes. The app keeps SDK 0.4.0 for legacy consumers and
-uses the provisional package through a separate alias. It still needs verification against a fresh SDK 0.5.8 package
-from the final platform candidate, a reviewed portable release dependency, and its own commit and release checks.
+The separate Treasury app session reported local verification on 2026-11-11 against an unpublished SDK 0.5.8 tarball
+frozen from platform commit `e2edec7`: typecheck, 914/914 offline tests, 70/70 browser scenarios, frontend and evidence
+checks, and isolated Docker startup and state checks. That package preceded later platform commits. The app keeps SDK
+0.4.0 for legacy consumers and vendors 0.5.8 through a separate portable file alias. Its release must verify the
+exact SDK tarball from the final platform commit, rerun the app checks, review the release dependency pin, and commit
+its own feature delta. The tagged and published SDK 0.5.7 lacks these routes.
 
-The current consumer discovers `treasury-limit-orders-v1` through authenticated `appClient.capabilities()`
+The tested consumer discovers `treasury-limit-orders-v1` through authenticated `appClient.capabilities()`
 (`GET /apps/v1/capabilities`). Failed or malformed reads keep order and consent controls closed in its local tests.
 The tagged 0.5.7 platform source lacks that route, so its host cannot advertise this order capability. The consumer
-still needs the final 0.5.8 tarball and retesting before release. The advertised capability means that the host has
-the app route; it does not grant consent, prove the active agent release supports it, or establish provider order
-support.
+must be retested with the final 0.5.8 tarball before release. The advertised capability means that the host has the
+app route; it does not grant consent, prove the active agent release supports it, or establish provider order support.
 
 The app session reports a separate consent carrying both `treasury` and `treasury-orders`, available even after the
 ordinary Treasury connection. Its server holds the app credential and calls the nine `limitOrders/*` methods through
@@ -127,9 +127,10 @@ owner to sign, then attempts placement once. After an uncertain placement reply 
 no replacement order. Its DAO flow files an exact vote with `daoLimitOrders.file`, follows `.state(hash)`, and checks
 current member roles before offering the voting transaction. Cancellation is claimed once and followed through
 `refresh` after an ambiguous reply. The UI keeps resting, partial fill, cancellation requested, failed payout and
-unknown states separate; it shows completion only after final payout evidence. The consumer has not yet integrated
-the 0.5.8 `cancelMayResume` signal for a proven pre-submission crash; that is part of its final package gate. These
-are local consumer test claims, not deployed or live provider observations.
+unknown states separate; it shows completion only after final payout evidence. The 2026-11-11 app run also tested
+`cancelMayResume`: an explicit same-ID continuation requires a fresh platform view proving no cancellation POST began;
+attempted submissions and lost replies stay poll-only. These are local consumer test claims, not deployed or live
+provider observations.
 
 Focused offline tests in `test/limit-order-terms.test.ts`, `test/limit-order-store.test.ts`,
 `test/limit-order-dispatch.test.ts`, `test/limit-order-observe.test.ts` and the service/cancellation suites cover exact
@@ -141,8 +142,8 @@ concurrent polls, credential revocation during filing, and malformed successful 
 block later sends and agent release in offline faults; recovery still polls unrelated unknown operations before
 surfacing the missing evidence. A source-frozen platform candidate and Bun consumer check on the final commit are
 release gates; [PR #78](https://github.com/MultiAgency/platform/pull/78) identifies the latest completed run. The
-separate Treasury checkout reports offline and browser checks against its provisional package; it still needs the
-rebuilt SDK package. No cross-repository end-to-end order flow has been run.
+separate Treasury checkout's earlier 0.5.8 run does not validate the package from this branch's final commit. No
+cross-repository end-to-end order flow has been run.
 Live placement, cancellation, payout behavior, the production route, and the deployed provider's policy enforcement
 remain unverified. Native EVM/Solana `sign-intent` is a separate design with different protections and is not enabled
 by this order path.

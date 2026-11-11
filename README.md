@@ -170,10 +170,10 @@ Each line is a gap; the linked page says how the rest is known. The
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
 - Treasury limit orders are an unreleased 0.5.8 feature in progress, behind an owner-signed policy opt-in, one exact
   signature from the owner per order and a new `treasury-orders` app consent. The default policy still leaves them off. Its local
-  placement, cancellation and recovery paths have offline tests. A Treasury app consumer has been implemented and
-  tested locally in a separate, uncommitted checkout against a provisional tarball. Its authenticated capability
-  discovery has offline tests; the Treasury app still needs integration with the final 0.5.8 SDK package and its own
-  release checks. The tagged and published 0.5.7 SDK does not contain these order routes.
+  placement, cancellation and recovery paths have offline tests. A separate Treasury app consumer was tested locally
+  against an unpublished 0.5.8 tarball on 2026-11-11, including authenticated capability discovery and guarded
+  continuation of a proven-unsent cancellation. Its release must verify the exact SDK artifact from the final platform
+  commit and repeat its own checks. The tagged and published 0.5.7 SDK does not contain these order routes.
   No live placement, fill or payout check has been completed. The demo provider answered authenticated dry previews
   on 2026-11-10; production did not expose these routes in that read-only check ([limit orders](docs/limit-orders.md)).
 - Whether a linked DAO is confidential (`treasury/get`) relies on Trezu's convention: its confidential setup registers
