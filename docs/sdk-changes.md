@@ -19,6 +19,12 @@ platform-only fixes are listed separately.
   critical mistake. In the [crash test](crash-test.md), models given the SDK call without the skill sent a second payment
   under a new `requestId` when a tool result said the first had failed or was pending (14 of 46 runs, simulated provider).
   No API change.
+- **An approve vote lists earlier payouts of the same terms** (addition): `owner/prepare` for an `approval_vote` with
+  `verdict: "approve"` answers `payment.repeats`: this agent's payouts of the same payee, asset and amount (and flow) in
+  the last 24 hours, read from the provider's history, as `{ checked: true, payouts: [{ correlationId, at, status }] }`,
+  or `{ checked: false }` when that history couldn't be read whole. Settled, released, held and failed payouts count
+  (a provider `FAILED` isn't proof nothing moved); a refund doesn't. The confirm page shows it beside the terms. It refuses
+  nothing. Optional, so older apps ignore it. Offline-, browser- and stack-tested.
 
 ## 0.5.7 (2026-11-11)
 

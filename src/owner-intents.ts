@@ -22,6 +22,7 @@ import { daoPolicy, nextProposalId } from "./chain.js";
 import { canonicalPolicy, mandateDigest, type ReviewedPolicy } from "./mandate.js";
 import { isTerminal, settle } from "./ops.js";
 import { checkPaymentApproval, type PaymentApproval } from "./payment-approval.js";
+import { repeatPayouts } from "./repeat-payouts.js";
 import { acquireMoneyLock, assertMoneyLock } from "./lock.js";
 import { ownerSignatureProblem } from "./owner-signature.js";
 import { checkHostedCreation } from "./hosted-binding.js";
@@ -302,6 +303,8 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
       data: { kind: "refused", code: "owner_action_open" } });
   const vote = action.type === "approval_vote" ? await checkPaymentApproval(action) : undefined;
   const paymentApproval = vote?.binding;
+  // Earlier payouts of the same terms, shown to the owner beside them; it never refuses (src/repeat-payouts.ts).
+  const repeats = vote?.terms ? await repeatPayouts(vote.terms, action.type === "approval_vote" ? action.correlationId : "") : undefined;
   const owner = signer === "dao" ? await treasuryOwner() : undefined;
   if (action.type === "agent_create" && (owner ?? action.owner))
     checkHostedCreation((owner ?? action.owner)!, signer, action.role);
@@ -319,7 +322,7 @@ async function prepareLocked(action: OwnerAction, signer: Signer) {
   // A grant as this server asked for it: the owner reviews its label and when it ends, apart from the signing window.
   const grant = request.type === "grant_issue" ? { label: request.label, expiresAt: request.expires_at } : undefined;
   const base = { correlationId: generated.correlation_id, preview: generated.preview, expiresAt: generated.expires_at, digest,
-    ...(policies && { policy: policies }), ...(grant && { grant }), ...(paymentApproval && { payment: { ...paymentOf(paymentApproval)!, terms: vote!.terms } }) };
+    ...(policies && { policy: policies }), ...(grant && { grant }), ...(paymentApproval && { payment: { ...paymentOf(paymentApproval)!, terms: vote!.terms, ...(repeats && { repeats }) } }) };
 
   if (!owner) {
     const wallet = { intent: generated.intent, signer: generated.signer };

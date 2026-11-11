@@ -244,6 +244,11 @@ A payout the provider holds for the owner's approval. Its outcome is open, but i
 does not block new sends.
 _Avoid_: pending approval (as a noun)
 
+**Repeat payout**:
+An earlier payout of the same payee, asset and amount in the last 24 hours, listed beside an approve vote's terms
+(`payment.repeats`). It informs the owner; it never refuses, since a recurring payment repeats too.
+_Avoid_: duplicate (a duplicate is refused: `duplicate_held_payout`)
+
 **Refusal**:
 A proven outcome that nothing was sent, recorded with a code.
 

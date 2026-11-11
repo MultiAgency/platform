@@ -668,7 +668,13 @@ export const ownerPrepareOutput = z.looseObject({
   /** Approval votes only: the held payout it releases or rejects; for approve, the payment's terms (`chain: "near"` for a withdrawal) as proven against
    * the provider's request hash (payment-approval.ts), null for a reject. */
   payment: z.looseObject({ correlationId: z.string(), verdict: z.enum(["approve", "reject"]),
-    terms: z.looseObject({ recipient: z.string(), asset: z.string(), amount: z.string(), chain: z.literal("near").optional() }).nullable() }).optional(),
+    terms: z.looseObject({ recipient: z.string(), asset: z.string(), amount: z.string(), chain: z.literal("near").optional() }).nullable(),
+    /** An approve's earlier payouts of the same payee, asset and amount in the last 24 hours; `checked: false` when the
+     * history couldn't be read whole. Informs; never refuses (0.5.8). */
+    repeats: z.union([
+      z.looseObject({ checked: z.literal(true), payouts: z.array(z.looseObject({ correlationId: z.string(), at: z.string(), status: z.string() })) }),
+      z.looseObject({ checked: z.literal(false) }),
+    ]).optional() }).optional(),
   /** DAO signer only. */
   dao: z.looseObject({
     owner: z.string(),

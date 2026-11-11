@@ -193,7 +193,8 @@ test('an app requests a payout once under its requestId, follows it by requestId
     // owner; the provider settles the released payout (simulated) and nothing is sent again.
     const { approvalId } = value(await agent.call('held')).find(h => h.correlationId === first.correlationId);
     const vote = value(await agent.call('owner/prepare', { action: { type: 'approval_vote', approvalId, verdict: 'approve', correlationId: first.correlationId }, signer: 'wallet' }));
-    expect(vote.payment).toEqual({ correlationId: first.correlationId, verdict: 'approve', terms: { recipient: BUILDER, asset: USDC, amount: '2000000' } });
+    expect(vote.payment).toEqual({ correlationId: first.correlationId, verdict: 'approve', terms: { recipient: BUILDER, asset: USDC, amount: '2000000' },
+      repeats: { checked: true, payouts: [] } });
     expect(vote.intent.standard).toBe('nep413');
     const signed = await sign(OWNER, vote.intent.payload);
     value(await agent.call('owner/submit', { correlationId: vote.correlationId, signedData: { ...vote.intent, public_key: signed.publicKey, signature: signed.signature } }));
@@ -201,6 +202,20 @@ test('an app requests a payout once under its requestId, follows it by requestId
     await expect.poll(async () => value(await agent.call('payouts/status', { requestId: 'wo-1' })).state).toBe('succeeded');
     expect(stack.simulated.transfers).toHaveLength(1);
     steps.push("the owner's vote, relayed by the app with the proven terms, released the held payout once");
+
+    // The same payout again under a new requestId, once the first has settled (the crash test's "pay again"): it is held for
+    // the owner like any payout, and its vote names the first beside its terms. The owner rejects it; nothing moves.
+    const again = value(await ask('wo-again'));
+    expect(again).toMatchObject({ requestId: 'wo-again', state: 'held' });
+    const { approvalId: againApproval } = value(await agent.call('held')).find(h => h.correlationId === again.correlationId);
+    const repeat = value(await agent.call('owner/prepare', { action: { type: 'approval_vote', approvalId: againApproval, verdict: 'approve', correlationId: again.correlationId }, signer: 'wallet' }));
+    expect(repeat.payment.repeats).toEqual({ checked: true, payouts: [{ correlationId: first.correlationId, at: expect.any(String), status: 'SUCCESS' }] });
+    expect(repeat.confirm.url, 'the confirm page shows it too').toMatch(/\/confirm\//);
+    const refusal = value(await agent.call('owner/prepare', { action: { type: 'approval_vote', approvalId: againApproval, verdict: 'reject', correlationId: again.correlationId }, signer: 'wallet' }));
+    const rejection = await sign(OWNER, refusal.intent.payload);
+    value(await agent.call('owner/submit', { correlationId: refusal.correlationId, signedData: { ...refusal.intent, public_key: rejection.publicKey, signature: rejection.signature } }));
+    await expect.poll(async () => value(await agent.call('payouts/status', { requestId: 'wo-again' })).state).toBe('failed');
+    steps.push('a second payout of the same terms after the first settled is held, its vote names the first, and the owner rejects it');
 
     // A withdrawal to chain near (P3b): the owner agrees a withdrawal payee through the app; each request is held for the
     // owner, whose approval, proven against the provider's hash, releases it once, and whose rejection ends one unpaid.
@@ -213,7 +228,8 @@ test('an app requests a payout once under its requestId, follows it by requestId
     expect(heldWithdrawal.body).toEqual({ asset: USDC, amount: '500000', chain: 'near', recipient: BUILDER, confidential: true });
     const pending = value(await agent.call('held')).find(h => h.correlationId === withdrawn.correlationId);
     const approve = value(await agent.call('owner/prepare', { action: { type: 'approval_vote', approvalId: pending.approvalId, verdict: 'approve', correlationId: withdrawn.correlationId }, signer: 'wallet' }));
-    expect(approve.payment).toEqual({ correlationId: withdrawn.correlationId, verdict: 'approve', terms: { recipient: BUILDER, asset: USDC, amount: '500000', chain: 'near' } });
+    expect(approve.payment).toEqual({ correlationId: withdrawn.correlationId, verdict: 'approve', terms: { recipient: BUILDER, asset: USDC, amount: '500000', chain: 'near' },
+      repeats: { checked: true, payouts: [] } });
     const approved = await sign(OWNER, approve.intent.payload);
     value(await agent.call('owner/submit', { correlationId: approve.correlationId, signedData: { ...approve.intent, public_key: approved.publicKey, signature: approved.signature } }));
     stack.simulated.settle(withdrawn.correlationId);
@@ -242,7 +258,7 @@ test('an app requests a payout once under its requestId, follows it by requestId
     stack.simulated.dropTransferResponse();
     expect(value(await ask('wo-3', '1000000'))).toMatchObject({ requestId: 'wo-3', state: 'unknown' });
     const accepted = stack.simulated.transfers.length;
-    expect(stack.simulated.transfers.filter(p => p.type !== 'withdraw')).toHaveLength(2);
+    expect(stack.simulated.transfers.filter(p => p.type !== 'withdraw')).toHaveLength(3);
     expect(value(await ask('wo-3', '1000000'))).toMatchObject({ state: 'unknown' });
     expect(await ask('wo-4', '500000')).toMatchObject({ ok: false, kind: 'unresolved' });
     expect(stack.simulated.transfers, 'a lost request is never resent, and blocks new ones until resolved').toHaveLength(accepted);
