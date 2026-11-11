@@ -214,8 +214,10 @@ Each line is a gap; the linked page says how the rest is known. The
 - Cumulative per-asset caps and the USD budget can't be overrun by this executor's own simultaneous sends (offline-tested); for
   other senders (another host, the grant used directly) they rest on the provider, whose docs call its cumulative
   limits best-effort under concurrency in one place and serialized per wallet in another. One concurrent mainnet trial
-  held the budget. A held payout doesn't block later sends, so several can be filed before any settles. Provider
-  questions Q1–Q5 in the [enforcement assessment](docs/enforcement.md#spending-limits-under-concurrency).
+  held the budget. A held payout doesn't block later sends, so several can be filed before any settles. Of the
+  provider questions in the [enforcement assessment](docs/enforcement.md#spending-limits-under-concurrency), window edges
+  (Q3) are answered per the provider's docs; per-asset and budget atomicity across instances (Q1, Q2), whether a
+  tightened policy stops already-held work (Q4) and admissions during a crash repair (Q5) stay open.
 - The policy's asset list limits what the agent spends, not what it buys: the wallet lets a swap into an unlisted
   asset through. This server refuses one before sending; the wallet should.
 - The owner can't verify the enforced policy: it is stored encrypted to the custody keystore, and the public

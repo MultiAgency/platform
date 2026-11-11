@@ -476,7 +476,7 @@ is involved: the platform still reads no per-asset usage (the provider exposes n
 This bounds only what this executor sends. Another host, a copied grant token, or the grant used directly is
 serialized only by the provider (see "Two facts" below). A held payout (`owner_approval`) doesn't block later sends
 while it waits for the vote, so this executor can file several held payouts one after another, each admitted before
-any settles; whether pending work counts against a cap is the provider's (Q4). A provider cap refusal under a code
+any settles; per the provider's docs each counts against its per-asset limits from dispatch until it settles (Q4). A provider cap refusal under a code
 this platform doesn't yet treat as proven (`policy_limit_exceeded`, `policy_transaction_limit_exceeded`) leaves the
 send unresolved and blocks the executor: safe, not smooth ([recovery limitation](#recovery-limitation)).
 
@@ -512,14 +512,29 @@ single concurrent mainnet trial (E5) is one grant on one host.
 - **Q2 (USD budget, E5, E13).** Is "charged atomically at dispatch" a single transaction across grants and API instances?
   Which price is charged (the quote's, or the price at dispatch), how is it rounded, and is the charge trued up to the
   executed `amount_in` or kept on `REFUNDED` and `FAILED`?
-- **Q3 (window edges, E12).** Are per-asset hourly/daily/monthly limits rolling (`policy.md`:73) or UTC calendar periods
-  (upstream tests `velocity_accounting_e2e.sh`:40–41 at b8c58c0), and which timestamp places an operation in a window?
-- **Q4 (pending and held work, E8, B6).** Does a `PENDING_APPROVAL` or `QUEUED` operation count against the USD budget and
-  per-asset caps from admission, and is it judged again at release against usage and a policy tightened meanwhile?
-  `policy.md`:102 says pending actions count until settled; OutLayer's `CUSTODY.md`:386 at b8c58c0 says nothing is
-  reserved at acceptance.
-- **Q5 (crash, E11).** After a coordinator crash leaves an operation uncharged (`stuck_request_repair_e2e.sh` at b8c58c0),
-  are new admissions for that wallet held until the repair charges it?
+- **Q3 (window edges, E12): answered per provider docs.** Per-asset hourly/daily/monthly `limits` are rolling windows
+  that the Agent API counts per agent, shared by every grant, at dispatch; pending or uncertain actions count until
+  settled, and a completed one counts for the full window after completion (skills@0b81bba6 `references/policy.md`:74, :101–105).
+  The USD budget runs in fixed periods from the moment the applied policy turned each cap on (daily every 24 h from then,
+  weekly every 7 days, monthly on the same date and time in UTC), not rolling, so up to twice a cap can move across a
+  reset; a shorter per-asset limit bounds that burst (:89–95). OutLayer's calendar-period test
+  (`velocity_accounting_e2e.sh`:40–41 at b8c58c0) is OutLayer's own accounting; on the Agent API's route the API keeps
+  these counts. Per docs, not observed on mainnet.
+- **Q4 (pending and held work, E8, B6): counting answered per provider docs; a tightened policy still open.** A held
+  or queued action counts against per-asset limits from dispatch until settled (skills@0b81bba6 `policy.md`:101–105),
+  hard limits are checked before an action is held for the owner (:72), and a timelocked action is judged again when
+  released and can end `FAILED` (:88, :106). OutLayer's "nothing is reserved at acceptance" (`CUSTODY.md`:386 at
+  b8c58c0) describes OutLayer's own accounting; on the Agent API's route the API counts pending work. Still open:
+  whether a cap reduced, a destination changed, a freeze or a revoked grant stops an `owner_approval` payout already
+  held. The 2026-10-12 held payouts were committed before their votes, but that doesn't settle it (see "Two observed
+  held payouts were committed before approval" below); the keystore re-checks frozen, input asset and the
+  per-transaction cap before signing (`outlayer@da5c9ff`).
+- **Q5 (crash, E11): partly answered per OutLayer's public tests.** A request the coordinator broadcast but didn't record
+  is repaired lazily: the next read of it settles it as `settled_late` and charges the usage counter exactly once
+  (`usage_charged`), and one the chain never saw stays `processing` (`tests/stuck_request_repair_e2e.sh`:17–28 at
+  b8c58c0). Still open: whether new admissions for that wallet wait until the repair charges it. The coordinator is
+  private, and nothing public says. This executor isn't exposed either way: an operation stuck at the provider stays
+  unresolved in its journal and blocks its sends until settled, and its status reads are what trigger the repair.
 
 ## Two facts that limit any local guarantee
 - **One live grant is not one sender.** Any number of processes can share a token. Counting grants fences
@@ -647,10 +662,11 @@ Spending-limit cases (platform issue #6, 2026-11-09; details in
   hosts and instances, provider question Q1.
 - **E5, USD budget:** this executor's own overlapping sends offline-tested; observed once on mainnet; atomicity
   across grants and instances, provider question Q2.
-- **E8, tightening the policy while work is queued or held:** provider question Q4.
-- **E11, crash points:** this side's are offline-tested (`test/journal.test.ts`, `test/lock.test.ts`); the provider's,
-  Q5.
-- **E12, window edges:** provider question Q3.
+- **E8, tightening the policy while work is queued or held:** partly answered under Q4 (counting per docs; timelocked work
+  is judged again at release); whether a tightened policy stops an already-held payout stays unverified.
+- **E11, crash points:** this side's are offline-tested (`test/journal.test.ts`, `test/lock.test.ts`); the provider's
+  lazy repair is per its public tests, and whether admissions wait for it stays open (Q5).
+- **E12, window edges:** answered under Q3 (rolling per-asset windows; fixed budget periods).
 - **E13, price and rounding edges:** provider question Q2.
 - **B1–B7, the offline accounting cases of an executable model:** no local budget engine is built (see "Resolve with
   implementation and deployment evidence"), so each is either a property of this side's boundary, offline-tested, or
@@ -659,7 +675,7 @@ Spending-limit cases (platform issue #6, 2026-11-09; details in
   they block every later send (`test/money-safety.test.ts`, `test/lock.test.ts`). Same-key retries: never made here
   (`test/journal.test.ts`); the provider's replay is the open idempotency dependency under
   [recovery limitation](#recovery-limitation). A crash before the claim: `test/journal.test.ts`. Window boundaries:
-  Q3. A policy reduction: Q4.
+  Q3, answered. A policy reduction: Q4, open for already-held work.
 
 Still open outside issue #6: verifying an owner signature against the enforced policy (S1, S2); the credential and
 route inventory (M1); retries around timeout and restart (E6); release on proven non-execution only (E7); revoking or
