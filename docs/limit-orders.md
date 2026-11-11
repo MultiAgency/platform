@@ -111,11 +111,12 @@ the tagged and published SDK 0.5.7 package, which lacks these routes. The app ke
 uses the provisional package through a separate alias. It still needs verification against a fresh SDK 0.5.8 package
 from the final platform candidate, a reviewed portable release dependency, and its own commit and release checks.
 
-The current consumer discovers `treasury-limit-orders-v1` through `/gw/me`, which a headless platform host returns
-404. It therefore refuses every order control on the deployed API hosts. The consumer must switch to the SDK's
-authenticated `appClient.capabilities()` (`GET /apps/v1/capabilities`) and be retested with the final tarball before
-release. The advertised capability means that the host has the app route; it does not grant consent, prove the active
-agent release supports it, or establish provider order support.
+The current consumer discovers `treasury-limit-orders-v1` through authenticated `appClient.capabilities()`
+(`GET /apps/v1/capabilities`). Failed or malformed reads keep order and consent controls closed in its local tests.
+The tagged 0.5.7 platform source lacks that route, so its host cannot advertise this order capability. The consumer
+still needs the final 0.5.8 tarball and retesting before release. The advertised capability means that the host has
+the app route; it does not grant consent, prove the active agent release supports it, or establish provider order
+support.
 
 The app session reports a separate consent carrying both `treasury` and `treasury-orders`, available even after the
 ordinary Treasury connection. Its server holds the app credential and calls the nine `limitOrders/*` methods through

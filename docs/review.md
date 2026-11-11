@@ -59,8 +59,9 @@ The tagged 0.5.6 SDK uses provider SDK 0.8.2, with policy evidence compatibility
 refusal/idempotency behavior. The tagged and published 0.5.7 SDK also lacks order routes. An unreleased 0.5.8 Treasury
 limit-order feature has local order routes, owner signatures, a dedicated app consent and offline recovery tests. No
 live order was placed by this platform. The Treasury app consumer is implemented and tested in a separate, uncommitted
-checkout against a provisional pre-release 0.5.7 tarball; its headless-host capability discovery, final 0.5.8 package
-integration and release checks remain. Production provider order routes were absent in the 2026-11-10 read-only check.
+checkout against a provisional pre-release 0.5.7 tarball; its credentialed headless-host capability discovery is
+offline-tested, while final 0.5.8 package integration and release checks remain. Production provider order routes were
+absent in the 2026-11-10 read-only check.
 Native signing remains out of scope. See [limit orders](limit-orders.md) and
 [provider SDK upgrade](provider-sdk-082.md).
 
