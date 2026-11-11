@@ -2,6 +2,7 @@ import { paidCall, message, type Task } from "./client.js";
 import { paymentKey } from "./payment-key.js";
 import { paymentHeader, paymentId, type X402Request } from "./x402.js";
 import { contractOf } from "../chain.js";
+import { approvalExpired } from "./approval.js";
 
 /**
  * The x402 leg of `send` (src/agent.ts), the only caller. Signing is local and runs before the submission claim, so a
@@ -26,13 +27,26 @@ export class PaymentNotTaken extends Error {
   constructor(readonly httpStatus: number, readonly reason: string) { super(`The market didn't take the payment (HTTP ${httpStatus}): ${reason}`); }
 }
 
+/** A deadline stopped the first paid call before its header left this process, even though the journal was claimed. */
+export class PaymentNotSubmitted extends Error {
+  constructor(readonly code: "approval_expired" | "grant_missing", message: string) { super(message); }
+}
+
 /** A `502` means the facilitator was unreachable: the same header is sent again, never a new signature (skill 0.2.0). */
 const ATTEMPTS = 3, RETRY_MS = 2_000;
 
 /** The paid call. Its task, or `PaymentNotTaken`; a transport failure throws as it is. */
-export async function paidHire(request: X402Request, header: string): Promise<{ correlation_id: string; task: Task }> {
+export async function paidHire(request: X402Request, header: string, approvalExpiresAt?: number, grantExpiresAt?: number): Promise<{ correlation_id: string; task: Task }> {
   const params = message(request.messageId, request.brief);
   for (let attempt = 1; ; attempt++) {
+    // Before the first POST, a deadline refusal proves the header never left; after one POST, it cannot prove that.
+    const expired = approvalExpired(approvalExpiresAt) ? "approval_expired"
+      : approvalExpired(grantExpiresAt) ? "grant_missing" : null;
+    if (expired) {
+      const detail = expired === "approval_expired" ? "The DAO's hire approval expired" : "The market grant expired";
+      if (attempt === 1) throw new PaymentNotSubmitted(expired, `${detail} before the first paid call. Nothing was paid.`);
+      throw new Error(`${detail} after this payment was attempted. Follow its recorded outcome; no further paid call was sent.`);
+    }
     const answer = await paidCall(request.handle, params, header);
     if ("task" in answer) return { correlation_id: paymentId(request), task: answer.task };
     if (answer.status !== 502 || attempt === ATTEMPTS) throw new PaymentNotTaken(answer.status, answer.error);

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, beforeEach, mock, test } from "node:test";
 import { generateKey, parseKey } from "near-kit";
+import lockfile from "proper-lockfile";
 import { MARKET_USDC, market } from "./e2e/market.mjs";
 
 /**
@@ -87,6 +88,42 @@ test("a hire pays only the terms approved: a changed quote or another brief is r
   await assert.rejects(hire(APP, { requestId: "h-3", brief: `${BRIEF}!`, approved }), /isn't the one approved/);
   assert.deepEqual(withdrawals, []);
   assert.equal(readOps().length, 0);
+});
+
+test("overlapping hires with one requestId refuse different terms even after the other records payment", async t => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "500000");
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const otherBrief = `${BRIEF} Different work.`;
+  const otherApproved = await quoteHire({ handle: "writer", brief: otherBrief });
+  let enteredFirst!: () => void, releaseFirst!: () => void, enteredSecond!: () => void, releaseSecond!: () => void;
+  const firstInPolicy = new Promise<void>(resolve => { enteredFirst = resolve; });
+  const firstMayContinue = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const secondAtLock = new Promise<void>(resolve => { enteredSecond = resolve; });
+  const secondMayFail = new Promise<void>(resolve => { releaseSecond = resolve; });
+  let policyReads = 0, lockCalls = 0;
+  t.mock.method(api, "getPolicy", async () => {
+    if (++policyReads === 1) { enteredFirst(); await firstMayContinue; }
+    return policyView(marketPolicy(KEY));
+  });
+  const actualLock = lockfile.lock;
+  t.mock.method(lockfile, "lock", (file: string, options: Parameters<typeof lockfile.lock>[1]) => {
+    if (++lockCalls === 2) { enteredSecond(); return secondMayFail.then(() => { throw Object.assign(new Error("busy"), { code: "ELOCKED" }); }); }
+    return actualLock(file, options);
+  });
+  const first = hire(APP, { requestId: "overlap", brief: BRIEF, approved });
+  await firstInPolicy;
+  const second = hire(APP, { requestId: "overlap", brief: otherBrief, approved: otherApproved });
+  try {
+    // The second call has passed its initial journal lookup but cannot acquire the first call's money lock.
+    await secondAtLock;
+    releaseFirst();
+    assert.equal((await first).state, "unknown");
+    releaseSecond();
+    await assert.rejects(second, (error: unknown) => (error as { data?: { code?: string } }).data?.code === "request_conflict");
+    assert.equal(readOps().filter(op => op.method === "x402" && op.idempotencyKey === requestKey(APP, "overlap")).length, 1);
+    assert.equal(sim.chain.accounts.get(KEY)!.transfers.length, 1);
+    assert.deepEqual(withdrawals, []);
+  } finally { releaseFirst(); releaseSecond(); }
 });
 
 test("an undelivered hire blocks the agent's sends while its payment can settle, then reads not charged", async () => {
@@ -182,7 +219,8 @@ test("a DAO-owned market agent pays a hire only on its DAO's signed approval of 
     await assert.rejects(approveHire(context, await daoApproval({ key: generateKey().secretKey })), /isn't the agent's DAO owner's/);
     await assert.rejects(approveHire(context, await daoApproval({ host: "other.test" })), /isn't the agent's DAO owner's/);
     await assert.rejects(approveHire(context, await daoApproval({ text: "Approve anything" })), /isn't the agent's DAO owner's/);
-    await assert.rejects(approveHire(context, await daoApproval({ validUntil: new Date(Date.now() - 1_000).toISOString() })), /has ended/);
+    await assert.rejects(approveHire(context, await daoApproval({ validUntil: new Date(Date.now() - 1_000).toISOString() })),
+      (error: unknown) => (error as { data?: { code?: string } }).data?.code === "approval_expired");
     const tampered = await daoApproval();
     await assert.rejects(approveHire(context, { ...tampered, approved: { ...tampered.approved, amount: "1" } }), /isn't the agent's DAO owner's/, "terms other than the ones signed");
     assert.equal(withdrawals.length, 0);

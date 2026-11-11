@@ -100,18 +100,24 @@ code.
    as `payout` does with `owner_approval: false`. A DAO approves each hire's exact terms by vote first, as it approves
    Treasury proposals (`proposalText`): the hire is filed as a durable proposal and paid only once the vote passes.
    A vote takes days and the agent's price can change meanwhile: the hire re-quotes before paying and refuses unless
-   the new `402` row equals the approved terms.
-3. **Hire.** `market/hire { requestId, terms }` sends once per `requestId` (the payout-request identity), under the
+   the new `402` row equals the approved terms. The signed `validUntil` is checked before each new submission,
+   after asynchronous preflight and signing, including top-ups and paid-call retries.
+3. **Hire.** `market/hire { requestId, brief, approved }` sends once per `requestId` (the payout-request identity), under the
    money lock, through `dispatch`, purpose `market`, in two legs:
    - *Top-up:* a provider `withdraw` of the shortfall (the quote less what the payment key already holds) and, the
      first time, NEAR to open its account. It is an ordinary operation: write-ahead, journaled, resolved by the
      provider's status.
    - *Payment:* a new `Action` method `x402`, sent from `send` like every other submission, so
-     `test/send-path.test.ts` still holds. The record is written, the delegate action is signed and stored, then
+     `test/send-path.test.ts` still holds. The payment terms are recorded, then the delegate action is signed and
      `SendMessage` is repeated with `X-PAYMENT`. The task id is recorded the moment it is known: it is the only way back
      to a paid result.
-4. **Follow.** `market/status { requestId }` answers what the journal proves: `refused`, `paid` (task completed and the
-   transfer observed on chain), `not_charged`, or `unknown`, and polls `GetTask` while the task moves.
+4. **Follow.** `market/status { requestId }` answers what the journal proves: `refused`, `paid` (the transfer observed
+   on chain, regardless of task state), `not_charged`, or `unknown`, and polls `GetTask` while the task moves. These are the
+   final payment's outcomes: earlier top-ups can remain recorded on the key when a later leg is refused or approval
+   expires. Expiry does not undo those withdrawals. Once the x402 payment is recorded, a matching attempt is followed
+   after expiry without another send, and different terms under its requestId refuse `request_conflict`. If approval
+   expires after a top-up but before payment preparation, `market/status` can still be `not_found`: inspect the
+   top-up operation and payment-key balance before asking for another hire, even under the same requestId.
 
 ### When a payment is resolved
 
@@ -148,13 +154,19 @@ key's account and balances, the approved terms and, for a DAO, the passed vote.
 
 Daily/monthly caps and USD budgets account for provider withdrawals when they occur, not later payments from retained
 key funds. This change does not add payment-time cumulative accounting or make the last leg provider-enforced.
+For a DAO, the deadline is checked after all asynchronous reads and signing, immediately before each submission claim.
+If approval expires after a paid call was attempted, further 502 retries stop while its recorded outcome stays unknown
+until chain evidence resolves it. Offline regressions cover expiry during ownership, dispatch reads, finality,
+signing and retry waits (`test/market-deadline.test.ts`), and lost lock/shutdown/release during signing
+(`test/market-signing-race.test.ts`). No platform mainnet hire observation is claimed.
 
 ### State
 
 No new state directory. The payment key is in the agent's settings file, preserved with it (`docs/operations.md`).
-Each hire is an operation in the agent's journal (`.ops/`): its terms, the delegate's nonce and `max_block_height`,
-the key's balance at signing (what resolution needs) and the task id. Executor only; an approve-only copy answers
-`market/status` from the executor.
+Each hire's payment is an operation in the agent's journal (`.ops/`): its terms, the delegate's nonce and
+`max_block_height`, and the key's balance at signing (what resolution needs). The market's task id and observed task
+states are kept in separate evidence beside the journal. Executor only; an approve-only copy answers `market/status`
+from the executor.
 
 ### Rollback
 
