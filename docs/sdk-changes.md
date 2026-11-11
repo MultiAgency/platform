@@ -12,7 +12,7 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
-## 0.5.7 (unreleased)
+## 0.5.7 (2026-11-11)
 
 - **A DAO's `market` consent covers its market agent's own owner actions** (platform#67; the user's decision,
   2026-11-11): under a DAO consent carrying `market`, `owner/prepare` with `signer: "dao"` files the market agent's
@@ -36,8 +36,8 @@ platform-only fixes are listed separately.
 - **One requestId, one DAO hire** (platform#70): `daoHires.file` for a `requestId` already filed with the same terms
   answers that request (200, both `transactions` null, no new proposal) while it is relayed, signed or still within its
   vote; with other terms it is refused `request_conflict`, a new `AppGatewayCode` (**Breaking for exhaustive switches**).
-  Before, each filing made a new proposal, even for a hire
-  already paid (passing it moved nothing). One that lapsed unsigned is filed anew. Offline-tested (`test/app-dao.test.ts`).
+  Before, each filing made a new proposal, even for a hire already paid (passing it moved nothing). One that lapsed
+  unsigned is filed anew. Offline-tested (`test/app-dao.test.ts`).
 - **One owner action of a kind at a time** (addition): `owner/prepare` refuses a second owner action of a kind with
   `code: "owner_action_open"` while one is submitted, or a DAO's is still open and unexpired, as it already did for a
   hosted agent's creation. A freeze and an unfreeze hold each other; a vote is held only by a vote on the same held
