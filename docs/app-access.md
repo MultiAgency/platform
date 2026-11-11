@@ -233,7 +233,7 @@ the brief and how long the approval may last; `GET /apps/v1/dao-hires/<hash>` re
 provider records it, then pays the hire once; a DAO-owned market agent refuses a plain `market/hire`), on a market
 agent's own owner actions under a consent carrying `market` (0.5.7, #67, the user's decision of 2026-11-11: its `market`
 grant and that grant's revocation, freeze, unfreeze, and a policy edit of `limits`, `budget` and `max_actions_per_hour`
-only, `daoMarketMayAsk`; a cap can't move money by itself, since every hire is paid only after its own vote and a
+only, raising, lowering or removing those caps, `daoMarketMayAsk`; a cap can't move money by itself, since every hire is paid only after its own vote and a
 top-up only to the payment key by what an approved hire lacks; other policy fields, and every owner action on an agent
 that isn't a market agent, still need `treasury`), and on
 the `treasury` grant, revoking a grant, a policy edit, freeze and unfreeze (`owner/prepare` with `signer: "dao"`, which

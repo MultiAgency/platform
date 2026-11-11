@@ -175,7 +175,7 @@ Each line is a gap; the linked page says how the rest is known. The
   `treasury`, from 0.5.1) by the DAO's vote and an app's swap proposal approved by DAO vote and executed (2026-11-05,
   [mainnet log](docs/mainnet-log.md#a-dao-funds-its-agent-and-approves-a-swap-through-an-app-on-platform-staging-2026-11-05-utc)). Freeze and unfreeze by DAO vote are offline-tested only. The provider's owner intents (creation, grant, freeze) expire in 600 s or about 290 s (provider docs),
   so only a DAO whose vote passes that fast completes them; a slower DAO can approve swaps one proposal at a time but
-  can't turn on autopilot (#20). A DAO's own stop (no app) ends what was given before it is applied; that happens only
+  can't turn on autopilot (#20), nor grant its market agent, so it can't hire on the agent market. A DAO's own stop (no app) ends what was given before it is applied; that happens only
   when someone opens its page after the vote, and the provider grant stands, so a consent the DAO gives later can turn
   autopilot on again. See [app access](docs/app-access.md).
 - A wallet owner's own stop (no app; `/confirm/wallet/stop`) ends app consents and turns autopilot off for one agent or
