@@ -19,6 +19,13 @@ evidence refuses. Every listed public and confidential balance must be zero unle
 agent this also checks the payment key's native NEAR (including locked storage) and USDC. Other unsolicited assets on
 that key are not enumerated; retain the key and inspect it before explicitly leaving funds behind.
 
+The separate Treasury limit-order feature adds a release check for every tracked order and each order listed by the
+provider. It rereads each provider order because the list may be stale. An open, payout-failed, unidentified or
+unreadable order refuses release even with `allowBalance: true`; a resting order may still fill after archive.
+Because the provider list can lag, this check cannot prove the absence of an external order omitted from it.
+Reconcile externally placed orders with the provider before owner-run release.
+This addition is offline-tested only and is not in the tagged 0.5.6 release. See [limit orders](limit-orders.md).
+
 A refusal returns `{ state: "refused", reason, balances }`; it writes no release marker. A successful check first writes
 `RELEASED_AT` and `RELEASED_ARCHIVE` in the kept instance settings and turns autopilot off. Every later dispatch and
 owner-action submission refuses `agent_released`, including from another process sharing those settings. The gateway

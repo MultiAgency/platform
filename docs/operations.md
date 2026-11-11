@@ -52,6 +52,19 @@ unexecuted, and a `requestId` an app sends again then makes a new proposal there
 again. Rolling forward, an agent's own directory wins over such a duplicate. Stop writers before copying state; never start the destination before stopping the
 source. The lease coordinates processes on one host only.
 
+The separate Treasury limit-order feature writes additive records beneath `.proposals/limit-orders/<agent id>/`:
+the exact owner-approved order, one placement identity, complete fill and payout observations, and a one-way
+cancellation claim. Preserve the whole `.proposals/` tree and `.ops/` journal together, after stopping the executor.
+The new `limit_order` and `limit_order_cancel` journal methods make a host that has attempted either action
+incompatible with the 0.5.6 reader; its older reader refuses the journal rather than silently discarding the send.
+Do not roll that agent back to 0.5.6 after an order attempt. A host with only new proposal records has not crossed the
+journal boundary, but its older build ignores those proposals; keep them intact and do not resend their `requestId`s
+until the compatible build returns. See [limit orders](limit-orders.md).
+
+DAO order votes add `limit_order` request records under `.app-access/dao-requests/`. Preserve that directory with
+the rest of `.app-access/`. A pre-feature gateway reader may reject these records; finish or explicitly review an
+in-flight DAO vote before rolling the gateway back, even if no order was placed.
+
 ## Work-order executors
 
 Work-order support is locally implemented and offline-tested, not deployed or mainnet-observed.

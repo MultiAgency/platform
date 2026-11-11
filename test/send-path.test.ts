@@ -5,8 +5,9 @@ import { test } from "node:test";
 import { assertDryGrantUses, memberName, syntax, walk } from "./fixtures/source-analysis.mjs";
 
 /**
- * Every money action leaves through one door: `dispatch` → `send` in src/agent.ts, the only code that
- * calls a grant's money methods. Anything else reaching a grant must be a dry quote. A new send path
+ * Every money action leaves through one door: `dispatch` in src/agent.ts. Execution calls pass through
+ * its module-private `submitClaimed` → `send`; the provider's keyless cancellation is claimed and sent
+ * in the dispatch-only cancellation branch. Anything else reaching a grant must be a dry quote. A new send path
  * fails here before it can skip the checks `dispatch` runs.
  */
 
@@ -32,7 +33,7 @@ test("outside src/agent.ts, the grant factory is used only for explicit dry quot
   assert.ok(uses > 0, "the quote site moved: update this test");
 });
 
-test("inside src/agent.ts, money methods are called only from send, which only dispatch can unlock", () => {
+test("inside src/agent.ts, execution methods are called only from send", () => {
   const text = sources.find((s) => s.path === "src/agent.ts")!.text;
   const outside: string[] = [];
   walk(syntax(text), (node, parents) => {
@@ -48,10 +49,10 @@ test("inside src/agent.ts, money methods are called only from send, which only d
   assert.doesNotMatch(text, /export\s+(const|let)\s+FIRST_SUBMISSION/);
 });
 
-const MONEY = ["swap", "transfer", "shield", "unshield", "withdraw", "forGrant"];
+const MONEY = ["swap", "transfer", "shield", "unshield", "withdraw", "placeLimitOrder", "cancelLimitOrder", "forGrant"];
 const enclosingFunction = (parents: any[]) => [...parents].reverse().find(p => ["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression", "ObjectMethod", "ClassMethod"].includes(p.type));
 
-test("the permitted send is called only inside dispatch, and only once", () => {
+test("the permitted send is called once inside a private helper reached only through dispatch", () => {
   const text = sources.find((s) => s.path === "src/agent.ts")!.text;
   const permitted: (string | undefined)[] = [];
   walk(syntax(text), (node, parents) => {
@@ -59,7 +60,27 @@ test("the permitted send is called only inside dispatch, and only once", () => {
     if (!node.arguments.some((a: any) => a.type === "Identifier" && a.name === "FIRST_SUBMISSION")) return;
     permitted.push(enclosingFunction(parents)?.id?.name);
   });
-  assert.deepEqual(permitted, ["dispatch"]);
+  assert.deepEqual(permitted, ["submitClaimed"]);
+  const callers: (string | undefined)[] = [];
+  walk(syntax(text), (node, parents) => {
+    if (node.type === "CallExpression" && node.callee.type === "Identifier" && node.callee.name === "submitClaimed")
+      callers.push(enclosingFunction(parents)?.id?.name);
+  });
+  assert.deepEqual(callers.sort(), ["dispatch", "dispatchLimitOrder"].sort());
+  assert.doesNotMatch(text, /export\s+(?:async\s+)?function\s+submitClaimed/);
+});
+
+test("the provider cancellation POST is reachable only through dispatch's claimed branch", () => {
+  const text = sources.find(s => s.path === "src/agent.ts")!.text;
+  const callers: (string | undefined)[] = [];
+  walk(syntax(text), (node, parents) => {
+    if (node.type === "CallExpression" && memberName(node.callee) === "cancelLimitOrder")
+      callers.push(enclosingFunction(parents)?.id?.name);
+  });
+  assert.deepEqual(callers, ["dispatchLimitOrderCancellation"]);
+  assert.match(text, /claimOrderCancellation\(proposalId, placed\.orderId\)/);
+  assert.match(text, /claimSubmission\(key, request\)/);
+  assert.match(text, /return dispatchLimitOrderCancellation\(lock, action\.request\.proposalId\)/);
 });
 
 // Known destructurings of a same-named field that is not a grant client method, each with its reason.

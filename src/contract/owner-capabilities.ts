@@ -19,6 +19,8 @@ export const ownerCapabilities = {
   "treasury-plans-v1": { routes: [], procedures: ["rebalance", "externalPlan", "executePlan"] },
   /** Proposals an app makes and the owner approves later (docs/enforcement.md, "Treasury proposals"); apps only. */
   "treasury-proposals-v1": { routes: [], procedures: ["proposals/create", "proposals/get", "proposals/list", "proposals/approve", "proposals/reject", "proposals/withdraw", "proposals/execute"] },
+  /** Exact owner-signed resting orders; the app's separate consent still gates every call. */
+  "treasury-limit-orders-v1": { routes: [], procedures: ["limitOrders/quote", "limitOrders/create", "limitOrders/get", "limitOrders/list", "limitOrders/approve", "limitOrders/reject", "limitOrders/place", "limitOrders/cancel", "limitOrders/refresh"] },
   "treasury-recovery-v1": { routes: [], procedures: ["recover"] },
   "payables-payments-v1": { routes: [], procedures: ["pay", "paymentHistory", "paymentStatus", "invoices", "cancelPreparedInvoice", "ledger", "ledgerCsv", "reconcileBooks"] },
   "payables-payout-requests-v1": { routes: [], procedures: ["payouts/request", "payouts/status"] },

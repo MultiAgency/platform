@@ -41,12 +41,16 @@ export const treasuryPolicy: Policy = {
 
 /**
  * Why `policy` should not let this action through, beyond what the API checks; null when nothing.
- * The provider's asset list restricts what a swap spends. This application additionally refuses
- * swaps that buy an unlisted asset, which the agent otherwise could not sell under the same policy.
+ * The provider's asset list restricts what an action spends. This application additionally refuses
+ * swaps and limit orders that acquire an unlisted asset, which the agent otherwise could not sell
+ * under the same policy.
  */
 export function outputAssetRefusal(action: Action, policy: Policy): string | null {
-  if (action.method !== "swap") return null;
-  return mayBuy(policy.assets, action.request.destination_asset) ? null : `the swap buys ${action.request.destination_asset}, outside the policy's assets`;
+  const output = action.method === "swap" ? action.request.destination_asset
+    : action.method === "limit_order" ? action.request.side === "buy" ? action.request.base_asset : action.request.quote_asset
+    : null;
+  if (output === null || mayBuy(policy.assets, output)) return null;
+  return `${action.method === "swap" ? "the swap buys" : "the limit order acquires"} ${output}, outside the policy's assets`;
 }
 
 export const mayBuy = (assets: Policy["assets"], asset: string) => assets === "any" || assets.includes(asset);

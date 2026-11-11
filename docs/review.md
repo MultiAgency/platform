@@ -55,9 +55,11 @@ The canonical list is the README's [Not done yet](../README.md#not-done-yet). Th
   the policy without it.
 - The autopilot hasn't run unattended for days on mainnet.
 
-The 0.5.6 candidate uses provider SDK 0.8.2, with policy evidence compatibility tested for `limit_order` and unchanged
-refusal/idempotency behavior. This adds no order execution or native signing route. The dependency review uses pinned
-public source and official skills; the deployed provider version remains unverified. See
+The tagged 0.5.6 SDK uses provider SDK 0.8.2, with policy evidence compatibility tested for `limit_order` and unchanged
+refusal/idempotency behavior. A later, separate Treasury limit-order feature is in progress with local order routes,
+owner signatures, a dedicated app consent and offline recovery tests; it is not part of that tag. No live order was
+placed by this platform, the Treasury app consumer is unfinished, and production provider support was absent in a
+read-only check. Native signing remains out of scope. See [limit orders](limit-orders.md) and
 [provider SDK upgrade](provider-sdk-082.md).
 
 ## Checking it yourself

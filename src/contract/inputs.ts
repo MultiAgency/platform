@@ -64,6 +64,11 @@ export const ownerAction = z.discriminatedUnion("type", [
     expectedPolicy: reviewedPolicy,
     changes: z.object({
       swap: z.boolean().optional(),
+      /** Off by default. Enabling requires the owner's explicit 0–300 bps price-deviation ceiling. */
+      limit_order: z.discriminatedUnion("enabled", [
+        z.strictObject({ enabled: z.literal(true), max_deviation_bps: z.number().int().min(0).max(300) }),
+        z.strictObject({ enabled: z.literal(false) }),
+      ]).optional(),
       destinations: z.array(z.object({ address: transferAccount, confidential: z.boolean() })).max(64).optional(),
       /** NEAR accounts paid by withdrawal to chain `near` (no memo); withdrawals are on exactly while there is one. */
       withdrawals: z.array(z.object({ address: nearAccount })).max(64).optional(),

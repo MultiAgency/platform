@@ -39,6 +39,8 @@ const nearWithdrawal = (d: Policy["destinations"]["list"][number]) => d.action =
 export type PolicyChanges = Partial<Pick<Policy, "assets" | "owner_approval" | "limits" | "max_actions_per_hour" | "budget">> & {
   /** Whether the agent may swap between its assets. */
   swap?: boolean;
+  /** Explicit owner-signed permission to place limit orders, with its price-deviation ceiling. */
+  limit_order?: { enabled: true; max_deviation_bps: number } | { enabled: false };
   /** The treasury it may return funds to and the payees in its agreement. */
   destinations?: TransferDestination[];
   /** The NEAR accounts it pays by withdrawal. */
@@ -57,7 +59,9 @@ export async function policyRequest(changes: PolicyChanges, expectedPolicy: Revi
 }
 
 /** The provider request for a reviewed policy edit, and the policy in force it replaces. */
-export async function policyChange({ swap, destinations, withdrawals, ...asked }: PolicyChanges, expectedPolicy: ReviewedPolicy) {
+export async function policyChange({ swap, limit_order: limitOrder, destinations, withdrawals, ...asked }: PolicyChanges, expectedPolicy: ReviewedPolicy) {
+  if (limitOrder?.enabled && (!Number.isInteger(limitOrder.max_deviation_bps) || limitOrder.max_deviation_bps < 0 || limitOrder.max_deviation_bps > 300))
+    throw new PublicError("A limit order's maximum price deviation must be an integer from 0 to 300 basis points.");
   // A field sent as undefined (the serializer keeps the key) leaves it as it is in force.
   const fields = Object.fromEntries(Object.entries(asked).filter(([, value]) => value !== undefined));
   const id = agentId();
@@ -72,14 +76,21 @@ export async function policyChange({ swap, destinations, withdrawals, ...asked }
   const others = policy.destinations.list.filter((d) => d.action !== "transfer" && !nearWithdrawal(d));
   const withdraws = withdrawals === undefined ? policy.actions.includes("withdraw") : toNear.length > 0 || others.some((d) => d.action === "withdraw");
   const swaps = swap ?? policy.actions.includes("swap");
+  // An unrelated edit preserves both the provider's existing permission and its deviation rule.
+  // An explicit opt-out removes both, so a later opt-in must name its ceiling again.
+  const { limit_order: previousLimitOrder, ...basePolicy } = policy;
+  const orderRule = limitOrder === undefined ? previousLimitOrder
+    : limitOrder.enabled ? { max_deviation_bps: limitOrder.max_deviation_bps } : undefined;
   const next: Policy = {
-    ...policy,
+    ...basePolicy,
     ...fields,
+    ...(orderRule !== undefined && { limit_order: orderRule }),
     actions: [
-      ...policy.actions.filter((a) => a !== "swap" && a !== "transfer" && a !== "withdraw"),
+      ...policy.actions.filter((a) => a !== "swap" && a !== "transfer" && a !== "withdraw" && (limitOrder === undefined || a !== "limit_order")),
       ...(swaps ? (["swap"] as const) : []),
       ...(transfers.length ? (["transfer"] as const) : []),
       ...(withdraws ? (["withdraw"] as const) : []),
+      ...(limitOrder?.enabled ? (["limit_order"] as const) : []),
     ],
     destinations: {
       mode: "only",

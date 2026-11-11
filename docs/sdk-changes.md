@@ -49,7 +49,7 @@ Platform changes in this release, outside the package:
   with the read+market consent couldn't grant its market agent. Other policy fields, and owner actions on any agent that
   isn't a market agent, still need `treasury`. Each is still a proposal the DAO votes on. Offline-tested
   (`test/app-dao.test.ts`).
-- **A quote for an agent the market can't hire is refused with a code** (reclassification,
+- **A quote for an agent the market can't hire is refused with a code** (reclassification; **Breaking for exhaustive switches**,
   platform#66): `market/quote`, and the re-quote inside `market/hire`, answer `refused` with `agent_not_found`
   (the market's `-32001`), `agent_not_hireable` (`-32004`) or `quote_refused` (`-32602`). Before, `market/quote`
   answered `unavailable`, which tells an app to send the call again, and `market/hire` answered `refused` with
@@ -77,6 +77,11 @@ Platform changes in this release, outside the package:
   parses. Offline-tested (`test/provider-display.test.ts`).
 - **Docs:** the app-server skill says how a DAO hire filing shortens `validUntil` (the earliest of the request, the
   consent's expiry and `MAX_HIRE_APPROVAL_MS`) and that the answer carries the date the DAO votes on (platform#70).
+- **Treasury limit orders** (addition): a dedicated `treasury-orders` consent and SDK contract cover quotes, exact
+  owner approval, guarded placement, live status reads and one-way cancellation. Order views include digests of saved
+  approval or rejection signatures so a DAO vote relay can reconcile a lost HTTP answer without signing or sending
+  again. This feature is absent from the tagged 0.5.6 package. Its platform path has offline tests; Treasury app release
+  integration and live order lifecycle checks remain release gates. See [limit orders](limit-orders.md).
 
 
 Platform changes in this release, outside the package:
@@ -84,7 +89,7 @@ Platform changes in this release, outside the package:
   said "work order payout"; platform#67's report), and the simulated market can list an agent that isn't taking calls
   (`outcome: "closed"`, answering `-32004`).
 - **Calls carrying a signature have their own request budget** (platform#59): a setup, a consent and its nonce, an
-  owner action's `owner/submit`, and the DAO request reads that relay a passed vote's signature no longer share a
+  owner action's `owner/submit`, a limit order's approval or rejection, and the DAO request reads that relay a passed vote's signature no longer share a
   credential's hourly budget with its other calls; they draw on a second budget of the same size. Another tenant's traffic
   can't refuse them with a 429 inside the signature's window, and they still can't exceed a limit of their own. Each 429
   is logged with its budget and, when the path names one, its Organization (at most once a minute per credential and

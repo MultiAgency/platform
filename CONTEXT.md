@@ -43,10 +43,12 @@ attempted unknown payments remain poll-only. Once a payment operation is recorde
 are refused. A top-up alone has no requestId-bound payment operation yet; its status can still be `not_found`.
 
 **Limit order**:
-A provider order funded now that rests until filled, cancelled or expired. Provider `SUCCESS` means funded/resting,
-not filled or paid. SDK 0.8.2 adds its API and policy action; the platform reads that policy evidence and preserves it
-on unrelated edits but exposes no order execution or cancellation route. It is not a platform journal method or a new
-permission in the default policies. See docs/provider-sdk-082.md.
+A provider order funded now that rests until filled, canceled or expired. Provider placement `SUCCESS` means funded,
+not filled or paid. In the separate Treasury feature, the owner signs an exact order proposal after explicitly
+enabling the `limit_order` policy action, and an app needs the dedicated `treasury-orders` consent. Placement and
+cancellation are journaled once; partial fills and payout finality are read and retained separately. The default
+policy still leaves this action off. The feature is in progress and has no live placement observation. See
+docs/limit-orders.md and docs/provider-sdk-082.md.
 
 **Area** / **Brief**:
 An area is what one agent shows: **Payables** (the payout agent), **Treasury** (the treasury agent) or **market** (the

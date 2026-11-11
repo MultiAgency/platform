@@ -1,4 +1,5 @@
 import lockfile from "proper-lockfile";
+import { assertSuccessfulOrderEvidence } from "./limit-orders/store.js";
 import { blocksDispatch, type Op, opsLog, readOps, resolveUnsubmitted } from "./ops.js";
 
 /**
@@ -78,7 +79,9 @@ export function assertMoneyLock(lock: MoneyLock) {
 export function assertCanDispatch(lock: MoneyLock, initiatingKey?: string) {
   assertMoneyLock(lock);
   assertNotStopping();
-  const unresolved = readOps().filter((op) => blocksDispatch(op) && op.idempotencyKey !== initiatingKey);
+  const ops = readOps();
+  assertSuccessfulOrderEvidence(ops);
+  const unresolved = ops.filter((op) => blocksDispatch(op) && op.idempotencyKey !== initiatingKey);
   if (unresolved.length) throw new UnresolvedOperations(unresolved);
 }
 
@@ -128,7 +131,9 @@ export async function acquireMoneyLock({ reconcile = false }: { reconcile?: bool
     assertMoneyLock(lock);
     resolveUnsubmitted();
     if (!reconcile) {
-      const unresolved = readOps().filter(blocksDispatch);
+      const ops = readOps();
+      assertSuccessfulOrderEvidence(ops);
+      const unresolved = ops.filter(blocksDispatch);
       if (unresolved.length > 0) throw new UnresolvedOperations(unresolved);
     }
   } catch (error) {

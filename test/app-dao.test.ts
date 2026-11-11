@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { accessLogText } from "./fixtures/harness.js";
 import { createServer, request, type Server } from "node:http";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { writeAtomic } from "../src/synced.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +10,7 @@ import { test } from "node:test";
 import { generateKey } from "near-kit";
 import { daoMarketMayAsk } from "../src/contract/app-access.js";
 import { consentMessage, setupMessage } from "../src/contract/app-consent.js";
+import { appClient } from "../src/contract/app-client.js";
 import { AppConsents, AppCredentials, sweepConsentKeys } from "../src/gateway/app-access.js";
 import { APP_ROOT, appRoutes, confirms, type HostedSetup } from "../src/gateway/app-routes.js";
 import { confirmRoutes } from "../src/gateway/app-confirm.js";
@@ -20,6 +22,7 @@ import { sendFailure } from "../src/http.js";
 import { rawKey } from "../src/nep413.js";
 
 const HOST = "platform.test", DAO = "agentic.sputnik-dao.near";
+const httpFetch = globalThis.fetch;
 const later = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
 const listen = (server: Server) => new Promise<number>(resolve => server.listen(0, "127.0.0.1", () => resolve((server.address() as { port: number }).port)));
 const close = (server: Server) => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
@@ -50,6 +53,7 @@ async function harness(t: import("node:test").TestContext) {
     derived: null as typeof signer | null,
     /** Runs while the agent's server is asked who owns it, as a chain read in flight. */
     onIdentity: null as null | (() => void | Promise<void>),
+    onLatestBlock: null as null | (() => void | Promise<void>),
     /** Whether the stop page may be opened once more this hour. */
     mayOpen: (_key: string) => true };
   const forwarded: { path: string; headers: Record<string, unknown>; body: any }[] = [];
@@ -75,7 +79,7 @@ async function harness(t: import("node:test").TestContext) {
     owner: async () => state.derived ?? signer,
   };
   const daoVotes: DaoVotes = {
-    latestBlock: async () => 1_000, nextProposalId: async () => 57,
+    latestBlock: async () => { await state.onLatestBlock?.(); return 1_000; }, nextProposalId: async () => 57,
     findSignature: async (_dao, { hash }) => { if (state.findDown) throw new Error("indexer down"); return state.passed.get(hash) ?? state.signature; },
   };
   const server = createServer(async (req, res) => { try {
@@ -111,8 +115,8 @@ async function harness(t: import("node:test").TestContext) {
   const pass = (hash: string) => { state.passed.set(hash, Buffer.from(daoKey.sign(Buffer.from(hash, "hex")).data)); };
   const rpc = (procedure: string, org = "org_1") => `/apps/v1/o/${org}/a/treasury/rpc/${procedure}`;
   /** Files a consent and has the DAO vote it through: the stored consent's id. */
-  const consented = async () => {
-    const { request: pending } = (await file()).body;
+  const consented = async (over = {}) => {
+    const { request: pending } = (await file(over)).body;
     vote(pending.hash);
     const signed = await call(port, `/apps/v1/dao-consents/${pending.hash}`, "GET", staging);
     assert.equal(signed.body.state, "signed");
@@ -254,6 +258,218 @@ const PROPOSAL = { id: "p-1", requestId: "r-1", agentId: "provider-id", deployme
   legs: [{ from: "nep141:usdc.test", to: "nep141:wrap.near", amount: "1000000", minAmountOut: "200000000000000000000000" }],
   quoted: [], policyRevision: 3, policyDigest: "d".repeat(64), strategyDigest: "s".repeat(64), createdAt: new Date().toISOString(),
   expiresAt: later(2), note: null, sha256: "e".repeat(64), state: "proposed", reason: null, approvedAt: null, planId: null, operations: [] };
+
+const ORDER = { id: "a".repeat(32), requestId: "order-r-1", agentId: "provider-id", deployment: "staging", organization: "org_1",
+  order: { base_asset: "nep141:wrap.near", quote_asset: "nep141:usdc.test", side: "buy", quantity: "1000000000000000000000000",
+    price: "3.25", deadline: later(1), confidential: true },
+  spendAsset: "nep141:usdc.test", spendAmount: "3250000", outputAsset: "nep141:wrap.near",
+  policyRevision: 3, policyDigest: "d".repeat(64), strategyDigest: "s".repeat(64), createdAt: new Date().toISOString(),
+  expiresAt: later(2), note: null, sha256: "e".repeat(64), state: "proposed", reason: null, approvedAt: null,
+  correlationId: null, orderId: null, fillStatus: null, payoutStatus: null, isPayoutStatusFinal: null, partialFills: null,
+  payouts: null, cancelRequestedAt: null, operation: null };
+
+test("a DAO votes on exact limit-order terms under both scopes, and relays its owner signature once", async t => {
+  const { port, state, forwarded, signer, staging, production, vote, consented } = await harness(t);
+  const treasuryOnly = await consented();
+  state.replies["/rpc/limitOrders/get"] = { status: 200, json: ORDER };
+  const ask = (verdict: "approve" | "reject" = "approve") => call(port, "/apps/v1/dao-limit-orders", "POST", staging,
+    { organization: "org_1", agent: "treasury", order: ORDER.id, verdict });
+  const before = forwarded.length;
+  assert.equal((await ask()).status, 403, "a plain Treasury consent does not authorize order votes");
+  assert.equal(forwarded.length, before);
+
+  const orderConsent = await consented({ scopes: ["read", "treasury", "treasury-orders"] });
+  const filed = await ask();
+  assert.equal(filed.status, 201, JSON.stringify(filed.body));
+  const read = forwarded.at(-1)!;
+  assert.deepEqual([read.path, read.headers["x-gateway-actor"], read.headers["x-gateway-consent"], read.headers["x-gateway-consents"]],
+    ["/rpc/limitOrders/get", "app:staging:org_1", orderConsent, orderConsent]);
+  const { request: pending } = filed.body;
+  assert.match(pending.description, /Approve Treasury limit order/);
+  assert.match(pending.description, /buy 1000000000000000000000000 atomic units of nep141:wrap\.near at price 3\.25/);
+  assert.match(pending.description, /Gross spend 3250000 atomic units of nep141:usdc\.test/);
+  assert.ok(pending.votingUntil <= Date.parse(ORDER.expiresAt));
+  assert.equal(filed.body.transactions.proposal.receiverId, DAO);
+  assert.equal((await call(port, `/apps/v1/dao-limit-orders/${pending.hash}`, "GET", production)).status, 404);
+
+  const stateOf = () => call(port, `/apps/v1/dao-limit-orders/${pending.hash}`, "GET", staging);
+  assert.equal((await stateOf()).body.state, "pending");
+  const justFiled = forwarded.length;
+  vote(pending.hash, generateKey());
+  assert.equal((await stateOf()).body.state, "pending", "another key's signature relays nothing");
+  assert.equal(forwarded.length, justFiled);
+  vote(pending.hash);
+  state.replies["/rpc/limitOrders/approve"] = { status: 200, json: { ...ORDER, state: "approved",
+    approvalSignatureHash: createHash("sha256").update(state.signature!.toString("base64")).digest("hex") } };
+  const relayed = await stateOf();
+  assert.equal(relayed.status, 200, JSON.stringify(relayed.body));
+  assert.deepEqual([relayed.body.state, relayed.body.orderState], ["relayed", "approved"]);
+  const approval = forwarded.at(-1)!;
+  assert.equal(approval.path, "/rpc/limitOrders/approve");
+  assert.deepEqual([approval.headers["x-gateway-consent"], approval.headers["x-gateway-consents"]], [orderConsent, orderConsent]);
+  assert.equal(approval.body.json.id, ORDER.id);
+  assert.equal(approval.body.json.signed.publicKey, signer.public_key);
+  assert.match(approval.body.json.signed.message, new RegExp(`^Approve Treasury limit order ${ORDER.id}\\n`));
+  assert.equal((await stateOf()).body.state, "relayed");
+  assert.equal(forwarded.length, justFiled + 1, "a recorded relay is never sent again");
+
+  const client = appClient({ base: `http://127.0.0.1:${port}`, credential: staging, fetch: httpFetch });
+  const clientFiled = await client.daoLimitOrders.file({ organization: "org_1", agent: "treasury", order: ORDER.id, verdict: "reject" });
+  assert.ok(clientFiled.ok, JSON.stringify(clientFiled));
+  const clientState = await client.daoLimitOrders.state(clientFiled.value.request.hash);
+  assert.equal(clientState.ok && clientState.value.state, "pending", "the SDK parses the DAO order vote state");
+
+  state.signature = null;
+  const second = await ask("reject");
+  assert.equal(second.status, 201);
+  const secondHash = second.body.request.hash as string;
+  assert.equal((await call(port, `/apps/v1/consents/${orderConsent}`, "DELETE", staging)).status, 200);
+  vote(secondHash);
+  const beforeEnded = forwarded.length;
+  assert.equal((await call(port, `/apps/v1/dao-limit-orders/${secondHash}`, "GET", staging)).status, 409,
+    "the consent filed under must remain live even if a plain Treasury consent survives");
+  assert.equal(forwarded.length, beforeEnded);
+  assert.ok(treasuryOnly);
+});
+
+test("a DAO order vote refuses stale or unrelated terms, then polls a claimed relay without resubmission", async t => {
+  const { port, state, forwarded, staging, vote, consented } = await harness(t);
+  await consented({ scopes: ["treasury", "treasury-orders"] });
+  const ask = () => call(port, "/apps/v1/dao-limit-orders", "POST", staging,
+    { organization: "org_1", agent: "treasury", order: ORDER.id, verdict: "reject" });
+  state.replies["/rpc/limitOrders/get"] = { status: 200, json: { ...ORDER, state: "approved" } };
+  const closed = await ask();
+  assert.deepEqual([closed.status, closed.body.code], [409, "order_not_open"],
+    "a voted or otherwise closed order cannot receive a new DAO ballot");
+  state.replies["/rpc/limitOrders/get"] = { status: 200, json: { ...ORDER, deployment: "another-app" } };
+  const unrelated = await ask();
+  assert.deepEqual([unrelated.status, unrelated.body.code], [409, "order_unanswered"],
+    "the gateway checks the agent's claimed order identity");
+  state.replies["/rpc/limitOrders/get"] = { status: 200, json: { ...ORDER, order: { ...ORDER.order, deadline: new Date(Date.now() + 30_000).toISOString() } } };
+  assert.equal((await ask()).status, 409, "the order deadline must leave time for the vote");
+
+  state.replies["/rpc/limitOrders/get"] = { status: 200, json: ORDER };
+  const filed = await ask();
+  assert.equal(filed.status, 201);
+  const hash = filed.body.request.hash as string;
+  state.replies["/rpc/limitOrders/reject"] = { status: 400, json: { defined: true, code: "temporary", status: 400, message: "unavailable" } };
+  vote(hash);
+  const first = await call(port, `/apps/v1/dao-limit-orders/${hash}`, "GET", staging);
+  assert.deepEqual([first.status, first.body.code], [409, "relay_unresolved"]);
+  const attempts = forwarded.filter(e => e.path === "/rpc/limitOrders/reject");
+  assert.equal(attempts.length, 1);
+  const receipt = createHash("sha256").update(state.signature!.toString("base64")).digest("hex");
+  const saved = JSON.parse(readFileSync(join(".app-access", "dao-requests", `${hash}.json`), "utf8"));
+  assert.equal(saved.relayAttempt.signatureHash, receipt, "the first attempt is durable before the relay returns");
+  state.replies["/rpc/limitOrders/get"] = { status: 200, json: { ...ORDER, state: "rejected", rejectionSignatureHash: receipt } };
+  const again = await call(port, `/apps/v1/dao-limit-orders/${hash}`, "GET", staging);
+  assert.deepEqual([again.status, again.body.state, again.body.orderState], [200, "relayed", "rejected"]);
+  assert.equal(forwarded.filter(e => e.path === "/rpc/limitOrders/reject").length, 1,
+    "a later poll never resubmits a claimed owner signature");
+});
+
+test("a lost DAO order approval reply reconciles the exact signature from the agent without another relay", async t => {
+  const { port, state, forwarded, staging, vote, consented } = await harness(t);
+  await consented({ scopes: ["treasury", "treasury-orders"] });
+  state.replies["/rpc/limitOrders/get"] = { status: 200, json: ORDER };
+  const filed = await call(port, "/apps/v1/dao-limit-orders", "POST", staging,
+    { organization: "org_1", agent: "treasury", order: ORDER.id, verdict: "approve" });
+  assert.equal(filed.status, 201);
+  const hash = filed.body.request.hash as string;
+  vote(hash);
+  const receipt = createHash("sha256").update(state.signature!.toString("base64")).digest("hex");
+  state.replies["/rpc/limitOrders/approve"] = { status: 503, json: { error: "reply lost" } };
+  state.replies["/rpc/limitOrders/get"] = { status: 200, json: { ...ORDER, state: "approved", approvalSignatureHash: receipt } };
+  const read = () => call(port, `/apps/v1/dao-limit-orders/${hash}`, "GET", staging);
+  const relayed = await read();
+  assert.deepEqual([relayed.body.state, relayed.body.orderState], ["relayed", "approved"]);
+  assert.equal((await read()).body.state, "relayed");
+  assert.equal(forwarded.filter(row => row.path === "/rpc/limitOrders/approve").length, 1,
+    "a stored signature digest resolves the lost reply without another owner-signature submission");
+});
+
+test("a claimed DAO order relay is reconciled after its signing window expires", async t => {
+  const { port, state, forwarded, staging, vote, consented } = await harness(t);
+  await consented({ scopes: ["treasury", "treasury-orders"] });
+  state.replies["/rpc/limitOrders/get"] = { status: 200, json: ORDER };
+  const filed = await call(port, "/apps/v1/dao-limit-orders", "POST", staging,
+    { organization: "org_1", agent: "treasury", order: ORDER.id, verdict: "approve" });
+  assert.equal(filed.status, 201);
+  const hash = filed.body.request.hash as string;
+  vote(hash);
+  const receipt = createHash("sha256").update(state.signature!.toString("base64")).digest("hex");
+  state.replies["/rpc/limitOrders/approve"] = { status: 503, json: { error: "reply lost" } };
+  const read = () => call(port, `/apps/v1/dao-limit-orders/${hash}`, "GET", staging);
+  assert.deepEqual([(await read()).status, forwarded.filter(row => row.path === "/rpc/limitOrders/approve").length], [409, 1]);
+  const saved = JSON.parse(readFileSync(join(".app-access", "dao-requests", `${hash}.json`), "utf8"));
+  assert.equal(saved.relayAttempt.signatureHash, receipt);
+  t.mock.method(Date, "now", () => saved.expiresAt + 1);
+  state.replies["/rpc/limitOrders/get"] = { status: 200,
+    json: { ...ORDER, state: "approved", approvalSignatureHash: receipt } };
+  assert.equal((await read()).body.state, "relayed", "expiry cannot hide a signature that was already submitted");
+  assert.equal(forwarded.filter(row => row.path === "/rpc/limitOrders/approve").length, 1);
+});
+
+test("revoking an app credential during DAO order filing chain reads stores no vote", async t => {
+  const { port, state, staging, consented } = await harness(t);
+  await consented({ scopes: ["treasury", "treasury-orders"] });
+  state.replies["/rpc/limitOrders/get"] = { status: 200, json: ORDER };
+  const before = readdirSync(join(".app-access", "dao-requests"));
+  const credentials = new AppCredentials(".app-access");
+  state.onLatestBlock = () => {
+    for (const c of credentials.list()) if (c.deployment === "staging") credentials.revoke(c.id);
+    state.onLatestBlock = null;
+  };
+  const filed = await call(port, "/apps/v1/dao-limit-orders", "POST", staging,
+    { organization: "org_1", agent: "treasury", order: ORDER.id, verdict: "approve" });
+  assert.deepEqual([filed.status, filed.body.code], [403, "access_ended"]);
+  assert.deepEqual(readdirSync(join(".app-access", "dao-requests")), before, "the revoked app filed no durable DAO vote");
+});
+
+test("concurrent DAO order vote polls claim only one owner-signature relay", async t => {
+  const { port, state, forwarded, staging, vote, consented } = await harness(t);
+  await consented({ scopes: ["treasury", "treasury-orders"] });
+  state.replies["/rpc/limitOrders/get"] = { status: 200, json: ORDER };
+  const filed = await call(port, "/apps/v1/dao-limit-orders", "POST", staging,
+    { organization: "org_1", agent: "treasury", order: ORDER.id, verdict: "approve" });
+  assert.equal(filed.status, 201);
+  const hash = filed.body.request.hash as string;
+  vote(hash);
+  const receipt = createHash("sha256").update(state.signature!.toString("base64")).digest("hex");
+  state.replies["/rpc/limitOrders/approve"] = { status: 200,
+    json: { ...ORDER, state: "approved", approvalSignatureHash: receipt } };
+  state.replies["/rpc/limitOrders/get"] = { status: 200,
+    json: { ...ORDER, state: "approved", approvalSignatureHash: receipt } };
+  const read = () => call(port, `/apps/v1/dao-limit-orders/${hash}`, "GET", staging);
+  const [first, second] = await Promise.all([read(), read()]);
+  assert.deepEqual([first.body.state, second.body.state], ["relayed", "relayed"]);
+  assert.equal(forwarded.filter(row => row.path === "/rpc/limitOrders/approve").length, 1);
+});
+
+test("a 200 answer without the DAO's exact recorded verdict never closes its order vote", async t => {
+  const { port, state, forwarded, staging, vote, consented } = await harness(t);
+  await consented({ scopes: ["treasury", "treasury-orders"] });
+  state.replies["/rpc/limitOrders/get"] = { status: 200, json: ORDER };
+  const filed = await call(port, "/apps/v1/dao-limit-orders", "POST", staging,
+    { organization: "org_1", agent: "treasury", order: ORDER.id, verdict: "approve" });
+  assert.equal(filed.status, 201);
+  const hash = filed.body.request.hash as string;
+  vote(hash);
+  const receipt = createHash("sha256").update(state.signature!.toString("base64")).digest("hex");
+  const read = () => call(port, `/apps/v1/dao-limit-orders/${hash}`, "GET", staging);
+  state.replies["/rpc/limitOrders/approve"] = { status: 200, json: ORDER };
+  const unchanged = await read();
+  assert.deepEqual([unchanged.status, unchanged.body.code], [409, "relay_unresolved"]);
+  state.replies["/rpc/limitOrders/get"] = { status: 200,
+    json: { ...ORDER, id: "b".repeat(32), state: "approved", approvalSignatureHash: receipt } };
+  const mismatched = await read();
+  assert.deepEqual([mismatched.status, mismatched.body.code], [409, "relay_unresolved"]);
+  state.replies["/rpc/limitOrders/get"] = { status: 200,
+    json: { ...ORDER, state: "approved", approvalSignatureHash: receipt } };
+  const applied = await read();
+  assert.deepEqual([applied.body.state, applied.body.orderState], ["relayed", "approved"]);
+  assert.equal(forwarded.filter(row => row.path === "/rpc/limitOrders/approve").length, 1);
+});
 
 test("a DAO votes on an app's proposal from the platform's own text, and the platform relays the signature once", async t => {
   const { port, state, forwarded, signer, staging, production, vote, consented } = await harness(t);

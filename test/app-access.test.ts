@@ -601,6 +601,33 @@ test("a treasury consent reaches proposals, bound to that consent and host; a re
   assert.equal((await call(port, rpc("org_2", "executePlan"), "POST", staging, { json: { planId: "00000000-0000-0000-0000-000000000000" } })).status, 200);
 });
 
+test("a Treasury limit order needs both scopes in one consent, forwards only that consent, and checks the owner's signature", async t => {
+  const { port, forwarded, staging, rpc, consent } = await routeHarness(t);
+  await consent({ scopes: ["treasury"] });
+  assert.throws(() => consentMessage(fields({ scopes: ["treasury-orders"] })), /treasury-orders needs treasury/);
+  const ask = (path: string, input: unknown = { id: "a".repeat(32) }, headers?: Record<string, string>) =>
+    call(port, rpc("org_1", path), "POST", staging, { json: input }, headers);
+  assert.equal((await ask("limitOrders/get")).status, 403, "Treasury alone does not permit orders");
+  const full = (await consent({ scopes: ["treasury", "treasury-orders"] })).body.consent;
+  const forged = { "x-gateway-consent": "f".repeat(64), "x-gateway-host": "evil.test", "x-gateway-consents": "f".repeat(64) };
+  assert.equal((await ask("limitOrders/get", { id: "a".repeat(32) }, forged)).status, 200);
+  assert.equal(forwarded.at(-1)!.headers["x-gateway-consent"], full.id);
+  assert.equal(forwarded.at(-1)!.headers["x-gateway-host"], HOST);
+  assert.equal(forwarded.at(-1)!.headers["x-gateway-consents"], full.id, "the agent sees only consents with both scopes");
+  assert.equal(forwarded.at(-1)!.headers["x-gateway-actor"], "app:staging:org_1");
+
+  const before = forwarded.length;
+  const body = async (recipient: string) => ({ id: "a".repeat(32), signed: await signed("Approve exact limit order", "owner.near", recipient) });
+  assert.equal((await ask("limitOrders/approve", await body("other.test"))).status, 400);
+  assert.equal((await ask("limitOrders/reject", await body("other.test"))).status, 400);
+  assert.equal(forwarded.length, before, "wrong-host signatures never reach the agent");
+  assert.equal((await ask("limitOrders/approve", await body(HOST))).status, 200);
+  assert.equal(forwarded.at(-1)!.path, "/rpc/limitOrders/approve");
+  assert.equal(forwarded.at(-1)!.headers["x-gateway-consent"], full.id);
+  assert.equal((await ask("limitOrders/reject", await body(HOST))).status, 200);
+  assert.equal(forwarded.at(-1)!.path, "/rpc/limitOrders/reject");
+});
+
 test("an unanswered ownership or key check is 503, never a refusal that would ask the owner to sign again", async t => {
   const { port, state, forwarded, staging, rpc, consent } = await routeHarness(t);
   assert.equal((await consent({ scopes: ["read"] })).status, 201);
@@ -967,6 +994,20 @@ test("calls carrying an owner's or DAO's signature draw on their own budget, and
     "one line per budget and minute, naming the Organization in the path");
   await ordinary();
   assert.equal(accessLogText().trim().split("\n").filter(line => line.includes('"rate_limited"')).length, 2, "a repeated 429 within the minute adds no line");
+});
+
+test("limit-order signatures and DAO vote relays keep their own budget after ordinary traffic is exhausted", async t => {
+  const { port } = await routeHarness(t);
+  const { token } = new AppCredentials(".app-access").issue({ deployment: "orders", host: HOST, label: "orders", days: 30, perHour: 2 });
+  const ordinary = () => call(port, "/apps/v1/o/org_1/a/payout/rpc/overview", "POST", token, { json: {} });
+  for (let i = 0; i < 2; i++) await ordinary();
+  assert.equal((await ordinary()).status, 429);
+  const approve = () => call(port, "/apps/v1/o/org_1/a/payout/rpc/limitOrders/approve", "POST", token, { json: {} });
+  const reject = () => call(port, "/apps/v1/o/org_1/a/payout/rpc/limitOrders/reject", "POST", token, { json: {} });
+  const relay = () => call(port, `/apps/v1/dao-limit-orders/${"a".repeat(64)}`, "GET", token);
+  assert.notEqual((await approve()).status, 429, "an owner signature can still reach the gateway");
+  assert.notEqual((await relay()).status, 429, "a DAO vote relay can still be read");
+  assert.equal((await reject()).status, 429, "order signatures still count against their own limit");
 });
 
 test("one Organization can't use up the hour of an app's other Organizations: each seen keeps a slice (#59)", async t => {

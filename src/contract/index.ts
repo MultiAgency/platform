@@ -28,6 +28,7 @@ export { AREAS, FRONTEND_AREAS, type Area } from "./areas.js";
 export { hireText, marketApproveInput, MAX_HIRE_APPROVAL_MS } from "./market.js";
 export * from "./proposals.js";
 export * from "./treasury-proposals.js";
+export * from "./limit-orders.js";
 export * from "./run-progress-schema.js";
 export { RecordingSchema, MAX_RECORDING_BYTES, AGUI_VERSION, AGUI_PROTOCOL_VERSION, type Recording, type RunLogEvent } from "./run-log-schema.js";
 

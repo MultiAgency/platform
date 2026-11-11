@@ -221,8 +221,15 @@ purpose `treasury`, so `maxUsd: 0` doesn't stop them. Scopes are separate: a con
 reachable. Each
 consent, call and revocation is appended to `.app-access/access-YYYY-MM.jsonl`, one file per month (UTC; builds before 0.5.3 wrote one `access.jsonl`).
 
+The separate limit-order feature adds `treasury-orders`, which requires `treasury` in the same consent and covers only
+`limitOrders/quote`, `create`, `get`, `list`, `approve`, `reject`, `place`, `cancel` and `refresh`. Existing `treasury`
+or `treasury-execute` consents alone do not acquire these routes. The owner must separately sign the `limit_order`
+policy opt-in and each exact order's NEP-413 text; the gateway checks the current owner's signing key before relaying
+approval or rejection, and the agent checks the exact text. A placement still requires the executor's Treasury grant.
+See [limit orders](limit-orders.md) for the in-progress, offline-tested path and its live gaps.
+
 DAO owners: a DAO's consent is signed by its own vote (`POST /apps/v1/dao-consents`, then `GET /apps/v1/dao-consents/<hash>`
-until the DAO's signature is found). It carries only `read`, `treasury`, `market` and,
+until the DAO's signature is found). It carries only `read`, `treasury`, `market`, `treasury-orders` and,
 as the DAO's opt-in, `treasury-execute` (`market` added by the user, 2026-11-09), and each call re-reads that the agent is still owned by the DAO's derived
 account. The DAO's grant vote is what authorizes unattended swaps (autopilot, and with `treasury-execute` the app's
 plans), within the strategy it binds and the DAO's signed policy; the grant's proposal says so. The platform authorizes the app, not a member: the app gates its own members with the
@@ -234,9 +241,14 @@ the brief and how long the approval may last; `GET /apps/v1/dao-hires/<hash>` re
 provider records it, then pays the hire once; a DAO-owned market agent refuses a plain `market/hire`), on a market
 agent's own owner actions under a consent carrying `market` (0.5.7, #67, the user's decision of 2026-11-11: its `market`
 grant and that grant's revocation, freeze, unfreeze, and a policy edit of `limits`, `budget` and `max_actions_per_hour`
-only, raising, lowering or removing those caps, `daoMarketMayAsk`; a cap can't move money by itself, since every hire is paid only after its own vote and a
-top-up only to the payment key by what an approved hire lacks; other policy fields, and every owner action on an agent
-that isn't a market agent, still need `treasury`), and on
+only, raising, lowering or removing those caps, `daoMarketMayAsk`; a cap can't move money by itself, since every hire
+is paid only after its own vote and a top-up only to the payment key by what an approved hire lacks; other policy
+fields, and every owner action on an agent
+that isn't a market agent, still need `treasury`), on
+each limit order under a consent carrying both `treasury` and `treasury-orders` (`POST /apps/v1/dao-limit-orders`
+files an exact approval or rejection vote; `GET /apps/v1/dao-limit-orders/<hash>` relays the signature once to
+`limitOrders/approve` or `reject` after checking the current agent and signing key; a durable relay claim makes later
+polls read the agent's exact signature receipt only), and on
 the `treasury` grant, revoking a grant, a policy edit, freeze and unfreeze (`owner/prepare` with `signer: "dao"`, which
 answers the proposal to file; the agent submits the signature). An off-chain edit (`destinations`, `withdrawals`,
 `budget`) is a readable NEP-413 message with about 290 s to pass; an on-chain edit (actions, assets, limits, approval,
@@ -482,8 +494,9 @@ outcome; the same request may be sent again once it clears. A 429 that isn't the
 keeps its earlier kind: `refused` on the app routes, `unavailable` or `unknown` on agent calls.
 
 From 0.5.7, calls on the path of an owner's or a DAO's signature with a short window draw on a second budget of the same
-size, not the shared one: `POST /apps/v1/setup`, `/consents` and `/consent-nonces`, an agent's `owner/submit`, and the
-DAO request reads that relay a passed vote's signature (`GET /apps/v1/dao-{setups,consents,votes,hires}/<hash>`). Ordinary
+size, not the shared one: `POST /apps/v1/setup`, `/consents` and `/consent-nonces`, an agent's `owner/submit` and
+`limitOrders/approve` or `limitOrders/reject`, and the DAO request reads that relay a passed vote's signature
+(`GET /apps/v1/dao-{setups,consents,votes,hires,limit-orders}/<hash>`). Ordinary
 traffic can't use it up and waste a signature, and those calls can't be used to get around the limit, since they count
 against their own. A credential's busiest hour can therefore reach twice its limit. Each 429 adds a `rate_limited` line to the
 access log with the deployment, the credential, which budget, and the Organization when the path names one; at most

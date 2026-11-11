@@ -48,15 +48,23 @@ export const APP_TREASURY = ["strategy/get", "autopilot/get", "autopilot/evidenc
  * without a signature per swap, and only under a grant binding the plan's strategy (src/planning/strategy-grant.ts).
  */
 export const APP_TREASURY_EXECUTE = ["rebalance", "externalPlan", "executePlan"] as const;
+/**
+ * Treasury order procedures require a separate `treasury-orders` consent beside `treasury`. Coverage here only admits
+ * the app to the procedure; the agent must still verify each order's owner-approved terms before placement.
+ */
+export const APP_TREASURY_ORDERS = ["limitOrders/quote", "limitOrders/create", "limitOrders/get", "limitOrders/list",
+  "limitOrders/approve", "limitOrders/reject", "limitOrders/place", "limitOrders/cancel", "limitOrders/refresh"] as const;
 export type AppProcedure = (typeof APP_READS)[number] | (typeof APP_OWNER)[number] | (typeof APP_PAYOUT)[number]
-  | (typeof APP_TREASURY)[number] | (typeof APP_TREASURY_EXECUTE)[number] | (typeof APP_MARKET)[number];
+  | (typeof APP_TREASURY)[number] | (typeof APP_TREASURY_EXECUTE)[number] | (typeof APP_TREASURY_ORDERS)[number] | (typeof APP_MARKET)[number];
 const READS = new Set<string>(APP_READS), OWNER = new Set<string>(APP_OWNER), PAYOUT = new Set<string>(APP_PAYOUT),
-  TREASURY = new Set<string>(APP_TREASURY), TREASURY_EXECUTE = new Set<string>(APP_TREASURY_EXECUTE), MARKET = new Set<string>(APP_MARKET);
+  TREASURY = new Set<string>(APP_TREASURY), TREASURY_EXECUTE = new Set<string>(APP_TREASURY_EXECUTE),
+  TREASURY_ORDERS = new Set<string>(APP_TREASURY_ORDERS), MARKET = new Set<string>(APP_MARKET);
 /** Whether consent scopes cover a procedure (the gateway also requires the owner's own access to it). */
 export const appScopesCover = (scopes: readonly AppScope[], path: string) =>
   (scopes.includes("read") && READS.has(path)) || (scopes.includes("owner") && OWNER.has(path)) || (scopes.includes("payout") && PAYOUT.has(path))
   || (scopes.includes("treasury") && TREASURY.has(path))
   || (scopes.includes("treasury") && scopes.includes("treasury-execute") && TREASURY_EXECUTE.has(path))
+  || (scopes.includes("treasury") && scopes.includes("treasury-orders") && TREASURY_ORDERS.has(path))
   || (scopes.includes("market") && MARKET.has(path));
 
 /**
@@ -98,9 +106,10 @@ export const AppSigner = z.enum(["wallet", "dao"]);
 /**
  * The scopes a DAO's consent may carry: reads, Treasury settings, autopilot and proposals the DAO approves by vote, and
  * with `treasury-execute` the app's plans within the policy and the strategy the DAO's grant binds, without a vote
- * each time. Not `owner` (the platform files a DAO's owner actions itself) or `payout` (not yet).
+ * each time; and with `treasury-orders` its separately approved limit orders. Not `owner` (the platform files a DAO's
+ * owner actions itself) or `payout` (not yet).
  */
-export const DAO_CONSENT_SCOPES = ["read", "treasury", "treasury-execute", "market"] as const satisfies readonly AppScope[];
+export const DAO_CONSENT_SCOPES = ["read", "treasury", "treasury-execute", "treasury-orders", "market"] as const satisfies readonly AppScope[];
 /**
  * What a DAO's `treasury` consent doesn't cover although a wallet owner's does: the linked treasury account. A DAO-owned
  * agent's link is the DAO itself, fixed at setup (src/hosted-binding.ts): an app never changes which DAO it answers to.
@@ -187,6 +196,15 @@ export const appDaoVoteState = z.discriminatedUnion("state", [
   z.looseObject({ state: z.literal("pending"), request: appDaoVoteRequest }),
   z.looseObject({ state: z.literal("relayed"), request: appDaoVoteRequest, proposalState: z.string() }),
 ]);
+/** A DAO's vote on one exact Treasury limit order, with the platform's order text and one signed relay. */
+export const appDaoOrderRequest = z.looseObject({ id: z.string(), dao: z.string(), organization: z.string(), agent: z.string(),
+  agentId: z.string(), order: z.string(), verdict: z.enum(["approve", "reject"]), votingUntil: z.number(), hash: z.string(), description: z.string() });
+export const appDaoOrderFiled = z.looseObject({ request: appDaoOrderRequest,
+  transactions: z.looseObject({ proposal: memberTransaction.nullable(), proposalAndVote: memberTransaction.nullable() }) });
+export const appDaoOrderState = z.discriminatedUnion("state", [
+  z.looseObject({ state: z.literal("pending"), request: appDaoOrderRequest }),
+  z.looseObject({ state: z.literal("relayed"), request: appDaoOrderRequest, orderState: z.string() }),
+]);
 /**
  * A DAO's approval of one market hire (docs/market.md), filed by the platform from its own text (`hireText`): it must
  * pass before `votingUntil`. Once the DAO's signature is found the platform relays it to `market/approve`, which pays the
@@ -247,14 +265,16 @@ export const appConsentNonce = z.looseObject({ nonce: z.string(), issuedAt: z.nu
  *   day, are at their limit).
  * - Proposals: `proposal_unanswered`, `proposal_not_open` (filing a vote, or relaying one, once the proposal is no longer
  *   open: the DAO's vote can't apply to it), `expires_too_soon`.
+ * - Limit orders: `order_unanswered`, `order_not_open` (the same decision for a proposed order and its exact DAO vote),
+ *   `relay_unresolved` (the one claimed owner-signature relay has no matching agent receipt yet; poll only),
+ *   `signature_changed` (the DAO signature differs from the durably claimed relay; review before further action).
  * - `too_many_consents`: the deployment holds its limit of live consents; revoke unused ones first.
  * - `setup_failed`: the agent couldn't be set up (the message says why).
- * - `agent_refused`: the agent refused the DAO's signed verdict while its proposal is open; reading the vote again
- *   relays the same signature, so it may succeed once the agent's state allows it.
+ * - `agent_refused`: the agent refused a DAO's signed proposal verdict while its proposal is open; that older
+ *   proposal route may relay the same signature again. Limit-order votes use a durable one-time relay claim instead.
  */
 export const APP_GATEWAY_CODES = ["invalid_request", "not_found", "signature_invalid", "browser", "dao_owned", "not_dao", "confirm_page",
   "not_created", "already_created", "agent_changed", "owner_changed", "consent_ended", "consent_revoked", "no_consent", "scope", "setup_key",
   "signed_expired", "vote_lapsed", "dao_stopped", "owner_stopped", "not_owner", "not_allowed", "setup_unavailable", "access_ended", "proposal_unanswered",
-  "proposal_not_open", "expires_too_soon", "setup_failed", "agent_refused", "too_many_consents", "dao_requests_limited", "brief_mismatch", "agent_released",
-  "request_conflict"] as const;
+  "proposal_not_open", "order_unanswered", "order_not_open", "relay_unresolved", "signature_changed", "expires_too_soon", "setup_failed", "agent_refused", "too_many_consents", "dao_requests_limited", "brief_mismatch", "agent_released", "request_conflict"] as const;
 export type AppGatewayCode = (typeof APP_GATEWAY_CODES)[number];

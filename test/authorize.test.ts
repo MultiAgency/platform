@@ -128,6 +128,21 @@ test("a swap may buy only an asset in the policy, whoever sends it", () => {
   assert.equal(code("treasury", swap(ASSETS.ETH)), "ok");
 });
 
+test("a signed Treasury limit order must acquire a listed asset and cannot rest under a cash floor", () => {
+  const USDT = "nep141:usdt.tether-token.near";
+  const order = (side: "buy" | "sell", base_asset: string, quote_asset: string): Action => ({ method: "limit_order",
+    request: { base_asset, quote_asset, side, quantity: NEAR(1), price: "2.5",
+      deadline: new Date(NOW + 86_400_000).toISOString(), confidential: true } });
+  assert.equal(code("treasury", order("sell", ASSETS.wNEAR, USDT)), "asset_out_not_allowed", "sell acquires quote");
+  assert.equal(code("treasury", order("buy", USDT, ASSETS.USDC)), "asset_out_not_allowed", "buy acquires base");
+  assert.equal(code("treasury", order("buy", ASSETS.wNEAR, ASSETS.USDC)), "ok");
+  assert.equal(code("treasury", order("buy", ASSETS.wNEAR, ASSETS.USDC),
+    { strategy: { ...strategy, cashFloor: { usd: 10, assets: [ASSETS.USDC] } } }), "cash_floor_order_unsupported");
+  assert.equal(code("autopilot", order("buy", ASSETS.wNEAR, ASSETS.USDC)), "order_requires_owner_signature");
+  assert.equal(code("treasury", order("buy", ASSETS.wNEAR, ASSETS.USDC),
+    { plan: { plan: {}, leg: {} } }), "order_not_plan_bound");
+});
+
 test("payouts, invoices and approvals are confidential USDC transfers", () => {
   for (const purpose of ["payout", "invoice", "approval"] as const) {
     assert.equal(code(purpose, pay("payee.near", "1000000", ASSETS.wNEAR)), "transfer_not_allowed", purpose);

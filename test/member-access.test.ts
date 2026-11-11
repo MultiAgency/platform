@@ -19,18 +19,18 @@ function paths(node: object, prefix = ""): string[] {
 const READS = ["compensation/list", "instance", "account", "setup", "overview", "policyHistory", "treasury/get", "activity", "unresolved", "held", "payouts/status", "autopilot/get", "autopilot/evidence",
   "autopilot/log", "strategy/get", "inbox/list", "ledger", "ledgerCsv", "reconcileBooks", "owner/status", "owner/pending", "owner/actions", "paymentHistory", "agreements/list", "paymentStatus", "invoices",
   "workOrders/list", "workOrders/get", "workOrders/status", "demoGuide/compose", "proposals/get", "proposals/list",
-  "market/quote", "market/status", "market/account"];
+  "market/quote", "market/status", "market/account", "limitOrders/quote", "limitOrders/get", "limitOrders/list", "limitOrders/refresh"];
 /**
  * Preparations require FunctionCall proposal permission. None executes money or replaces the
  * owner's signature. The first three retain their historical non-intervention classification.
  */
 const PROPOSES = ["owner/prepare", "agreements/propose", "agreements/offer", "rebalance", "externalPlan", "deposit", "treasury/fund",
-  "workOrders/create", "workOrders/prepare", "workOrders/deposit", "proposals/create", "proposals/withdraw"];
-const EXECUTES = ["proposals/execute", "compensation/prepare", "compensation/send", "compensation/review", "workOrders/file", "pay", "payouts/request", "market/hire", "sweep", "executePlan", "autopilot/tick", "autopilot/enable"];
+  "workOrders/create", "workOrders/prepare", "workOrders/deposit", "proposals/create", "proposals/withdraw", "limitOrders/create"];
+const EXECUTES = ["proposals/execute", "compensation/prepare", "compensation/send", "compensation/review", "workOrders/file", "pay", "payouts/request", "market/hire", "sweep", "executePlan", "autopilot/tick", "autopilot/enable", "limitOrders/place", "limitOrders/cancel"];
 const MANAGES = ["compensation/agreement", "strategy/save", "treasury/link", "treasury/unlink", "agreements/decline"];
 const MAINTAINS = ["autopilot/stop", "recover", "inbox/dismiss", "cancelPreparedInvoice"];
 /** Relaying an owner's signature: signers only. */
-const SIGNS = ["owner/submit", "workOrders/submit", "proposals/approve", "proposals/reject", "market/approve"];
+const SIGNS = ["owner/submit", "workOrders/submit", "proposals/approve", "proposals/reject", "market/approve", "limitOrders/approve", "limitOrders/reject"];
 
 const policy = {
   proposal_bond: "0",

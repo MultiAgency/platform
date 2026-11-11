@@ -1201,3 +1201,23 @@ assets on the key are not enumerated. All settings, records and keys remain reco
 required for restoration, and old consents stay ended. Lifecycle and money locks coordinate one host, not distributed
 fencing. Provider archive/restore refusal semantics remain per pinned docs (`ce381df`), with no mainnet observation;
 DAO release and incomplete-transition rollback are not covered. See [agent release](agent-release.md) for tests and limits.
+
+## Treasury limit orders (separate feature in progress)
+
+The owner must sign a policy revision enabling `limit_order` and a deviation ceiling, then sign each immutable
+order's exact terms. A dedicated `treasury-orders` app consent and live Treasury grant are also required by this
+platform. These application bindings do not prove a bypassed holder of the grant cannot place another order within
+the provider's policy. Provider enforcement of price deviation, asset caps, USD budget and action permission is per
+[pinned Agent API documentation](https://github.com/NEAR-Intents-Agent-API/skills/blob/0b81bba6fca6356a2db81d0ede08e9cb928d08e1/near-intents-agent-api/references/limit-orders.md),
+not independently established on the running service.
+
+The local output-asset authorization applies to both sides: a sell acquires quote, a buy acquires base. Orders are
+refused while a Treasury cash floor is configured, because a resting order cannot be valued as one settled swap.
+Placement rechecks the policy, strategy, grant, signed gross spend and an unwarned dry preview under the money lock;
+one journal claim precedes one provider call. A lost answer stays unresolved. Provider placement `SUCCESS` identifies
+a funded order, not a filled trade. Complete means closed fill and final completed payouts from a live order read;
+partial fills, pending cancellation, failed payout and unreadable finality remain reviewable. A cancel is claimed once,
+then only read after an ambiguous reply. Hosted-agent release refuses tracked or listed orders with open or unreadable
+finality even with a balance override; a lagging provider list cannot prove the absence of an external order.
+These paths have offline tests, but no live placement, fill, cancellation or payout observation.
+The production provider route was absent in the 2026-11-10 read-only check. See [limit orders](limit-orders.md).

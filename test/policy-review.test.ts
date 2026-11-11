@@ -6,7 +6,7 @@ import { prepare } from "../src/owner-intents.js";
 import { policyChange, policyRequest } from "../src/owner-requests.js";
 import { mandateDigest } from "../src/mandate.js";
 import { readOps, blocksDispatch } from "../src/ops.js";
-import { ASSETS, payoutPolicy } from "../src/policy.js";
+import { ASSETS, payoutPolicy, treasuryPolicy } from "../src/policy.js";
 import { authorityFixture, policyView } from "./fixtures/authority.js";
 import { freshDirectory, offline } from "./fixtures/harness.js";
 import { createRouterClient } from "@orpc/server";
@@ -48,6 +48,47 @@ test("matching policy preparation retains provider revision binding and untouche
   assert.equal(result.expected_revision, 1);
   assert.equal(result.policy.owner_approval, true);
   assert.equal(result.policy.max_actions_per_hour, 5);
+});
+
+test("a reviewed Treasury policy opts into limit orders only in the owner-signed request", async () => {
+  current = structuredClone(treasuryPolicy);
+  const reviewed = { revision: 1, digest: mandateDigest(current) };
+  const generate = mock.method(api, "generateIntent", async (request: { type: string; expected_revision?: number; policy?: typeof treasuryPolicy }) => {
+    assert.equal(request.type, "policy_update");
+    assert.equal(request.expected_revision, reviewed.revision);
+    assert.deepEqual(request.policy?.actions, ["swap", "limit_order"]);
+    assert.deepEqual(request.policy?.limit_order, { max_deviation_bps: 75 });
+    throw new Error("generation reached");
+  });
+  await assert.rejects(prepare({ type: "policy_update", changes: { limit_order: { enabled: true, max_deviation_bps: 75 } },
+    expectedPolicy: reviewed }, "wallet"), /^Error: generation reached$/);
+  assert.equal(generate.mock.callCount(), 1);
+  assert.deepEqual(current.actions, ["swap"], "the policy in force stays unchanged until the owner signs and the provider applies it");
+});
+
+test("an unrelated edit preserves a limit-order permission and deviation rule; opt-out removes both", async () => {
+  current = { ...treasuryPolicy, actions: ["swap", "limit_order"], limit_order: { max_deviation_bps: 0 } };
+  const reviewed = () => ({ revision: 1, digest: mandateDigest(current) });
+  const kept = (await policyChange({ max_actions_per_hour: 5 }, reviewed())).request.policy;
+  assert.deepEqual([...kept.actions].sort(), ["limit_order", "swap"]);
+  assert.deepEqual(kept.limit_order, { max_deviation_bps: 0 });
+  const removed = (await policyChange({ limit_order: { enabled: false } }, reviewed())).request.policy;
+  assert.deepEqual(removed.actions, ["swap"]);
+  assert.equal("limit_order" in removed, false);
+});
+
+test("limit-order policy changes reject deviations outside the provider's 0–300 bps range before preparing an intent", async () => {
+  const client = createRouterClient(router);
+  const read = mock.method(api, "getPolicy", async () => { throw new Error("must not read"); });
+  for (const max_deviation_bps of [-1, 301, 1.5]) {
+    await assert.rejects(client.owner.prepare({ action: { type: "policy_update", changes: {
+      limit_order: { enabled: true, max_deviation_bps } }, expectedPolicy: expected }, signer: "wallet" } as never), { code: "BAD_REQUEST" });
+  }
+  for (const limit_order of [{ enabled: true }, { enabled: false, max_deviation_bps: 100 }]) {
+    await assert.rejects(client.owner.prepare({ action: { type: "policy_update", changes: {
+      limit_order }, expectedPolicy: expected }, signer: "wallet" } as never), { code: "BAD_REQUEST" });
+  }
+  assert.equal(read.mock.callCount(), 0);
 });
 
 test("stale owner review never asks the provider to generate a signing payload", async () => {
