@@ -1,23 +1,55 @@
 # Platform staging
 
 A `staging` environment in the platform's Railway project serves app access for the dashboard's staging
-(`dev.multiagency.ai`) at `api.dev.multiagency.ai`; production would be `api.multiagency.ai`. Consents and setups name
+(`dev.multiagency.ai`) at `api.dev.multiagency.ai`; production is `api.multiagency.ai`. Consents and setups name
 this host as their NEP-413 recipient, so it isn't renamed once owners have signed. Staging runs on mainnet (the provider
 has no test network) with its own state and test agents, never the live demo hosts' records.
 
-Staging is meant to run the `platform` package (`scripts/package-platform.mjs`, built by every release candidate beside
-`dao`): the gateway as a headless host (`headless` in its config), which serves `/health`, app access (`/apps/v1`) and
+Staging runs the `platform` package (`scripts/package-platform.mjs`, built by every release candidate): the gateway
+as a headless host (`headless` in its config), which serves `/health`, app access (`/apps/v1`) and
 the confirm page with its own assets, and answers 404 to everything else, before reading any session: no sign-in,
-owner app, owner RPC, machine credentials or demo hosts. App setup is limited to the areas `appSetup` lists: Payables
-only on the deployed staging host. From 2026-11-02 `deploy/platform-staging.json` lists Treasury too (not
-deployed): an app sets up an Organization's own Treasury agent, as stack-tested in `test/e2e/app-access.spec.mjs`
-(simulated provider and signatures); `deploy/platform.json` stays Payables only until a staging run of that path is
-recorded. It has run it since 2026-10-31T01:03Z (release candidate `b9221b45`, commit `01add07`, Railway deployment
+owner app, owner RPC, machine credentials or demo hosts. App setup is limited to the areas `appSetup` lists:
+`deploy/platform-staging.json` lists Treasury, Payables and Market; `deploy/platform.json` lists Payables only.
+The dated records below distinguish setup and money actions observed on earlier deployments from local tests.
+It first ran the headless package on 2026-10-31T01:03Z (release candidate `b9221b45`, commit `01add07`, Railway deployment
 `4900d1c4`, image `1b74b1fa`); before, it ran the `dao` package, which also served the prototype's owner app and
 sign-in there. Read-only checks on 2026-10-31T01:06Z: `/health` 200; `/apps/v1/agents/x` 401 without a credential and
 403 with a browser `Origin`; `/`, `/gw/challenge`, `/gw/me`, `/a/x/access`, `/machine/v1/…`, an unmatched `/confirm/…`,
 owner-app assets and `/build-manifest.json` 404; `POST /gw/session` 404. Switching needed no migration: the state
 directory, hosted agents and consents are kept, and the host is unchanged, so signed consents and setups stay valid.
+
+**Infrastructure as Code applied by the owner, 2026-11-12 UTC.** The reviewed `.railway/railway.ts` selects staging's
+domain and existing `gateway-volume` at `/data`, one `us-west2` replica, `/health`, 5 restart retries and a 45-second
+drain. Variables remain managed in Railway, outside IaC. It does not change app setup or the SDK's public contract.
+The owner applied the pinned plan from source `320f82e`, triggering deployment
+`fd2c5435-d155-43d8-b6de-e9586c1cea99`. It reached `SUCCESS` with one `RUNNING` instance and final image
+`sha256:d277711454604337afdce0de8a6b42867d8b88de4ef365c80760dfc6d6531873`; the early status snapshot's older image
+digest was provisional. A post-apply plan exposed representation drift for explicit `ON_FAILURE`; the subsequent
+authoring correction omits that default while retaining 5 retries. Its fresh staging plan returned zero changes and
+no diagnostics, without another apply. See the dated [apply and verification record](operations.md#railway-infrastructure-as-code).
+After `fd2c5435` reached `SUCCESS`, read-only verification matched the retained manifest and source below and all 243
+packaged runtime file hashes, with no mismatches; Node was 24.22.0. Platform smoke after success passed 18 of 18 checks.
+No new source package was uploaded: the running application remains 0.5.7. Its original upload included legacy JSON, while
+future packages from this source omit them. The checks establish package identity, configuration and public host
+behavior, not new application or money-path acceptance. An image's files do not establish whether a remote service
+selects Config as Code. Run plan/apply tooling from the source checkout with development dependencies, not from the
+production image.
+The owner subsequently applied production's corrected configuration too; its separate deployment and checks are
+recorded in [platform production](platform-production.md).
+
+**Restoration observed 2026-11-12 UTC:** the owner restored 0.5.7 as Railway deployment
+`c15b4206-aba2-4081-951f-8da53e3f7c5b`, image
+`sha256:183b75548f18d15270b3c8e2628a55f0385b8f87d4eb313b5814bc7f88b97986`. The retained package manifest is
+`sha256:b7c3677887589af35bc4000fb4ac0ffa6ef62d447e477ad54771f750078d5d93`, naming source
+`cc90604699472d8cf9afb7fffdecd190c5a08389` and candidate `23e51842`. Read-only verification matched 243 packaged runtime
+file hashes to the manifest, and the owner's platform smoke passed 18 of 18 checks. The earlier deployment
+`70b2f02e` below had been removed. These verification checks establish the restored package and public host behavior;
+they exercised no money action or new application behavior. Configuration apply was a later, separate owner action
+described above.
+
+Steps 1–2 record initial provisioning. For an existing staging service, retain the original service, volume, variables
+and hosted records; do not create an empty replacement or repeat setup to recover an outage. Follow the preservation
+and owner-action review in [operations](operations.md#railway-infrastructure-as-code) before restarting executors.
 
 1. In the platform's Railway project, create `staging` as an empty environment (a duplicate copies production's
    services and variables) and add one empty service, `gateway`, with its own volume at `/data`, one replica,
@@ -26,7 +58,8 @@ directory, hosted agents and consents are kept, and the host is unchanged, so si
    for Payables, no configured agents: every agent is a hosted agent created through app setup), `NEAR_INTENTS_AGENT_API_KEY` (a separate
    key for staging from the same partner account, so it can be revoked without touching production's), `NEAR_INTENTS_AGENT_API_URL`,
    `FASTNEAR_API_KEY`, and a new `SESSION_SECRET`. No `DAO_ENV`, `PAYOUT_ENV` or `RESTORE_*`.
-3. Deploy the release candidate's `platform` package from a copy outside any git repository. Inside this one,
+3. After reviewed infrastructure apply and any required cutover, the owner deploys the release candidate's `platform`
+   package from a copy outside any git repository. Inside this one,
    `railway up` uploads the repository's root, not the package (seen 2026-11-04): with its `.gitignore` that has no
    `Dockerfile`, so Railway falls back to Railpack and fails with "No start command detected", and without it the upload
    takes in `.test-artifacts/`. So `cp -R <release>/platform /tmp/platform-<candidate>`, `cd` there, `railway link
@@ -51,8 +84,9 @@ directory, hosted agents and consents are kept, and the host is unchanged, so si
    `<publisher>-<app>` and are the same on every host: the host separates staging from production, and a credential is
    bound to one host (provisional until the first real owner on production). `staging` is the
    platform's own test deployment (the stand-in runs below); a credential under it acts on that deployment's consents.
-6. Rollback: redeploy the previous image; state stays on the staging volume. Nothing here touches proto.multiagency.ai
-   or invoices.multiagency.ai.
+6. Recovery: retain the previous image identity and the original staging volume. Before redeploying it, review state
+   compatibility and its configuration requirements; after IaC cutover, an older package's `railway.json` must not
+   silently regain ownership. Preserve records updated since startup; never restore an older backup over them.
 
 Production (`api.multiagency.ai`, set up 2026-11-07: [platform production](platform-production.md)) is the same
 package with `deploy/platform.json`, the image's default `DASHBOARD_FILE`: since 2026-11-08 the project's `gateway`
@@ -198,8 +232,9 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 - what the provider answers for a DAO-owned hosted agent
 
 **Before starting**
-- **Staging runs 0.5.7's `platform` package (commit `cc90604`, #77).** Since 2026-11-11 (deployed 13:45Z, checked at
-  15:57Z): candidate `23e51842`, Railway deployment `70b2f02e`, package manifest `sha256:b7c36778…` (created 13:40:52Z),
+- **0.5.7 before the restoration above (commit `cc90604`, #77).** Originally deployed 2026-11-11 at 13:45Z, checked at
+  15:57Z: candidate `23e51842`, Railway deployment `70b2f02e` (subsequently removed), package manifest
+  `sha256:b7c36778…` (created 13:40:52Z),
   with `deploy/platform-staging.json`; the image digest isn't recorded. It brings the 0.5.7 changes listed in
   [SDK changes](sdk-changes.md), among them a DAO's `market` consent covering its market agent's owner actions, one
   requestId per DAO hire, the signed-call request budget and per-Organization fair share (#59), one owner action of a
