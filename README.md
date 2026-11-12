@@ -283,10 +283,11 @@ Each line is a gap; the linked page says how the rest is known. The
   ([follow-up](docs/archive/infrastructure-review.md#follow-up-review-2026-10-16)).
 - CI doesn't build or check the `platform` image (no Docker in the job): only a release candidate does, as its last
   gate (`pnpm check:platform-image`; [operations](docs/operations.md)).
-- Every deploy still uses Railway's Config as Code, which the Railway CLI warned on 2026-11-05 keeps working only until
-  2026-12-01; later deploys need Railway's Infrastructure as Code (`.railway/railway.ts`). Not migrated:
-  `deploy/railway.gateway.json`, the `platform` package's root `railway.json` (staging and production). See
-  [operations](docs/operations.md#railway-config-as-code-ends-2026-12-01).
+- Railway Infrastructure as Code is prepared in `.railway/railway.ts`, with the platform package retaining its exact
+  authoring inputs. Read-only plans passed on staging and production (2026-11-12 UTC); owner-run apply remains pending,
+  with cutover needed only if a service still selects Config as Code. Earlier deployed packages contain legacy JSON,
+  whose announced cutoff is 2026-12-01. A package's files do not establish remote configuration ownership. See
+  [operations](docs/operations.md#railway-infrastructure-as-code).
 - Guided walkthroughs and short guides (`/demos`) are tested with offline browser fixtures, not on the deployed hosts,
   and can't guarantee a swap, prompt approval or settlement. Guidance is deterministic, not an LLM; live AG-UI agent
   orchestration isn't built.

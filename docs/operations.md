@@ -157,26 +157,89 @@ The `dao` image is built only from a package made by `scripts/package-shared-fro
 `web/dist` plus the Treasury and Payables builds), which copies in `Dockerfile.gateway` as the package's root Dockerfile
 and `deploy/railway.gateway.json` as its `railway.json`. The image runs `deploy/shared-frontends.json`.
 
-### Railway Config as Code ends 2026-12-01
+### Railway Infrastructure as Code
 
-On 2026-11-05, while deploying platform staging from a release candidate's `platform` package, the Railway CLI printed
-on every command that Config as Code (`railway.json` / `railway.toml`) is deprecated in favour of Infrastructure as Code
-(`.railway/railway.ts`, via `railway config migrate`) and that existing files keep working until 2026-12-01. Nothing
-here is migrated yet; deploys after that date need it. The files every deploy uses (no `railway.toml` is shipped):
+**Local candidate, not applied.** `.railway/railway.ts` replaces this source tree's legacy
+`deploy/railway.gateway.json`. The platform package retains the authoring file and `.railway/tsconfig.json` in its
+manifest and carries no `railway.json` or `railway.toml`. Earlier deployed packages, including staging's 0.5.7 and
+production's 0.5.4, contain legacy files; whether a service selects them is a separate remote setting. On 2026-11-05 the
+Railway CLI warned that Config as Code files keep working only until 2026-12-01. Removing the source file or uploading
+a new package does not clear a remote Railway Config File setting that is still selected.
 
-| File | Shipped as | Service |
-|---|---|---|
-| `deploy/railway.gateway.json` | the root `railway.json` of the `platform` package (`scripts/package-platform.mjs`) | `gateway`: staging (api.dev.multiagency.ai) and production (api.multiagency.ai) |
+The named IaC partial `gateway` manages only `service.gateway` and `volume.gateway-volume` in the selected environment.
+The authoring function rejects another named project and accepts only environments `staging` and `production`;
+verify the linked project is `platform` before planning. It uses existing names rather than embedding Railway IDs.
+Its intended settings are:
 
-It selects the package's Dockerfile, one replica, healthcheck `/health` and restart on failure (up to 5 retries). It
-also sets `drainingSeconds: 45`: Railway's default sends SIGKILL right after SIGTERM, which
-would cut a send in flight and leave it unresolved. On SIGTERM an agent server starts no new send and waits up to 25
-seconds for the one running (`stopSending`, `moneyIdle` in `src/lock.ts`); the gateway allows its agents 30 seconds,
-then up to 5 more (architecture.md). With a volume, Railway never runs the old and new deployment together
-(docs.railway.com/reference/volumes, read 2026-11-06), so a deploy has a short downtime and no second executor. Whether
-`railway config migrate` keeps `drainingSeconds` is unverified.
-`test/build-context.test.ts` pins the Dockerfile selection and the packaging. The Infrastructure as Code equivalent and
-whether `railway config migrate` reproduces these settings are unverified.
+| Setting | Intended value |
+|---|---|
+| Build | Dockerfile builder, the package's root `Dockerfile`; no change to its uploaded source |
+| Executor placement | One replica in `us-west2` |
+| Health and restart | `/health`, `ON_FAILURE`, at most 5 retries |
+| Shutdown | `drainingSeconds: 45` |
+| Persistent state | The existing `gateway-volume`, `us-west2`, 50,000 MB, mounted at `/data` |
+| Public domain | `api.dev.multiagency.ai` on staging; `api.multiagency.ai` on production; port 8080 |
+| Variables | Unmanaged: IaC neither reads nor writes their values, including settings and secrets absent from source |
+
+Keep the existing volume's name, identity, placement, mount and settings. A renamed volume can attach an empty
+replacement while leaving retained agent records on the old one. Volume creation, replacement, detachment, resizing,
+or removal of existing alerts is not part of this migration. State remains in `/data/state`; the complete preservation
+list and each instance's settings file above still apply. No journal or other application state format changes.
+The authoring file leaves existing volume alerts and online-resize settings out: CLI 5.71's
+[pinned diff implementation](https://github.com/railwayapp/cli/blob/v5.71.0/src/iac/change_set.rs#L1423) excludes those
+unauthored fields from changes. Review the actual plan for the selected environment before applying.
+
+The 45-second drain preserves the earlier deployment setting: an agent stops new sends on SIGTERM and waits up to
+25 seconds for one in flight; the gateway allows its children 30 seconds, then up to 5 more. It does not make the
+single-host executor lease distributed fencing. Before any owner-run cutover or rollout, confirm the original volume,
+one executor per agent, a consistent backup with stopped writers, and that no unattended observation or freeze window
+is active. Review retained owner actions and persisted schedules: startup can follow passed DAO votes and submit
+their signatures even with schedules off. Do not overwrite records that progress during startup.
+
+**CLI 5.71.0 workflow.** Run configuration tools from the reviewed source checkout with Node 24 and its development
+dependencies, including pinned `railway` 3.16.0; the production image installs production dependencies only. The package's
+manifest identifies its IaC inputs, but Railway does not evaluate `.railway/` during an upload. The SDK's public contract
+is unchanged by this infrastructure change.
+
+1. Inspect `railway status --json` and confirm the intended platform project, gateway service and environment. Review
+   `railway config migrate status` and existing partial ownership. Configuration commands use the linked project;
+   `config plan --environment staging` or `--environment production` selects the environment, not another project.
+   `--file` can select the reviewed checkout's authoring file without changing the link.
+2. Run `railway config plan --environment staging --json` before changing anything. It reads remote state only;
+   leave values redacted. A Config as Code ownership refusal is a cutover prerequisite, not permission to force apply.
+   Compare the legacy effective settings with the plan: a raw import can show Railpack and unset health/drain settings
+   even though the deployed legacy file supplies Dockerfile, `/health` and 45 seconds.
+3. If `railway config migrate status` reports that `gateway` still selects Config as Code, **owner only:** in the
+   verified staging context, `railway config migrate cutover --service gateway` clears that path and saves a reversible
+   snapshot. Skip cutover when status reports no selected Config as Code. In CLI 5.71, `migrate --apply` only writes
+   generated authoring source; this repository already supplies the reviewed file, so generation is unnecessary.
+4. Run a fresh plan and review the exact changes. Require the same volume and mount, one executor replica, 45-second
+   drain, the staging domain, unchanged variables/source, and no unrelated resource changes. If anything else differs,
+   keep the service paused and investigate. Save the reviewed plan outside `.railway/` only after its source is committed.
+   **Owner only:** apply that exact reviewed plan; no agent applies, cuts over, deploys or restarts as part of local work.
+5. The owner uploads the matching candidate package from outside a Git checkout, retaining the original volume and
+   instance settings. Follow the returned deployment ID to `SUCCESS`, verify the package/image identity, then run
+   `PLATFORM_URL=https://api.dev.multiagency.ai pnpm smoke` and inspect agent logs/restarts. Gateway health alone does
+   not show that its agents are available. Money actions and enabling schedules need their own authorization.
+6. Repeat context, ownership, plan, any required cutover, fresh plan and owner apply separately for production, followed
+   by its matching package and `PLATFORM_URL=https://api.multiagency.ai pnpm smoke`. Do not promote on staging smoke
+   alone when a feature's provider or live acceptance gate is still open.
+
+Cutover and apply are separate from deployment, and none has been performed by this local candidate. If cutover was
+needed, preserve its snapshot with the private release record; an owner considering `railway config migrate undo` must
+review the saved path, compatible package and retained state first. Restoring an old configuration path does not restore application
+state or establish that an older writer is compatible. Record the dated plan, actual cutover/apply, deployment and
+read-only checks separately. `test/build-context.test.ts` and `test/platform-host.test.ts` cover the local authoring and
+packaged-input boundaries; they do not establish remote apply or live shutdown behavior.
+
+**Read-only plans, 2026-11-12 UTC.** CLI 5.71.0 evaluated this candidate authoring against both existing environments.
+Each plan returned no diagnostics and two `safe` update groups: select the Dockerfile builder, then set the 45-second
+drain, `/health`, `ON_FAILURE` and 5 restart retries. Neither plan changed a volume, domain, replica, source or variable;
+both reported variables unmanaged. These plans compare remote settings, not the legacy files' effective deployment
+overrides, and establish neither apply nor a running release. The production migration-status read reported no service
+selecting Config as Code, despite its deployed package containing `railway.json`; cutover must therefore be conditional.
+Raw plans and imports were kept outside tracked documentation. Re-plan before owner apply because configuration or source
+may have changed since these reads.
 
 Both services must use the same reviewed source and frozen lockfile. Rebuilding `dao`
 alone does not update the public invoice page. Preserve `AGREEMENTS_URL` and matching

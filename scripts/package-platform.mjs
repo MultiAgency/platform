@@ -25,5 +25,6 @@ copy(join(dist, 'build-manifest.json'), join(output, 'web/dist/build-manifest.js
 for (const name of ['platform-entrypoint.sh', 'platform-staging.json', 'platform.json']) copy(join(root, 'deploy', name), join(output, 'deploy', name));
 chmodSync(join(output, 'deploy/platform-entrypoint.sh'), 0o755);
 copy(join(root, 'Dockerfile.platform'), join(output, 'Dockerfile'));
-copy(join(root, 'deploy/railway.gateway.json'), join(output, 'railway.json'));
+// Explicit inputs only: .railway may also contain private local plans or link state.
+for (const name of ['railway.ts', 'tsconfig.json']) copy(join(root, '.railway', name), join(output, '.railway', name));
 finish({ platform: revision(root) });
