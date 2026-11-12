@@ -98,6 +98,8 @@ export function stackControls(stack, { owner, payees = [] }) {
     // hire's unused payment expires and reads not charged.
     marketRegister: ({ account }) => { if (!stack.market) throw new Error('Start the stack with --market'); if (typeof account !== 'string') throw new Error('Give account'); stack.market.register(account); },
     marketAdvance: ({ blocks }) => { if (!stack.market) throw new Error('Start the stack with --market'); stack.market.advance(Number(blocks ?? 1_300)); },
+    marketRedeliver: async ({ assignmentId }) => { if (!stack.market) throw new Error('Start the stack with --market');
+      if (typeof assignmentId !== 'string') throw new Error('Give assignmentId'); return stack.market.redeliver(assignmentId); },
     dropSignatureResponse: ({ agent } = {}) => providerOf(agent).dropSignatureResponse(),
     revealOwnerOutcome: ({ agent } = {}) => providerOf(agent).revealOwnerOutcome(),
     setUnavailable: ({ value, agent }) => providerOf(agent).setUnavailable(value === true),
