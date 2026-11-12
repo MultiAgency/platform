@@ -44,6 +44,10 @@ export const READS = new Set([
   "market/quote",
   "market/status",
   "market/account",
+  "limitOrders/quote",
+  "limitOrders/get",
+  "limitOrders/list",
+  "limitOrders/refresh",
 ]);
 
 export const OWNER_PROPOSALS = new Set([
@@ -53,8 +57,8 @@ export const OWNER_PROPOSALS = new Set([
   "workOrders/create",
   "workOrders/prepare",
 ]);
-const PREPARE = new Set([...OWNER_PROPOSALS, "rebalance", "externalPlan", "deposit", "treasury/fund", "workOrders/deposit", "proposals/create", "proposals/withdraw"]);
-const EXECUTE = new Set(["proposals/execute", "workOrders/file", "compensation/prepare", "compensation/send", "compensation/review", "pay", "payouts/request", "market/hire", "sweep", "executePlan", "autopilot/tick", "autopilot/enable"]);
+const PREPARE = new Set([...OWNER_PROPOSALS, "rebalance", "externalPlan", "deposit", "treasury/fund", "workOrders/deposit", "proposals/create", "proposals/withdraw", "limitOrders/create"]);
+const EXECUTE = new Set(["proposals/execute", "workOrders/file", "compensation/prepare", "compensation/send", "compensation/review", "pay", "payouts/request", "market/hire", "sweep", "executePlan", "autopilot/tick", "autopilot/enable", "limitOrders/place", "limitOrders/cancel"]);
 const MANAGE = new Set(["compensation/agreement", "strategy/save", "treasury/link", "treasury/unlink", "agreements/decline"]);
 const MAINTAIN = new Set(["autopilot/stop", "recover", "inbox/dismiss", "cancelPreparedInvoice"]);
 
@@ -63,7 +67,7 @@ export function mayCall(access: Access, path: string): boolean {
   if (READS.has(path)) return true;
   if (PREPARE.has(path)) return access.canSign || access.canPropose;
   // The owner's signature over a proposal's text is what the agent checks; relaying it is a signer's call.
-  if (path === "owner/submit" || path === "workOrders/submit" || path === "proposals/approve" || path === "proposals/reject" || path === "market/approve") return access.canSign;
+  if (path === "owner/submit" || path === "workOrders/submit" || path === "proposals/approve" || path === "proposals/reject" || path === "market/approve" || path === "limitOrders/approve" || path === "limitOrders/reject") return access.canSign;
   if (EXECUTE.has(path)) return access.canExecute;
   if (MANAGE.has(path)) return access.canManage;
   if (path === "autopilot/set") return access.canManage && access.canExecute;

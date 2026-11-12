@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type { agreementCommand, compensationSend, paymentPreparation, reviewCommand } from "../compensation-contract.js";
 import type { proposalCreateInput, proposalRef, proposalSigned } from "./treasury-proposals.js";
+import type { limitOrderCreateInput, limitOrderQuoteInput, limitOrderRef, limitOrderSigned } from "./limit-orders.js";
 import type { marketApproveInput } from "./market.js";
 import type { depositInput, executePlanInput, marketHireInput, marketQuoteInput, marketStatusInput, ownerAction, ownerPrepareInput, ownerStatusInput, ownerSubmitInput, payoutRequestInput, payoutStatusInput } from "./inputs.js";
 
@@ -50,6 +51,12 @@ export type OwnerInputs = {
   "proposals/create": In<typeof proposalCreateInput>; "proposals/get": In<typeof proposalRef>; "proposals/list": undefined;
   "proposals/approve": In<typeof proposalSigned>; "proposals/reject": In<typeof proposalSigned>;
   "proposals/withdraw": In<typeof proposalRef>; "proposals/execute": In<typeof proposalRef>;
+  "limitOrders/quote": In<typeof limitOrderQuoteInput>;
+  "limitOrders/create": In<typeof limitOrderCreateInput>;
+  "limitOrders/get": In<typeof limitOrderRef>; "limitOrders/list": undefined;
+  "limitOrders/approve": In<typeof limitOrderSigned>; "limitOrders/reject": In<typeof limitOrderSigned>;
+  "limitOrders/place": In<typeof limitOrderRef>; "limitOrders/cancel": In<typeof limitOrderRef>;
+  "limitOrders/refresh": In<typeof limitOrderRef>;
   // Streams
   rebalance: undefined; executePlan: In<typeof executePlanInput>; sweep: { execute: boolean };
 };

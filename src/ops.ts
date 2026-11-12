@@ -29,6 +29,8 @@ type Context = {
   policyRevision?: number | null;
   /** `mandateDigest` of the policy in force when the request was sent. */
   policyDigest?: string | null;
+  /** Cancellation is allowed after policy removal; retain the original order's signed mandate separately. */
+  originalOrderPolicyDigest?: string | null;
   /** The plan this action executes, when it executes one. */
   planId?: string;
   /** The input's value at a fresh API token price when authorized; null when unavailable. */
@@ -40,7 +42,9 @@ export type Line =
   /** Outcome lines are stamped when written (`at`), so the log shows how long each took to resolve. */
   | { at?: string; idempotencyKey: string; correlation_id: string; status: string }
   | { at?: string; idempotencyKey: string; refused: string }
-  | { at?: string; idempotencyKey: string; submissionState: "SUBMISSION_ATTEMPTED" };
+  | { at?: string; idempotencyKey: string; submissionState: "SUBMISSION_ATTEMPTED" }
+  /** Cancellation accepts no operation correlation id; only a final payout read completes it. */
+  | { at?: string; idempotencyKey: string; cancelFinal: true };
 
 export type Op = Context & {
   /** Only v2 records prove that every send was preceded by a durable claim. */
@@ -56,10 +60,14 @@ export type Op = Context & {
   correlationId?: string;
   status?: string;
   refused?: string;
+  /** A live order read proved cancellation's payout final, after a claimed submission. */
+  cancelFinal?: true;
 };
 
 /** Outcome proven: settled terminally, or refused before anything was sent. */
-export const isResolved = (op: Op) => op.refused !== undefined || (op.status !== undefined && isTerminal(op.status));
+export const isResolved = (op: Op) => op.method === "limit_order_cancel"
+  ? op.cancelFinal === true || (op.refused !== undefined && op.submissionState !== "SUBMISSION_ATTEMPTED")
+  : op.refused !== undefined || (op.status !== undefined && isTerminal(op.status));
 
 /**
  * Sent, and waiting for the owner's approval. Its outcome is unknown but cannot be lost: the
@@ -86,6 +94,8 @@ export function submittedSwapValues(ops: readonly Op[], planId: string): readonl
 }
 
 export function record(line: Line) {
+  if ("request" in line && line.method === "limit_order_cancel" && line.journalVersion !== 2)
+    throw new Error("A limit-order cancellation needs a versioned submission claim");
   if ("request" in line && line.journalVersion === 2 && readOps().some((op) => op.idempotencyKey === line.idempotencyKey))
     throw new Error("Operation identity already recorded");
   if ("submissionState" in line) {
@@ -95,12 +105,24 @@ export function record(line: Line) {
   }
   if ("correlation_id" in line) {
     const existing = readOps().find((op) => op.idempotencyKey === line.idempotencyKey);
+    if (existing?.method === "limit_order_cancel") throw new Error("A cancellation provider acceptance is not a final payout");
     if (existing?.correlationId && existing.correlationId !== line.correlation_id) {
       throw new Error("Provider operation identity changed");
     }
     if (existing && isResolved(existing) && line.status !== existing.status) {
       return; // never reopen a proven terminal outcome with contradictory evidence
     }
+  }
+  if ("refused" in line) {
+    const existing = readOps().find((op) => op.idempotencyKey === line.idempotencyKey);
+    if (existing?.method === "limit_order_cancel" && existing.submissionState === "SUBMISSION_ATTEMPTED")
+      throw new Error("A claimed cancellation stays unresolved until its payout is final");
+  }
+  if ("cancelFinal" in line) {
+    const existing = readOps().find((op) => op.idempotencyKey === line.idempotencyKey);
+    if (!existing || existing.method !== "limit_order_cancel" || existing.journalVersion !== 2
+      || existing.submissionState !== "SUBMISSION_ATTEMPTED" || existing.refused || existing.correlationId || existing.status || existing.cancelFinal)
+      throw new Error("Invalid cancel completion: a claimed cancellation may be completed only once after final payout evidence");
   }
   if (recordInvoiceOperation(line)) return;
   appendSynced(opsLog(), { at: new Date().toISOString(), ...line });
@@ -116,13 +138,15 @@ const nonempty = z.string().min(1);
 const identity = { idempotencyKey: nonempty, at: z.string().optional() };
 // Unknown metadata is ignored. Known lifecycle fields cannot be silently discarded
 // by matching a different record shape.
-const noOutcome = { correlation_id: z.never().optional(), status: z.never().optional(), refused: z.never().optional(), submissionState: z.never().optional() };
+const noOutcome = { correlation_id: z.never().optional(), status: z.never().optional(), refused: z.never().optional(),
+  submissionState: z.never().optional(), cancelFinal: z.never().optional() };
 const preparationLine = z.object({ ...identity, ...noOutcome, at: z.string(), kind: nonempty, request: z.record(z.string(), z.unknown()),
     authorization: z.never().optional(),
     // `withdraw` since P3b, `x402` (a market hire's payment, docs/market.md) since 0.5.6: a build before either can't read
     // a journal holding one (docs/operations.md, rollback).
     method: z.enum(OPERATION_METHODS).optional(), journalVersion: z.literal(2).optional(),
     policyRevision: z.number().nullable().optional(), policyDigest: z.string().nullable().optional(),
+    originalOrderPolicyDigest: z.string().nullable().optional(),
     usdIn: z.number().nullable().optional(), planId: z.string().optional() });
 const outcome = { ...identity, ...noOutcome, request: z.never().optional(), journalVersion: z.never().optional(), authorization: z.never().optional() };
 const journalLine = z.union([
@@ -131,6 +155,8 @@ const journalLine = z.union([
   preparationLine.extend({ journalVersion: z.never().optional(), correlation_id: nonempty, status: nonempty.optional() }),
   z.object({ ...outcome, submissionState: z.literal("SUBMISSION_ATTEMPTED") }),
   z.object({ ...outcome, refused: nonempty }),
+  // New in limit orders: the live order view, not cancellation acceptance, proves payout completion.
+  z.object({ ...outcome, cancelFinal: z.literal(true) }),
   // Older logs may have a correlation ID without a status: still unresolved, never inferred terminal.
   z.object({ ...outcome, correlation_id: nonempty, status: nonempty.optional() }),
   // Historical authorization snapshots are metadata, never submission or settlement evidence.
@@ -166,6 +192,7 @@ export function readOps(): Op[] {
     const line = parsed.data!;
     if (line.request !== undefined) {
       if (ops.has(line.idempotencyKey)) invalid("duplicate preparation");
+      if (line.method === "limit_order_cancel" && line.journalVersion !== 2) invalid("cancellation without a versioned claim");
       ops.set(line.idempotencyKey, { ...line, ...("journalVersion" in line && line.journalVersion === 2 && { submissionState: "PREPARED" as const }) });
       if (line.correlation_id === undefined) continue;
     }
@@ -182,11 +209,14 @@ export function readOps(): Op[] {
       existing.submissionState = line.submissionState;
     }
     if (line.refused !== undefined) {
+      if (existing.method === "limit_order_cancel" && existing.submissionState === "SUBMISSION_ATTEMPTED")
+        invalid("claimed cancellation cannot be refused without final payout evidence");
       if (existing.correlationId || existing.status || (existing.refused !== undefined && existing.refused !== line.refused)) invalid("refusal contradicts prior evidence");
       if (line.refused === "never_submitted" && (existing.journalVersion !== 2 || existing.submissionState !== "PREPARED")) invalid("submission cannot be inferred absent");
       existing.refused = line.refused;
     }
     if (line.correlation_id !== undefined) {
+      if (existing.method === "limit_order_cancel") invalid("cancellation acceptance has no final outcome correlation");
       if (existing.refused !== undefined || (existing.journalVersion === 2 && (existing.submissionState !== "SUBMISSION_ATTEMPTED" || !line.status))) invalid("outcome without submission claim");
       if (existing.correlationId && existing.correlationId !== line.correlation_id) invalid("operation identity changed");
       if (isResolved(existing) && existing.status !== line.status) invalid("terminal outcome changed");
@@ -194,6 +224,12 @@ export function readOps(): Op[] {
       if (owner && owner !== line.idempotencyKey) invalid("operation identity shared by different preparations");
       correlations.set(line.correlation_id, line.idempotencyKey);
       Object.assign(existing, { correlationId: line.correlation_id, status: line.status });
+    }
+    if (line.cancelFinal === true) {
+      if (existing.method !== "limit_order_cancel" || existing.journalVersion !== 2 || existing.submissionState !== "SUBMISSION_ATTEMPTED"
+        || existing.refused || existing.correlationId || existing.status || existing.cancelFinal)
+        invalid("cancel completion without one claimed cancellation");
+      existing.cancelFinal = true;
     }
   }
   for (const op of invoiceOperations()) {
@@ -228,10 +264,11 @@ export function claimSubmission(key: string, request: unknown) {
   record({ idempotencyKey: key, submissionState: "SUBMISSION_ATTEMPTED" });
 }
 
-/** Only the next money-lock holder may retire abandoned v2 preparations. Never infer legacy safety. */
+/** Only the next money-lock holder may retire abandoned v2 preparations. A claimed but unsent
+ * cancellation keeps its original journal identity so an explicit cancel request can finish it. */
 export function resolveUnsubmitted() {
   for (const op of readOps()) {
-    if (!op.invoiceId && op.journalVersion === 2 && op.submissionState === "PREPARED" &&
+    if (!op.invoiceId && op.method !== "limit_order_cancel" && op.journalVersion === 2 && op.submissionState === "PREPARED" &&
         !op.correlationId && !op.status && !isResolved(op))
       record({ idempotencyKey: op.idempotencyKey, refused: "never_submitted" });
   }

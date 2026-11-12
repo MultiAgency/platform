@@ -1,8 +1,9 @@
 # Provider SDK 0.8.2 in platform/SDK 0.5.6
 
 The platform pins `@near-intents-agent-api/sdk` to **0.8.2** in `package.json` and `pnpm-lock.yaml`. Its release-age
-exception is scoped to that exact package version. Node 24 is required. No existing state is converted and no new
-spending capability is exposed by this dependency update.
+exception is scoped to that exact package version. Node 24 is required. The tagged 0.5.6 dependency update converted
+no existing state and exposed no new spending capability. The tagged 0.5.7 SDK also lacks order routes. A separate
+Treasury [limit-order feature](limit-orders.md) is in progress for SDK 0.5.8.
 
 ## Source review (2026-11-10)
 
@@ -24,6 +25,16 @@ claim that those commits are deployed. The API coordinator implementation was no
   be used. These are NEAR Intents transfer payloads, not the NEP-366 delegate the market requires. These native
   signing paths have different policy protections from our dispatch path and are not integrated here.
 
+## Deployed read and preview checks (2026-11-10)
+
+The authenticated demo provider served limit-order reads and a dry preview. At **22:38 UTC**, one dry **BUY** preview
+returned HTTP 200 with `dry: true`, `type: "limit_order"`, and a `quote.spend_asset` and `quote.spend_amount` matching
+the exact atomic quote-spend formula in the [pinned limit-order reference](https://github.com/NEAR-Intents-Agent-API/skills/blob/0b81bba6fca6356a2db81d0ede08e9cb928d08e1/near-intents-agent-api/references/limit-orders.md).
+The preview also warned `policy_action_denied`, `policy_price_deviation_exceeded`, and `insufficient_balance`: it did
+not authorize placement. No live placement, fill, payout, or cancellation was attempted. The production provider did
+not support these limit-order routes in the read-only check. A working demo route does not identify the deployed
+provider commit or prove live money-path behavior.
+
 ## Compatibility and permission boundary
 
 The old policy output schema rejected the new action. A regression reproduced an overview failure before widening
@@ -31,10 +42,13 @@ that read schema. Policy reads and owner previews now retain the `limit_order` a
 setting. Unrelated policy edits preserve both. An older app SDK can reject a policy containing this action; consumers
 with exhaustive action switches need to handle the additional value. This changes evidence reading, not authorization.
 
-Default Treasury, Payables and Market policies still omit limit orders and native signing. The router, app scopes,
-owner request inputs, journal methods and one dispatch/send path gain no order or native-signing operation. There is
-no order fill/cancellation lifecycle or cumulative accounting for native signatures in the platform. Integrating those
-features requires a separate design, owner permissions, recovery/approval semantics and regression coverage.
+In the tagged 0.5.6 and 0.5.7 releases, default Treasury, Payables and Market policies omit limit orders and native
+signing; the router, app scopes and dispatch path expose no order or native-signing operation. The unreleased 0.5.8
+limit-order change adds an owner-signed per-order permission, an explicit `treasury-orders` app consent, an opt-in
+policy action, guarded placement through `dispatch`, and retained fill/cancellation observations. This change is in progress and
+has focused offline tests only; it has not been placed on mainnet through the platform. Native signing remains outside
+this change and has no fill/cancellation lifecycle or cumulative accounting here. See [Treasury limit orders](limit-orders.md)
+for the exact boundaries and evidence.
 
 No new error classification is inferred from an SDK update. In particular `policy_price_deviation_exceeded`,
 `market_price_unavailable`, `limit_orders_open` and the newer `invalid_address` at 409 do not prove that an attempted

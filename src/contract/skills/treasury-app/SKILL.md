@@ -3,7 +3,8 @@ name: treasury-app
 description: >
   Use when an app's server proposes Treasury swaps for an Organization's agent through @multiagency/sdk and has them
   executed once the owner approves later: proposals by requestId, the exact text the owner signs (or a DAO's vote), one
-  execution per proposal with recovery by state, and the two Treasury consent scopes. Server side only. Read app-server first.
+  execution per proposal with recovery by state, or exact owner-signed limit orders with separate consent and fill
+  tracking. Server side only. Read app-server first.
 metadata:
   purpose: 'Treasury proposals through an app: propose by requestId, the owner signs the exact terms, execute once, recover by state.'
   type: core
@@ -14,9 +15,11 @@ requires:
   - app-server
 sources:
   - 'MultiAgency/platform:src/contract/treasury-proposals.ts'
+  - 'MultiAgency/platform:src/contract/limit-orders.ts'
   - 'MultiAgency/platform:src/contract/app-access.ts'
   - 'MultiAgency/platform:src/proposals/service.ts'
   - 'MultiAgency/platform:docs/enforcement.md'
+  - 'MultiAgency/platform:docs/limit-orders.md'
 ---
 
 # Treasury proposals from an app's server
@@ -27,7 +30,7 @@ its exact terms later (hours or days), by signing a text in their own wallet; th
 which runs once, under the owner's signed policy. No production host serves this yet; build against the SDK
 repository's local stack.
 
-Three consent scopes, each named in the text the owner signs:
+Four consent scopes, each named in the text the owner signs:
 - `read`, for the owner UI's frame: `account` gives the agent's wallet account and the grant the executor holds
   (`grant`, plus `stagedGrant` while a new one waits to be promoted); `reconcileBooks` gives each balance against its
   independent record. Follow unresolved operations with `unresolved`; the platform reconciles them itself, and an app
@@ -46,6 +49,9 @@ Three consent scopes, each named in the text the owner signs:
   within the policy without a signature per swap, and only while the owner's live grant binds the strategy they were
   planned under. The autopilot's per-run ceiling (`autopilot.maxUsd`) doesn't bind them: it applies only to autopilot
   runs, so `maxUsd: 0` doesn't stop these plans. `sweep`, `rebalance` and `executePlan` are streams: read them with `app.agent(...).stream(path, input)`.
+- `treasury-orders`, only beside `treasury`: dry order quote, create, get, list, owner approval or rejection, one
+  placement, cancellation and status refresh. Existing `treasury` consents do not acquire it. It does not turn on the
+  provider's `limit_order` policy action; the owner signs that policy revision separately.
 
 ## Where the limits are
 
@@ -191,6 +197,38 @@ off-chain policy edits), per the provider's docs read 2026-11-05. The DAO's dele
 completes the action, so a slower DAO can't freeze its agent by vote. The DAO's own stop
 (`/confirm/dao/stop/<dao>/<agent>`) ends app consents and turns autopilot off, but neither freezes the agent nor
 revokes the grant: under a consent the DAO votes later, an app can turn autopilot on again.
+
+## Resting limit orders (0.5.8 candidate, offline-tested)
+
+Read `app.capabilities()` with the app server's service credential and offer order controls only when it advertises
+`treasury-limit-orders-v1` and a distinct owner consent carries both `treasury` and `treasury-orders`. The headless
+platform host has no `/gw/me`; a capability advertises its app route, not consent, an active agent release, or
+deployed provider support. Keep the credential on the app server.
+
+Use `treasury-orders` only when the owner wants to sign **each exact order**. The provider SDK 0.8.2 interprets
+`quantity` as atomic base units and `price` as human quote units per whole base unit. Provide an explicit deadline
+between one minute and seven days ahead, and an owner approval expiry no later than that deadline. A dry
+`limitOrders/quote` moves nothing; check its warnings and exact atomic spend before showing the terms. The default
+policy does not allow `limit_order`. An owner must sign a policy update that enables it and sets the provider's
+deviation bound. A configured Treasury cash floor refuses placement until a proven reservation rule exists.
+
+Save a stable `requestId` and terms before `limitOrders/create`. A lost create answer may be retried with that exact
+body. The returned `LimitOrderView` supplies `sha256`; use the SDK's `limitOrderText(view, "approve")` as the exact
+NEP-413 message the wallet signs with recipient the platform host. Relay it to `limitOrders/approve`; this sends
+no funds. For a DAO owner, file `app.daoLimitOrders.file({ organization, agent, order: view.id, verdict: "approve" })`,
+have an authorized member file or vote on the returned transaction, then follow `.state(request.id)` until the
+signature is relayed. A relay attempt is saved before its agent call; an uncertain answer is poll-only and requires
+the agent's matching signature receipt. The app must enforce its member roles as it does for other DAO votes.
+
+Call `limitOrders/place` once after approval. A lost answer is followed by `limitOrders/get` and `refresh` using the
+same ID, never by a new request. Provider placement `SUCCESS` means funded/resting, not filled. Show partial fills,
+final payout and `unknown` separately. `limitOrders/cancel` is a one-way request without a provider idempotency key.
+After an ambiguous reply, read `refresh`. Repeat `cancel` for the same ID only when the view explicitly says
+`cancelMayResume === true`: a matching claim and journal prove the platform never began its provider POST. Once a
+submission attempt is recorded, `cancelMayResume` is false and all recovery is read-only. A completed order needs a
+closed fill and final completed payouts.
+No live placement, fill, payout or cancellation through this platform has been observed. Production provider order
+routes were absent in the 2026-11-10 read-only check. See [limit orders](https://github.com/MultiAgency/platform/blob/main/docs/limit-orders.md).
 
 ## Common mistakes
 

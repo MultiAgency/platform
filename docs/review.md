@@ -55,9 +55,19 @@ The canonical list is the README's [Not done yet](../README.md#not-done-yet). Th
   the policy without it.
 - The autopilot hasn't run unattended for days on mainnet.
 
-The 0.5.6 candidate uses provider SDK 0.8.2, with policy evidence compatibility tested for `limit_order` and unchanged
-refusal/idempotency behavior. This adds no order execution or native signing route. The dependency review uses pinned
-public source and official skills; the deployed provider version remains unverified. See
+The tagged 0.5.6 SDK uses provider SDK 0.8.2, with policy evidence compatibility tested for `limit_order` and unchanged
+refusal/idempotency behavior. The tagged and published 0.5.7 SDK also lacks order routes. An unreleased 0.5.8 Treasury
+limit-order feature has local order routes, owner signatures, a dedicated app consent and offline recovery tests. No
+live order was placed by this platform. The separate Treasury app
+[PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records the exact unpublished 0.5.8 SDK package
+and local consumer tests for credentialed capability discovery, cancellation continuation and retained decisions.
+Each later SDK source commit changes that package's provenance and needs a matching app retest. App hosted acceptance,
+deployed provider support and live order outcomes remain open.
+Production provider order routes were absent in the 2026-11-10 read-only check.
+Consequently, a 0.5.8 platform using that provider would refuse hosted-agent release after its other prechecks,
+including for agents with no local orders; a working order-list route or separately reviewed absence proof is a
+production rollout gate ([release check](agent-release.md#release)).
+Native signing remains out of scope. See [limit orders](limit-orders.md) and
 [provider SDK upgrade](provider-sdk-082.md).
 
 ## Checking it yourself

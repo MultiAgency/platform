@@ -26,6 +26,21 @@ platform-only fixes are listed separately.
   (a provider `FAILED` isn't proof nothing moved); a refund doesn't. The confirm page shows it beside the terms. It refuses
   nothing. Optional, so older apps ignore it. Offline-, browser- and stack-tested.
 
+- **Treasury limit orders** (addition): a dedicated `treasury-orders` consent and SDK contract cover quotes, exact
+  owner approval, guarded placement, live status reads and one-way cancellation. An order view's optional
+  `cancelMayResume` is true only when the platform's matching claim and journal prove no cancellation POST began;
+  otherwise the app reads status and never repeats the POST. Order views also include digests of saved approval or
+  rejection signatures so a DAO vote relay can reconcile a lost HTTP answer without signing or sending again. This
+  feature is absent from the tagged 0.5.7 package. Its platform path has offline tests. The separate Treasury app
+  [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records the exact frozen SDK package it tested,
+  its checksum and local consumer results. These change notes ship inside the package, so each later SDK source
+  commit requires a new candidate and exact app retest. App release, hosted route and live order lifecycle checks
+  remain open.
+  See [limit orders](limit-orders.md).
+- **App host capability discovery** (addition): `appClient.capabilities()` reads the authenticated
+  `GET /apps/v1/capabilities` route, including `treasury-limit-orders-v1` when the host can serve Treasury order routes.
+  It grants no consent and does not verify an active agent release or provider support. Headless `/gw/me` remains absent.
+
 Platform changes in this release, outside the package:
 - **The books attribute a wNEAR deposit** (staging, 2026-11-11): a deposit's asset was proven only by a NEP-141
   `ft_transfer` event to the deposit address, and wrap.near logs none, so a staging agent's 3 wNEAR deposit (wrapped and
@@ -39,6 +54,9 @@ Platform changes in this release, outside the package:
   audit events, and shields in `/history`, each shaped as observed on staging except the shield row (none observed).
   A funded, shielded and swapped stack agent reconciles to zero (`test/e2e/stack-app.spec.mjs`), read through the new
   `reconcileBooks` stack control.
+- **The signature request budget also covers order approval**: `limitOrders/approve` and `limitOrders/reject`, and
+  `GET /apps/v1/dao-limit-orders/<hash>` when relaying a passed vote's signature, use the separate budget introduced
+  in 0.5.7. Offline-tested (`test/app-access.test.ts`).
 
 ## 0.5.7 (2026-11-11)
 
@@ -49,7 +67,7 @@ Platform changes in this release, outside the package:
   with the read+market consent couldn't grant its market agent. Other policy fields, and owner actions on any agent that
   isn't a market agent, still need `treasury`. Each is still a proposal the DAO votes on. Offline-tested
   (`test/app-dao.test.ts`).
-- **A quote for an agent the market can't hire is refused with a code** (reclassification,
+- **A quote for an agent the market can't hire is refused with a code** (reclassification; **Breaking for exhaustive switches**,
   platform#66): `market/quote`, and the re-quote inside `market/hire`, answer `refused` with `agent_not_found`
   (the market's `-32001`), `agent_not_hireable` (`-32004`) or `quote_refused` (`-32602`). Before, `market/quote`
   answered `unavailable`, which tells an app to send the call again, and `market/hire` answered `refused` with

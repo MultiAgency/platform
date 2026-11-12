@@ -4,7 +4,8 @@ import { os } from "./base.js";
 type Read = "setup" | "instance" | "account" | "overview" | "policyHistory" | "activity" | "unresolved" | "held" | "inbox/list" | "autopilot/get" | "autopilot/evidence"
   | "autopilot/log" | "strategy/get" | "treasury/get" | "ledger" | "ledgerCsv" | "reconcileBooks" | "paymentHistory" | "paymentStatus" | "payouts/status" | "invoices"
   | "agreements/list" | "owner/status" | "owner/pending" | "owner/actions" | "compensation/list" | "workOrders/list" | "workOrders/get" | "workOrders/status"
-  | "proposals/get" | "proposals/list" | "market/quote" | "market/status" | "market/account";
+  | "proposals/get" | "proposals/list" | "market/quote" | "market/status" | "market/account"
+  | "limitOrders/quote" | "limitOrders/get" | "limitOrders/list" | "limitOrders/refresh";
 
 /**
  * A read's answer must match its published contract (src/contract/owner-outputs.ts). Validate only: the original value

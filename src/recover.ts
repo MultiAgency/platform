@@ -5,6 +5,8 @@ import { blocksDispatch, isResolved, isTerminal, type Method, type Op, readOps, 
 import { contractOf } from "./chain.js";
 import { paymentOutcome, readChainView } from "./market/resolution.js";
 import { paymentId, type X402Request } from "./market/x402.js";
+import { assertSuccessfulOrderEvidence, cancellationClaimPhase, loadOrderProposal, readOrderFinal, saveOrderPlacement } from "./limit-orders/store.js";
+import { orderFinality, refreshOpenOrders, refreshTrackedOrder } from "./limit-orders/observe.js";
 
 /**
  * Resolves money actions left without a proven outcome (a crash, a lost response, an UNCERTAIN
@@ -59,6 +61,10 @@ export async function recover(): Promise<Recovery[]> {
         recoveries.push({ op, outcome: "unknown", status: mismatch ? undefined : op.status, detail: `${mismatch ? "" : "status unread: "}${String(error)}` });
       }
     }
+    await refreshOpenOrders();
+    // Complete safe status-only polling first, then surface a lost funded-order identity. Missing
+    // placement evidence must not hide an unrelated unresolved operation from reconciliation.
+    assertSuccessfulOrderEvidence(readOps());
     return recoveries;
   } finally {
     await lock.release();
@@ -90,12 +96,53 @@ async function recoverPayment(op: Op): Promise<Recovery> {
 
 async function recoverOne(op: Op): Promise<Recovery> {
   if (op.method === "x402" && op.submissionState === "SUBMISSION_ATTEMPTED") return recoverPayment(op);
+  if (op.method === "limit_order_cancel") {
+    const proposalId = op.idempotencyKey.startsWith("limit-order-cancel:") ? op.idempotencyKey.slice("limit-order-cancel:".length) : "";
+    if (!proposalId) return { op, outcome: "unknown", detail: "Cancellation identity is missing; preserve state for review" };
+    const phase = cancellationClaimPhase(proposalId, op);
+    if (phase === "retired") return { op, outcome: "refused", detail: "Cancellation was proven never submitted" };
+    const view = await refreshTrackedOrder(proposalId);
+    const finality = orderFinality(view);
+    if (phase === "prepared") {
+      if (finality === "complete") {
+        record({ idempotencyKey: op.idempotencyKey, refused: "never_submitted" });
+        return { op, outcome: "refused", status: view.fill_status,
+          detail: "The order closed before the claimed cancellation was submitted" };
+      }
+      if (finality === "failed") return { op, outcome: "unknown", status: view.fill_status,
+        detail: "The order's final payout failed before cancellation was submitted; preserve state for review" };
+      return { op, outcome: finality === "unknown" ? "unknown" : "open", status: "PREPARED",
+        detail: "Cancellation is proven unsent; an explicit cancel request may finish it under the original claim" };
+    }
+    if (phase !== "attempted") throw new Error("Cancellation operation has no matching claim");
+    if (finality === "complete") {
+      record({ idempotencyKey: op.idempotencyKey, cancelFinal: true });
+      return { op, outcome: "settled", status: view.fill_status };
+    }
+    return { op, outcome: finality === "open" ? "open" : "unknown", status: view.fill_status,
+      detail: finality === "failed" ? "The order closed but a payout failed; review before any new send"
+        : "Cancellation outcome is not payout-final; read again, never repeat the cancel POST" };
+  }
   const correlationId = op.correlationId;
   if (!correlationId) {
     if (op.submissionState === "PREPARED") return { op, outcome: "open", status: "PREPARED", detail: "Never submitted. Resubmit the original invoice to continue with its existing key." };
     return { op, outcome: "unknown", detail: "No operation id; acceptance is unknown. Provider deduplication is unverified; review required." };
   }
-  const { status } = await readStatus(correlationId);
+  const answer = await readStatus(correlationId);
+  const { status } = answer;
+  if (op.method === "limit_order") {
+    const proposalId = op.idempotencyKey.startsWith("limit-order:") ? op.idempotencyKey.slice("limit-order:".length) : "";
+    const proposal = proposalId ? loadOrderProposal(proposalId) : null;
+    const final = proposal ? readOrderFinal(proposalId) : null;
+    if (!proposal || final?.state !== "claimed" || final.operationKey !== op.idempotencyKey || answer.type !== "limit_order")
+      throw new StatusMismatch();
+    if (status === "SUCCESS") {
+      const orderId = answer.details.order_id;
+      if (!orderId) return { op, outcome: "unknown", status: op.status,
+        detail: "Placement succeeded without an order ID; preserve the journal and investigate" };
+      saveOrderPlacement(proposalId, { correlationId, orderId, at: new Date().toISOString() });
+    }
+  }
   if (status !== op.status) record({ idempotencyKey: op.idempotencyKey, correlation_id: correlationId, status });
   return { op, outcome: isTerminal(status) ? "settled" : status === "UNCERTAIN" || status === "NEEDS_REVIEW" ? "unknown" : "open", status, ...(isMoving(status) && { detail: "still moving" }) };
 }

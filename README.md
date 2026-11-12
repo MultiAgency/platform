@@ -168,6 +168,15 @@ Each line is a gap; the linked page says how the rest is known. The
   configuration (`deploy/platform.json`) doesn't set up Treasury agents yet; staging's does. A proposal's approval is the platform's check, not the provider's: whoever holds
   the treasury grant can swap within the policy without it. Held swaps aren't used: what their vote commits to is
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
+- Treasury limit orders are an unreleased 0.5.8 feature in progress, behind an owner-signed policy opt-in, one exact
+  signature from the owner per order and a new `treasury-orders` app consent. The default policy still leaves them off. Its local
+  placement, cancellation and recovery paths have offline tests. The separate Treasury app
+  [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records local consumer tests against an exact,
+  unpublished 0.5.8 package, including authenticated capability discovery and guarded continuation of a proven-unsent
+  cancellation. Every later SDK source commit changes package provenance and requires a matching app retest before
+  release. The tagged and published 0.5.7 SDK does not contain these order routes.
+  No live placement, fill or payout check has been completed. The demo provider answered authenticated dry previews
+  on 2026-11-10; production did not expose these routes in that read-only check ([limit orders](docs/limit-orders.md)).
 - Whether a linked DAO is confidential (`treasury/get`) relies on Trezu's convention: its confidential setup registers
   the DAO's MPC key at the DAO's own name on `intents.near` (Trezu's backend source; both keys read alike for one DAO on
   mainnet, 2026-11-08). A DAO set up some other way, or under a path Trezu changes to, reads `false`. Set up for

@@ -3,7 +3,7 @@ import type { z } from "zod";
 import type { Area } from "./areas.js";
 import type { hireTerms } from "./inputs.js";
 import { retryAfterSeconds } from "./retry-after.js";
-import { appAgent, appConsentList, appConsentNonce, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoHireFiled, appDaoHireState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appReservations, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
+import { appAgent, appCapabilities, appConsentList, appConsentNonce, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoHireFiled, appDaoHireState, appDaoOrderFiled, appDaoOrderState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appReservations, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
 import type { appConsentSubmission } from "./app-consent.js";
 import { ownerClient, type OwnerCallOptions, type OwnerFailure, type OwnerOutput, type OwnerProcedure, type OwnerResult } from "./owner-client.js";
 import type { ownerStreams } from "./owner-outputs.js";
@@ -99,6 +99,8 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
   const post = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
   return {
+    /** App routes available on this platform host. This grants no owner consent or provider support. */
+    capabilities: (options?: AppRouteOptions) => route("/capabilities", appCapabilities, {}, options),
     /** The agent's owner and current provider ID (`agentId`, null until created): what a consent must name. */
     identity: (agent: string, options?: AppRouteOptions) => route(`/agents/${encodeURIComponent(agent)}`, appAgent, {}, options),
     /**
@@ -155,6 +157,12 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
       file: (input: { organization: string; agent: string; proposal: string; verdict: "approve" | "reject" }, options?: AppRouteOptions) =>
         route("/dao-votes", appDaoVoteFiled, post(input), options),
       state: (id: string, options?: AppRouteOptions) => route(`/dao-votes/${encodeURIComponent(id)}`, appDaoVoteState, {}, options),
+    },
+    /** A DAO's exact owner signature for a proposed Treasury limit order. Approval does not place the order. */
+    daoLimitOrders: {
+      file: (input: { organization: string; agent: string; order: string; verdict: "approve" | "reject" }, options?: AppRouteOptions) =>
+        route("/dao-limit-orders", appDaoOrderFiled, post(input), options),
+      state: (id: string, options?: AppRouteOptions) => route(`/dao-limit-orders/${encodeURIComponent(id)}`, appDaoOrderState, {}, options),
     },
     /**
      * A DAO's approval of one market hire under its DAO consent carrying `market` (docs/market.md): `file` takes the terms
