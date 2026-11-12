@@ -184,15 +184,18 @@ test("a headless config refuses every sign-in or owner-app feature, and each dep
 
 test("the platform package carries the gateway and the confirm entry's files only: no owner app, no app frontends", async () => {
   const { execFileSync } = await import("node:child_process");
-  const { existsSync, mkdirSync, statSync, readdirSync } = await import("node:fs");
+  const { existsSync, mkdirSync, statSync, readdirSync, symlinkSync } = await import("node:fs");
+  const { pathToFileURL } = await import("node:url");
   const tree = mkdtempSync(join(tmpdir(), "platform-tree-")), out = join(tmpdir(), `platform-package-${randomBytes(4).toString("hex")}`);
   const write = (path: string, content = path) => { mkdirSync(join(tree, path, ".."), { recursive: true }); writeFileSync(join(tree, path), content); };
   try {
     for (const path of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json", "src/gateway/server.ts", "Dockerfile.platform",
       "deploy/railway.gateway.json", "deploy/platform-entrypoint.sh", "deploy/platform-staging.json", "deploy/platform.json", "deploy/dashboard.json",
+      ".railway/local-state.json", ".railway/credentials.json", ".env", ".hosted/agent.env", ".ops/private", "railway.json", "railway.toml",
       "web/dist/index.html", "web/dist/confirm.html", "web/dist/static/js/index.1.js", "web/dist/static/js/confirm.2.js", "web/dist/static/js/lib.3.js",
       "web/dist/static/js/lib.3.js.LICENSE.txt", "web/dist/static/css/c.4.css", "web/dist/static/font/f.5.woff2", "frontends/treasury/index.html"]) write(path);
     write("package.json", JSON.stringify({ name: "platform-tree", private: true, type: "module" }));
+    for (const path of [".railway/railway.ts", ".railway/tsconfig.json"]) write(path, readFileSync(path, "utf8"));
     write("web/dist/build-manifest.json", JSON.stringify({ allFiles: [], integrity: {}, entries: {
       index: { html: ["/index.html"], initial: { js: ["/static/js/lib.3.js", "/static/js/index.1.js"], css: ["/static/css/c.4.css"] } },
       confirm: { html: ["/confirm.html"], initial: { js: ["/static/js/lib.3.js", "/static/js/confirm.2.js"], css: ["/static/css/c.4.css"] }, assets: ["/static/font/f.5.woff2"] } } }));
@@ -204,15 +207,31 @@ test("the platform package carries the gateway and the confirm entry's files onl
     // there too, but none of its files ships, so none is served.
     assert.deepEqual([...confirmAssets(join(out, "web/dist"))].sort(), ["/static/css/c.4.css", "/static/font/f.5.woff2", "/static/js/confirm.2.js", "/static/js/lib.3.js"]);
     assert.deepEqual(files("deploy").sort(), ["deploy/platform-entrypoint.sh", "deploy/platform-staging.json", "deploy/platform.json"]);
+    assert.deepEqual(files(".railway").sort(), [".railway/railway.ts", ".railway/tsconfig.json"], "only declared IaC inputs ship, never local credentials or state");
+    for (const path of ["railway.json", "railway.toml", "deploy/railway.gateway.json", ".env", ".hosted", ".ops", "node_modules"])
+      assert.equal(existsSync(join(out, path)), false, `${path} must not enter the platform package`);
     assert.equal(existsSync(join(out, "frontends")), false);
     assert.equal(statSync(join(out, "deploy/platform-entrypoint.sh")).mode & 0o111, 0o111, "the entrypoint is executable");
     assert.equal(readFileSync(join(out, "Dockerfile"), "utf8"), "Dockerfile.platform");
     const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as { revisions: Record<string, unknown>; files: Record<string, string> };
     assert.deepEqual(Object.keys(manifest.revisions), ["platform"]);
+    for (const path of [".railway/railway.ts", ".railway/tsconfig.json"])
+      assert.equal(manifest.files[path], createHash("sha256").update(readFileSync(join(tree, path))).digest("hex"), `${path} is bound to the release manifest`);
+    assert.equal(manifest.files["railway.json"], undefined, "the manifest contains no legacy Config as Code");
     assert.ok(manifest.files["web/dist/confirm.html"] && manifest.files["web/dist/build-manifest.json"] && !manifest.files["web/dist/index.html"]);
     // The release candidate's check: every web file shipped is byte-equal to the tested build's.
     for (const [file, hash] of Object.entries(manifest.files)) if (file.startsWith("web/dist/"))
       assert.equal(hash, createHash("sha256").update(readFileSync(join(tree, file))).digest("hex"), `${file} differs from the tested build`);
+    // Evaluate the shipped inputs with installed dependencies, from the package rather than the source config path.
+    symlinkSync(join(process.cwd(), "node_modules"), join(out, "node_modules"), "dir");
+    const { createRailwayContext, project } = await import("railway/iac");
+    const original = await import("../.railway/railway.js");
+    const packaged = await import(pathToFileURL(join(out, ".railway/railway.ts")).href) as typeof original;
+    assert.equal(packaged.partial, "gateway");
+    for (const environment of ["staging", "production"]) {
+      const context = createRailwayContext({ environment, projectName: "platform" });
+      assert.deepEqual(await packaged.default(context, project), await original.default(context, project), `${environment}: the package evaluates to the reviewed IaC`);
+    }
     assert.throws(() => execFileSync(process.execPath, [join(process.cwd(), "scripts/package-platform.mjs"), out], { cwd: tree, stdio: "pipe" }), /must not exist/);
   } finally { rmSync(tree, { recursive: true, force: true }); rmSync(out, { recursive: true, force: true }); }
 });

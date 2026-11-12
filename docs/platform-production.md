@@ -8,14 +8,29 @@ Payables only, no configured agents). The production environment's earlier proto
 checked: no balances, journals or agent lists were read); proto.multiagency.ai, invoices.multiagency.ai,
 payables.multiagency.ai and treasury.multiagency.ai no longer answer.
 
-**Runs 0.5.4 since 2026-11-08T22:17Z:** candidate `2d8d30d6` (commit `f2c7b7f`, the release candidate whose last gate
+**Infrastructure as Code applied by the owner, 2026-11-12 UTC.** The owner applied the pinned plan from source
+`d741f3b`. Deployment `c9cba776-bd43-4353-9bcb-a15b5c64e95e` reached `SUCCESS`, with one `RUNNING` instance and image
+`sha256:af965b1db0b7093897d1c54e12c08c51d581f59b179c669032f227e6ed76e58c`; the API also reported that image for the
+earlier `b9ab9792` deployment. Effective settings showed one `us-west2` replica, `/health`, 45-second drain, 5 restart
+retries and default `ON_FAILURE`. The original volume instance `49b76b29-1170-4c40-863a-30dd54d5cfc4` remained `READY`
+at `/data`, 50,000 MB. Platform smoke after success passed 18 of 18 checks; the post-apply plan returned zero changes
+and no diagnostics, with variables unmanaged. Read-only runtime verification matched package manifest
+`sha256:647aa96417228de100571b996f7d0d0a4037d7af7d7982059b48874f7a0aa96b`, source
+`f2c7b7f5077c01a52b8dd44eebc551a74eb945f6` (candidate `2d8d30d6`) and all 219 packaged runtime file hashes, with no
+mismatches; Node was 24.22.0. No new application source was uploaded. The application remains 0.5.4; its original
+upload included legacy JSON, while future packages from this source omit those files. These checks establish configuration,
+package identity and public host behavior, not new application or money-path acceptance. See the
+[apply and verification record](operations.md#railway-infrastructure-as-code).
+
+**Earlier 0.5.4 deployment, 2026-11-08T22:17Z:** candidate `2d8d30d6` (commit `f2c7b7f`, the release candidate whose last gate
 booted this package's image offline twice), Railway deployment `b9ab9792` on the `gateway` service (image
-`sha256:fd7992ae…`, base `node:24.22.0-slim`), deployed from a copy of the candidate's `platform` package identical
+recorded then as `sha256:fd7992ae…`; the later API read returned `sha256:af965b1d…`, above; base `node:24.22.0-slim`),
+deployed from a copy of the candidate's `platform` package identical
 to it. It signs for `api.multiagency.ai` and started no hosted agents. At 22:17Z the platform smoke checks passed (18 of
 18) and the confirm page's 6 assets were each fetched and byte-equal to the package's. Before it switched, the same
 checks passed on 0.5.3.
 
-**Running since 2026-11-08 (04:54Z, 0.5.3):** the project's `gateway` service, synced into production from staging, so each
+**Earlier deployment, 2026-11-08 (04:54Z, 0.5.3):** the project's `gateway` service, synced into production from staging, so each
 environment has its own instance with its own volume, variables, domain and deployments. Deployment `c34b1867`
 (04:54Z, image `sha256:bb1d820b…`), built from the same upload of candidate `a434f381`'s package as `api` below
 (snapshot `sha256:b45bdb10…`); it signs for `api.multiagency.ai`, and
@@ -42,32 +57,48 @@ script `/static/js/lib-react.e499478f4d.js` 200; an unknown DAO's stop page 404 
 
 | Item | State | What it needs |
 |---|---|---|
-| A release candidate on the commit to ship | 0.5.3 is the build to ship: it has the shutdown grace, consent archiving, the monthly access log and provider SDK 0.8.0 (needed for a partner portal key). Candidate `a434f381` (commit `49b8d51`, Node 24.22.2) passed every gate on 2026-11-07; published to npm and tagged `sdk-v0.5.3` | Done |
-| The same build observed on staging | staging runs 0.5.3 (`c3a2eb0b`, then `54fa8a24` with a partner portal key, 2026-11-07; read-only checks passed); one consent and one read through treasury.dev on 2026-11-07 ([platform staging](platform-staging.md)) | Done |
+| First production release candidate | 0.5.3 introduced the shutdown grace, consent archiving, the monthly access log and provider SDK 0.8.0 (needed for a partner portal key). Candidate `a434f381` (commit `49b8d51`, Node 24.22.2) passed every gate on 2026-11-07; published to npm and tagged `sdk-v0.5.3` | Recorded for that release; a later release needs its own candidate |
+| Staging evidence for that release | 0.5.3 ran on staging (`c3a2eb0b`, then `54fa8a24` with a partner portal key, 2026-11-07; read-only checks passed); one consent and one read through treasury.dev on 2026-11-07 ([platform staging](platform-staging.md)) | Recorded for that build; not evidence of a later release |
 | Its own credentials | shared with staging since 2026-11-08: the sync copied staging's provider key, FastNEAR key and `SESSION_SECRET`, kept for production app credentials too (user, 2026-11-08; the risk is in the known shortcut above) | Not required before production app credentials. To separate later: a production partner portal key, a production FastNEAR key and a new `SESSION_SECRET` on production's `gateway`, then the read-only checks |
-| Railway config | `railway.json` still works until 2026-12-01; the first deploy used it (2026-11-07) | Any deploy after 2026-12-01 needs the migration ([operations](operations.md#railway-config-as-code-ends-2026-12-01)) |
+| Railway config | The owner applied corrected IaC on 2026-11-12 UTC; deployment, 18/18 smoke and package identity checks passed, with zero changes in the post-apply plan. Migration status reported no selected Config as Code path; the original 0.5.4 upload included legacy JSON | Configuration verified; a future source-package upload remains a separate owner action ([operations](operations.md#railway-infrastructure-as-code)) |
 | Treasury setup on production | `deploy/platform.json` sets up Payables only | A decision: add `treasury` to `appSetup` (DAO setup through apps is mainnet-observed on staging), or keep Payables only at first |
 | Developer credentials | operator-issued ([developer access](developer-access.md)) | The first production credentials: the dashboard's and Treasury's, then requests by approval |
-| Rollback | nothing earlier to roll back to | For later releases, redeploy the previous image; its state stays on its own volume. Never delete or restore backend records |
+| Rollback | Earlier deployment identities are recorded above; state-format compatibility still governs recovery | Review the exact previous image and retained state before redeploying. Preserve the original volume and records; configuration cutover is separate from application-state compatibility |
 | Monitoring | `PLATFORM_URL=https://api.multiagency.ai pnpm smoke` checks it read-only (#37; passed all 16 checks on `gateway` 2026-11-08, about 05:05Z) | Run it after each deploy. `/health` is the gateway's liveness only: it stays 200 while an agent restarts or crash-loops, so watch the service's logs and restarts too |
 | Memory | not sized | Each hosted agent is its own Node process: loading one agent's code took about 237 MB RSS (measured 2026-11-06 on macOS arm64, not on Railway). At the cap of 32 hosted agents that's about 7.6 GB beside the gateway. Set the service's memory limit for the agents you expect, and watch its usage on staging first |
 | State growth | ended consents and the access log grow with use | Run `pnpm app-credential archive-consents` weekly and `check-keys` on a schedule; move each finished month's `access-YYYY-MM.jsonl` off the volume; watch the volume's use (a full `/data` refuses every send and app call) |
-| Shutdown grace | `drainingSeconds: 45` in the package's `railway.json` | Nothing: an agent stops sending on SIGTERM and waits up to 25 s for a send in flight. Check after the first deploy that the old deployment stopped cleanly (its log shows no "still running" line) |
+| Shutdown grace | The earlier package declares `drainingSeconds: 45` in legacy JSON; the IaC candidate declares it under `deploy` | Verify the reviewed plan and post-apply configuration set 45 seconds. An agent waits up to 25 s for a send in flight; inspect shutdown logs after the owner-run deployment |
 
 ## Steps
+
+Steps 1–2 record the original provisioning. Existing production keeps its original service, `/data` volume, settings
+and records; do not repeat Sync or bootstrap to perform this migration. The source now supplies an IaC candidate whose
+named `gateway` partial selects `api.multiagency.ai`, the existing `gateway-volume`, one `us-west2` replica, `/health`,
+5 restart retries and 45-second drain. Variables are unmanaged by IaC, and the uploaded source is not replaced.
+The SDK's public contract and app setup are unchanged. Before deploying the first package without `railway.json`, the
+owner must perform the [staging and then production reviewed apply, with cutover only where required](operations.md#railway-infrastructure-as-code).
+Run those tools from the reviewed source checkout with development dependencies; the production image does not
+install the authoring SDK. The owner has applied both environments' configuration. Applying
+configuration can redeploy the existing image without uploading new source, so the resulting deployment needs its own
+status/log checks. Production still runs the earlier release, whose original upload included legacy JSON; future
+packages from this source omit it.
 
 1. In the platform's Railway project, production environment, bring in staging's `gateway` service with **Sync**
    (production as the receiving environment). Review the staged changes before deploying: Sync shows staging's whole
    service set and copies its variables, so remove `DASHBOARD_FILE` and replace staging's secrets (step 2), and keep
-   any production service it would delete unless that's intended. It gets its own volume at `/data`; the package's
-   `railway.json` sets one replica and healthcheck `/health`.
+   any production service it would delete unless that's intended. It gets its own volume at `/data`; the initial
+   packages' `railway.json` supplied one replica and healthcheck `/health`.
 2. Variables: no `DASHBOARD_FILE` (the image defaults to `/app/deploy/platform.json`), `NEAR_INTENTS_AGENT_API_KEY`
    (the new production key), `NEAR_INTENTS_AGENT_API_URL`, `FASTNEAR_API_KEY`, and a new `SESSION_SECRET`. No
    `DAO_ENV`, `PAYOUT_ENV` or `RESTORE_*`.
-3. Deploy the candidate's `platform` package from a copy outside any git repository:
+3. After the infrastructure prerequisites above, the owner deploys the candidate's `platform` package from a copy
+   outside any git repository:
    `cp -R <release>/platform /tmp/platform-<candidate>`, `cd` there, `railway link` (platform project, production,
    `gateway`), then `railway up --service gateway --environment production`. The build log shows the Dockerfile's
-   steps, and the upload is about 0.9 MB.
+   steps. Follow the exact returned deployment ID to `SUCCESS`, verify its package/image identity and retained volume,
+   then inspect hosted-agent logs and restarts. Startup can submit signatures from already-passed DAO votes and run
+   persisted schedules: review retained owner actions and schedules before restarting; a smoke check does not require
+   enabling them. Preserve any records that progress during startup.
 4. Leave `DASHBOARD_HOST` unset: the service then signs only for `api.multiagency.ai`, so nothing can be signed for
    the Railway domain by mistake. On the Railway domain, `/health` answers 200 and `/apps/…` and `/confirm/…` answer
    421, which shows that binding. Add `api.multiagency.ai` as the service's custom domain (target port 8080), add the

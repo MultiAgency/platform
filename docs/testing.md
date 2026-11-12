@@ -123,6 +123,11 @@ process can listen on 127.0.0.1 at the same port, before or after the gateway, a
 127.0.0.1 there: a browser's DevTools endpoint did. The dashboard proxy now dials the gateway over `::1`, where only the
 gateway answers; `gateway-port.spec.mjs` squats 127.0.0.1 on the gateway's port and fails without the fix.
 
+The executor, reviewer and invoice server also used ports probed before the HTTPS proxies bound. A proxy or another
+process could take a released port and make a child exit with `EADDRINUSE`. The proxies now bind first, and initial
+child startup retries a contested port before the gateway records its agent routes. `stack-port-contention.spec.mjs`
+holds the probed ports and checks both the dashboard and invoice proxy against the services on new ports (offline E2E).
+
 Run one E2E suite per machine at a time. Hosted agents take ports from 9000 (`src/gateway/hosted-agents.ts`), checked
 free only when reserved, so two suites at once (two checkouts, say) can reserve the same port and the second agent can't
 bind it (`EADDRINUSE`, then restarts with backoff): on 2026-11-08 a stack's setup waited 30 s for such an agent while
