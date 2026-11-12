@@ -12,7 +12,7 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
-## 0.5.8 (unreleased)
+## 0.5.8 (2026-11-11)
 
 - **The `app-server` skill says to derive a payout's `requestId`, payee and amount in code** (docs): from the app's own
   record of what is owed, never from what a model or an incoming message proposes, and lists a model choosing them as a
@@ -42,6 +42,11 @@ platform-only fixes are listed separately.
   It grants no consent and does not verify an active agent release or provider support. Headless `/gw/me` remains absent.
 
 Platform changes in this release, outside the package:
+- **An explicit cross-repository Treasury order gate** starts the platform gateway and separate Treasury app server
+  against simulated provider, chain, owner key and funds. It checks consent refusal, exact order signing, payout-gated
+  completion and one provider POST after lost placement or cancellation replies across app restarts. Its manifest binds
+  both source commits and the app's installed SDK package; it is separate from the default candidate suite and from
+  deployed-provider evidence (`test/cross-repo/treasury-orders/`).
 - **The books attribute a wNEAR deposit** (staging, 2026-11-11): a deposit's asset was proven only by a NEP-141
   `ft_transfer` event to the deposit address, and wrap.near logs none, so a staging agent's 3 wNEAR deposit (wrapped and
   sent in one transaction, 2026-11-06) read as unattributed in `reconcileBooks`. A successful `ft_transfer` call of the
