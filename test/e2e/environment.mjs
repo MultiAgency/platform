@@ -61,7 +61,7 @@ async function freePort(host = '127.0.0.1') {
 const MARKET_AGENTS = { writer: { amount: '500000', windowSeconds: 600, outcome: 'complete', result: 'the article' },
   refuser: { amount: '500000', windowSeconds: 600, outcome: 'reject' },
   worker: { amount: '500000', windowSeconds: 600, outcome: 'worker', name: 'Agency worker' } };
-export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoPortfolio = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false, appSetup = ['payables'], market = false, marketWebhookUrl = null, marketWebhookSecret = null } = {}) {
+export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoPortfolio = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false, appSetup = ['payables'], market = false, marketWebhookUrl = null, marketWebhookSecret = null, beforeServiceStart } = {}) {
   await requireConfirmBuild();
   if (daoPortfolio) { workspace = true; portfolioOwner = DAO; }
   const dao = daoPortfolio;
@@ -78,10 +78,9 @@ export async function environment(directory, { workspace = false, portfolioOwner
   let executor, reviewer;
   const executorDir = join(directory, 'executor'), reviewerDir = join(directory, 'reviewer'), gatewayDir = join(directory, 'gateway');
   for (const dir of [executorDir, reviewerDir, gatewayDir]) mkdirSync(dir);
-  // Each port is probed on the address its service binds: the gateway listens on every interface (`::`), and a port free
-  // on 127.0.0.1 can still be held there by another process (macOS allows both binds), so its start would fail.
-  const [executorPort, reviewerPort, invoicePort] = await Promise.all([freePort(), freePort(), freePort('::1')]);
-  let gatewayPort = await freePort('::');
+  // The proxy callbacks read these only after the services start. Bind the proxies first: their OS-assigned ports must
+  // not take a port that was already probed and released for an agent server.
+  let executorPort, reviewerPort, invoicePort, gatewayPort;
   const key = join(directory, 'localhost.key'), cert = join(directory, 'localhost.crt');
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert,
     '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=DNS:localhost,IP:127.0.0.1'], { stdio: 'ignore' });
@@ -101,6 +100,9 @@ export async function environment(directory, { workspace = false, portfolioOwner
   // page showed "WebSockets request was expected" (docs/testing.md). Over ::1 only the gateway answers.
   const dashboard = `https://127.0.0.1:${await proxy(() => gatewayPort, '::1')}`;
   const invoices = `https://localhost:${await proxy(() => invoicePort, '::1')}`;
+  // Probe on the addresses each service binds. The gateway listens on every interface (`::`), where an apparently
+  // free 127.0.0.1 port may still be held (on macOS); it also retries a lost race at startup below.
+  [executorPort, reviewerPort, invoicePort, gatewayPort] = await Promise.all([freePort(), freePort(), freePort('::1'), freePort('::')]);
   // P2: an owner app's actual builds as releases A, B and an incompatible C, served by the shared release
   // server as its own process. Activation is the app operator's action, done here through the same code.
   let release;
@@ -134,13 +136,19 @@ export async function environment(directory, { workspace = false, portfolioOwner
     for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => {
       output += chunk; appendFileSync(join(directory, `${name}.log`), chunk);
     });
-    const deadline = Date.now() + 20_000;
-    while (!output.includes(ready)) {
-      if (child.exitCode !== null || child.signalCode) throw new Error(`${name} exited: ${output}`);
-      if (Date.now() > deadline) throw new Error(`${name} startup timed out: ${output}`);
-      await delay(50);
+    try {
+      const deadline = Date.now() + 20_000;
+      while (!output.includes(ready)) {
+        if (child.exitCode !== null || child.signalCode) throw new Error(`${name} exited: ${output}`);
+        if (Date.now() > deadline) throw new Error(`${name} startup timed out: ${output}`);
+        await delay(50);
+      }
+      return child;
+    } catch (error) {
+      // A timed-out child can still hold an executor lease or socket. Never retry beside it.
+      await stop(child);
+      throw error;
     }
-    return child;
   }
   async function stop(child) {
     if (child.exitCode !== null || child.signalCode) return;
@@ -157,6 +165,17 @@ export async function environment(directory, { workspace = false, portfolioOwner
   // A valid test grant makes executor enforcement observable independently of missing credentials.
   const startReviewer = async () => reviewer = await start('reviewer', reviewerDir, 'src/server.ts', { PORT: String(reviewerPort), EXECUTOR: 'off', AGENT_GRANT_TOKEN: simulated.token,
       AGREEMENTS_URL: `http://[::1]:${invoicePort}`, AGREEMENTS_SECRET: 'local-agreements' }, 'Treasury dashboard on');
+  // A separate process may still take a probed port before the child binds it. Initial retries can choose new ports:
+  // no gateway agent configuration has been written yet. A later restart keeps its established references instead.
+  async function startInitial(startService, refreshPorts) {
+    for (let attempt = 1; ; attempt++) {
+      try { await startService(); return; }
+      catch (error) {
+        if (attempt === 3 || !String(error.message).includes('EADDRINUSE')) throw error;
+        await refreshPorts();
+      }
+    }
+  }
   async function dispose() {
     await Promise.all(services.map(stop));
     await Promise.all(proxies.map(close));
@@ -165,8 +184,11 @@ export async function environment(directory, { workspace = false, portfolioOwner
     await marketSim?.close();
   }
   try {
-    await startExecutor();
-    await startReviewer();
+    await beforeServiceStart?.({ executorPort, reviewerPort, invoicePort });
+    await startInitial(startExecutor, async () => {
+      [executorPort, invoicePort] = await Promise.all([freePort(), freePort('::1')]);
+    });
+    await startInitial(startReviewer, async () => { reviewerPort = await freePort(); });
     const agents = [{ name: 'payout', owner, area: 'payables', port: reviewerPort, executor: false, invoices: `${invoices}/submit` }];
     if (portfolio) {
       const port = await freePort();

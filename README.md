@@ -97,6 +97,10 @@ Each agent has exactly one executor host; the local lease doesn't enforce that a
 runs `EXECUTOR=off` (approve-only). Deployment, executor migration and state preservation are in the
 [operations guide](docs/operations.md).
 
+Railway Infrastructure as Code is applied in staging and production. The
+[dated configuration checks](docs/operations.md#railway-infrastructure-as-code) record successful deployments,
+18/18 public smoke checks and zero-change plans for both environments.
+
 ## DAO ownership
 
 A DAO has no keys, but it can sign through NEAR's MPC network. The owner is an account whose only
@@ -168,12 +172,12 @@ Each line is a gap; the linked page says how the rest is known. The
   configuration (`deploy/platform.json`) doesn't set up Treasury agents yet; staging's does. A proposal's approval is the platform's check, not the provider's: whoever holds
   the treasury grant can swap within the policy without it. Held swaps aren't used: what their vote commits to is
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
-- Treasury limit orders are in the 0.5.8 SDK source, with platform rollout pending. They require an owner-signed policy opt-in, one exact
+- Treasury limit orders shipped in the tagged and published 0.5.8 SDK, with platform rollout pending. They require an owner-signed policy opt-in, one exact
   signature from the owner per order and a new `treasury-orders` app consent. The default policy still leaves them off. Its local
   placement, cancellation and recovery paths have offline tests. The separate Treasury app
   [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records local consumer tests against an exact
-  0.5.8 candidate package, including authenticated capability discovery and guarded continuation of a proven-unsent
-  cancellation. Every later SDK source commit changes package provenance and requires a matching app retest before
+  published 0.5.8 package, including authenticated capability discovery and guarded continuation of a proven-unsent
+  cancellation. A package built from later SDK source has different provenance and needs a matching app retest before
   release. The tagged and published 0.5.7 SDK does not contain these order routes.
   No live placement, fill or payout check has been completed. The demo provider answered authenticated dry previews
   on 2026-11-10; production did not expose these routes in that read-only check ([limit orders](docs/limit-orders.md)).
@@ -283,10 +287,6 @@ Each line is a gap; the linked page says how the rest is known. The
   ([follow-up](docs/archive/infrastructure-review.md#follow-up-review-2026-10-16)).
 - CI doesn't build or check the `platform` image (no Docker in the job): only a release candidate does, as its last
   gate (`pnpm check:platform-image`; [operations](docs/operations.md)).
-- Every deploy still uses Railway's Config as Code, which the Railway CLI warned on 2026-11-05 keeps working only until
-  2026-12-01; later deploys need Railway's Infrastructure as Code (`.railway/railway.ts`). Not migrated:
-  `deploy/railway.gateway.json`, the `platform` package's root `railway.json` (staging and production). See
-  [operations](docs/operations.md#railway-config-as-code-ends-2026-12-01).
 - Guided walkthroughs and short guides (`/demos`) are tested with offline browser fixtures, not on the deployed hosts,
   and can't guarantee a swap, prompt approval or settlement. Guidance is deterministic, not an LLM; live AG-UI agent
   orchestration isn't built.

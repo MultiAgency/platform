@@ -109,8 +109,8 @@ package/consumer and image verification remain separate from these source checks
   rejection signatures so a DAO vote relay can reconcile a lost HTTP answer without signing or sending again. This
   feature is absent from the tagged 0.5.7 package. Its platform path has offline tests. The separate Treasury app
   [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records the exact frozen SDK package it tested,
-  its checksum and local consumer results. These change notes ship inside the package, so each later SDK source
-  commit requires a new candidate and exact app retest. App release, hosted route and live order lifecycle checks
+  its checksum and local consumer results. These change notes ship inside the package, so a package built from later
+  SDK source requires a new candidate and exact app retest. App release, hosted route and live order lifecycle checks
   remain open.
   See [limit orders](limit-orders.md).
 - **App host capability discovery** (addition): `appClient.capabilities()` reads the authenticated

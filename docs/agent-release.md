@@ -35,7 +35,7 @@ observed provider, the 0.5.8 release check refuses `limit_orders` after the othe
 with no local order records: an unavailable list cannot prove that no older or external order remains payout-open.
 Hosted-agent release on production therefore needs a working provider order-list route or a separately reviewed
 absence proof. Do not infer absence from the current policy or an empty local journal.
-This 0.5.8 addition is offline-tested only and is not in the tagged 0.5.7 release. See
+This 0.5.8 addition shipped in the tagged and published 0.5.8 SDK, but remains offline-tested only; 0.5.7 lacks it. See
 [limit orders](limit-orders.md).
 
 A refusal returns `{ state: "refused", reason, balances }`; it writes no release marker. A successful check first writes

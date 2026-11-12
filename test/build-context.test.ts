@@ -13,7 +13,7 @@ const SHIPPED = {
   platform: {
     script: "scripts/package-platform.mjs",
     dockerfile: "Dockerfile.platform",
-    railway: "deploy/railway.gateway.json",
+    railway: [".railway/railway.ts", ".railway/tsconfig.json"],
     deploy: ["platform-entrypoint.sh", "platform-staging.json", "platform.json"],
   },
 };
@@ -23,24 +23,60 @@ test("the declared package is everything that can deploy: no other Dockerfile, p
   const shipped = Object.values(SHIPPED);
   assert.deepEqual(readdirSync(".").filter(f => /^Dockerfile/.test(f)).sort(), shipped.map(p => p.dockerfile).sort(), "Dockerfiles");
   assert.equal(existsSync("Dockerfile"), false, "no ambiguous root Dockerfile");
-  assert.equal(existsSync("railway.json"), false, "no root Railway config: each package carries its own");
+  for (const path of ["railway.json", "railway.toml", "deploy/railway.gateway.json"])
+    assert.equal(existsSync(path), false, `${path}: legacy Config as Code is retired`);
   assert.deepEqual(readdirSync("scripts").filter(f => /^package-/.test(f)).map(f => `scripts/${f}`).sort(), shipped.map(p => p.script).sort(), "packaging scripts");
-  const deploy = [...shipped.flatMap(p => [...p.deploy, p.railway.replace("deploy/", "")]), ...LOCAL_CONFIGS].sort();
+  const deploy = [...shipped.flatMap(p => p.deploy), ...LOCAL_CONFIGS].sort();
   assert.deepEqual(readdirSync("deploy").sort(), deploy, "deploy files: shipped by a package or declared local");
 });
 
-test("each package carries exactly its declared Dockerfile, Railway config and deploy files", () => {
+test("each package declares its Dockerfile, IaC inputs and deploy files", () => {
   for (const [name, p] of Object.entries(SHIPPED)) {
     const script = readFileSync(p.script, "utf8"), literal = (text: string) => text.replaceAll(".", "\\.");
     assert.match(script, new RegExp(`copy\\(join\\(root, '${literal(p.dockerfile)}'\\), join\\(output, 'Dockerfile'\\)\\)`), `${name}: Dockerfile`);
-    assert.match(script, new RegExp(`copy\\(join\\(root, '${literal(p.railway)}'\\), join\\(output, 'railway\\.json'\\)\\)`), `${name}: railway.json`);
+    for (const input of p.railway) assert.ok(existsSync(input), `${name}: ${input}`);
     const copied = script.match(/for \(const name of \[([^\]]*)\]\) copy\(join\(root, 'deploy', name\)/)?.[1];
     assert.deepEqual([...(copied ?? "").matchAll(/'([^']+)'/g)].map(m => m[1]).sort(), [...p.deploy].sort(), `${name}: deploy files`);
-    const railway = JSON.parse(readFileSync(p.railway, "utf8"));
-    assert.equal(railway.build.dockerfilePath, "Dockerfile", `${name}: the package's Dockerfile`);
-    // Railway's default is SIGKILL at once; the gateway needs 30 s for its children, then up to 5 s more (architecture.md).
-    assert.ok(railway.deploy.drainingSeconds > 35, `${name}: deploy grace exceeds the gateway's shutdown bound`);
   }
+});
+
+test("evaluated Railway IaC retains each gateway's volume, one executor replica and shutdown grace without managing variables", async () => {
+  const { createRailwayContext, project } = await import("railway/iac");
+  const { default: configure, partial } = await import("../.railway/railway.js");
+  assert.equal(partial, "gateway", "apply is scoped to the existing gateway");
+  for (const [environment, domain] of [["staging", "api.dev.multiagency.ai"], ["production", "api.multiagency.ai"]] as const) {
+    const definition = await configure(createRailwayContext({ environment, projectName: "platform" }), project);
+    assert.equal(definition.name, "platform");
+    assert.equal(definition.environments, undefined, "the migration does not create or replace environments");
+    assert.ok("variables" in definition);
+    assert.deepEqual(definition.variables, { managed: false }, "existing and unknown variable names stay unmanaged");
+    const resources = definition.resources?.flat() ?? [];
+    assert.deepEqual(resources.map(resource => resource.address).sort(), ["service.gateway", "volume.gateway-volume"]);
+    const gateway = resources.find(resource => resource.type === "service");
+    assert.ok(gateway && gateway.type === "service");
+    assert.equal(gateway.name, "gateway");
+    assert.equal(gateway.source, undefined, "the existing packaged deployment source is not replaced");
+    assert.equal(gateway.configFile, undefined, "legacy Config as Code is not selected");
+    assert.equal(gateway.variables, undefined, "no variable values or secrets are declared");
+    assert.deepEqual(gateway.build, { builder: "DOCKERFILE", dockerfilePath: "Dockerfile" });
+    // Railway reads its ON_FAILURE default back as unset; declaring it would leave drift and propose another redeploy.
+    assert.equal(gateway.deploy?.restartPolicyType, undefined, "leave Railway's default unset so subsequent plans are idempotent");
+    assert.deepEqual(gateway.deploy, {
+      drainingSeconds: 45, restartPolicyMaxRetries: 5,
+      healthcheckPath: "/health", multiRegionConfig: { "us-west2": { numReplicas: 1 } },
+    });
+    assert.deepEqual(gateway.networking, { customDomains: { [domain]: { port: 8080 } } });
+    assert.deepEqual(gateway.volumeAttachments, { "gateway-volume": {
+      volume: "volume.gateway-volume", mountPath: "/data", volumeConfig: { region: "us-west2", sizeMB: 50000 },
+    } });
+    const volume = resources.find(resource => resource.type === "volume");
+    assert.ok(volume && volume.type === "volume");
+    assert.equal(volume.name, "gateway-volume", "renaming the live volume could attach an empty replacement");
+    assert.deepEqual(volume.config, { region: "us-west2", sizeMB: 50000 });
+  }
+  for (const environment of [undefined, "preview", "prodcution"])
+    await assert.rejects(async () => configure(createRailwayContext({ environment, projectName: "platform" }), project), /environment|staging|production/i);
+  await assert.rejects(async () => configure(createRailwayContext({ environment: "staging", projectName: "another-project" }), project), /project|platform/i);
 });
 
 test("every gateway configuration the deploy guides name is shipped in a package", () => {

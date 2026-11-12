@@ -61,7 +61,7 @@ limit-order feature has local order routes, owner signatures, a dedicated app co
 live order was placed by this platform. The separate Treasury app
 [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records the exact frozen 0.5.8 SDK package
 and local consumer tests for credentialed capability discovery, cancellation continuation and retained decisions.
-Each later SDK source commit changes that package's provenance and needs a matching app retest. App hosted acceptance,
+A package built from later SDK source has different provenance and needs a matching app retest. App hosted acceptance,
 deployed provider support and live order outcomes remain open.
 The [cross-repository HTTP gate](../test/cross-repo/treasury-orders/README.md) exercises both real servers against a
 simulated provider and chain; its result names the exact source and package it checked. It is separate from browser
