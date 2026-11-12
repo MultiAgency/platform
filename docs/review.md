@@ -97,3 +97,11 @@ offline simulation, not deployed-market or earnings-return evidence).
 Cumulative caps and budgets still account for provider withdrawals. Downgrade below 0.5.6 is unsupported after shared
 market records exist: the previous reader rejects a market reservation and prevents the whole gateway starting,
 including Treasury and Payables (`test/market-rollback.test.ts`). See [market](market.md#rollback) and [operations](operations.md).
+
+
+DAO-owned app payouts: SDK 0.5.9 candidate admits Payables setup and payout consent, and routes payout
+grants and held-payout votes through existing verified DAO owner actions. Contract and gateway
+coverage: `test/app-dao.test.ts`. Paperwork adoption and local simulated acceptance are recorded in its
+`docs/job-demo.md` and the private local acceptance report. Clean database handoff to another process
+is covered; SIGKILL, provider-response-loss and hosted wallet/quorum/mainnet behavior remain unverified.
+Not deployed or mainnet-observed. See [app access](app-access.md).

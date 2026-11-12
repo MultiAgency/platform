@@ -1223,3 +1223,11 @@ then only read after an ambiguous reply. Hosted-agent release refuses tracked or
 finality even with a balance override; a lagging provider list cannot prove the absence of an external order.
 These paths have offline tests, but no live placement, fill, cancellation or payout observation.
 The production provider route was absent in the 2026-11-10 read-only check. See [limit orders](limit-orders.md).
+
+
+DAO access filing recovery (2026-11-12 source review): setup and consent filings choose a new
+nonce on each call (`src/gateway/app-dao.ts`, `DaoRequests.file`). A lost filing reply retried with
+identical text can produce another request/hash; saved-text reuse is not same-request recovery.
+Known IDs must be polled. This does not establish duplicate payout execution. DAO payout local
+acceptance does not cover SIGKILL recovery, provider-response loss, hosted member-wallet filing,
+actual quorum or mainnet settlement; see docs/app-access.md.

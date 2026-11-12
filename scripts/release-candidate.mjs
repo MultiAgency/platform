@@ -116,7 +116,8 @@ for (const [file, hash] of Object.entries(platformFiles))
   if (file.startsWith('web/dist/') && hash !== sha256(join(snapshot, file))) throw new Error(`The platform package's ${file} differs from the tested build`);
 // 5. The image of exactly that package, built as Railway builds it: two offline boots pass the platform checks and keep
 // every state directory (scripts/check-platform-image.mjs). Needs Docker. A failure leaves no release.json.
-gate('platform-image', process.execPath, ['scripts/check-platform-image.mjs', join(out, 'platform')], output => {
+const imageArchive = join(out, 'platform-image.tar');
+gate('platform-image', process.execPath, ['scripts/check-platform-image.mjs', join(out, 'platform'), imageArchive], output => {
   const pass = output.match(/PASS: (\d+) packaged hashes; .*?; (\d+) state files and (\d+) state directories unchanged/);
   return pass ? { packagedFiles: Number(pass[1]), stateFiles: Number(pass[2]), stateDirectories: Number(pass[3]) } : {};
 });
@@ -124,10 +125,13 @@ gate('platform-image', process.execPath, ['scripts/check-platform-image.mjs', jo
 record.runDigest = runDigest;
 record.snapshot = snapshot;
 record.inputs = Object.fromEntries(required.map(name => [name.slice(2), { path: flag(name), digest: digest(flag(name), []) }]));
-record.packages = { platform: { path: join(out, 'platform'), manifestSha256: sha256(join(out, 'platform/manifest.json')) } };
+record.packages = { platform: { path: join(out, 'platform'), manifestSha256: sha256(join(out, 'platform/manifest.json')),
+  image: JSON.parse(readFileSync(`${imageArchive}.json`, 'utf8')) } };
 if (sdk) {
   const pack = readdirSync(join(snapshot, '.test-artifacts/contract')).find(name => name.endsWith('.tgz'));
-  record.sdk = { tarball: join(snapshot, '.test-artifacts/contract', pack), sha256: sha256(join(snapshot, '.test-artifacts/contract', pack)) };
+  const provenance = join(snapshot, '.test-artifacts/contract', pack.replace(/\.tgz$/, '.provenance.json'));
+  record.sdk = { tarball: join(snapshot, '.test-artifacts/contract', pack), sha256: sha256(join(snapshot, '.test-artifacts/contract', pack)),
+    provenance, provenanceSha256: sha256(provenance) };
 }
 record.result = 'passed';
 record.finishedAt = new Date().toISOString();

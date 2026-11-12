@@ -491,3 +491,12 @@ For restoration obtain `app.consents.nonce()`, have the owner sign a fresh setup
 then have the owner sign fresh ordinary consent, unfreeze and restore. Previous consents never become live again.
 DAO release is unavailable. This flow is offline/stack-tested, not observed on mainnet; provider archive/restore
 semantics remain per pinned provider documentation.
+
+
+DAO-owned Payables (candidate): set up `area: "payables"`, create with `role: "payout"` and
+`signer: "dao"`, then obtain DAO consent for `read` and `payout`. On that agent, `payout` admits
+`owner/prepare` for the `payout` grant, revocation, policy edits, freeze/unfreeze and `approval_vote`.
+The reply carries the proposal for members to file, never an intent to sign. Follow `owner/status`;
+the platform submits the DAO signature. Keep the existing payout request ID and follow
+`payouts/status` for settlement. Require `owner_approval` in the reviewed policy for a vote per payout.
+Do not request `owner` scope or use `/dao-votes` for held payouts. Not deployed or mainnet-observed.

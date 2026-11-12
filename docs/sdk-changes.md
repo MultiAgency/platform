@@ -12,6 +12,21 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
+## 0.5.9 (2026-11-12)
+
+- DAO consents admit `payout`; app setup admits Payables and `agent_create` role `payout`.
+  On a Payables agent, payout consent covers preparing its payout grant, revocation, policy edits,
+  freeze/unfreeze and held-payout approval votes with `signer: "dao"`. Replies carry DAO proposals,
+  never signing bytes for the app. Approval still verifies provider evidence before submission.
+  DAO `owner` consent remains refused. Creation-status reads under temporary setup consent remain supported.
+- `daoScopesCover` refuses scope sets a DAO cannot grant. App clients must request `read,payout`
+  for the payout workflow and follow DAO owner actions through `owner/status`; `/dao-votes` stays
+  specific to Treasury proposals. See [app access](app-access.md).
+- Local Paperwork acceptance uses the frozen 0.5.9 artifact, with simulated DAO reject/revise/approve,
+  settlement, clean database handoff to a separate process, and wallet jobs. This is not SIGKILL,
+  provider-response-loss, deployed-host or mainnet evidence. The tested artifact predates this changelog
+  entry; publication needs a fresh committed release artifact and its release checks.
+
 ## 0.5.8 (2026-11-11)
 
 - **The `app-server` skill says to derive a payout's `requestId`, payee and amount in code** (docs): from the app's own

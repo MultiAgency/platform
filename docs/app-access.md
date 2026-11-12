@@ -231,7 +231,7 @@ approval or rejection, and the agent checks the exact text. A placement still re
 See [limit orders](limit-orders.md) for the in-progress, offline-tested path and its live gaps.
 
 DAO owners: a DAO's consent is signed by its own vote (`POST /apps/v1/dao-consents`, then `GET /apps/v1/dao-consents/<hash>`
-until the DAO's signature is found). It carries only `read`, `treasury`, `market`, `treasury-orders` and,
+until the DAO's signature is found). It carries only `read`, `payout`, `treasury`, `market`, `treasury-orders` and,
 as the DAO's opt-in, `treasury-execute` (`market` added by the user, 2026-11-09), and each call re-reads that the agent is still owned by the DAO's derived
 account. The DAO's grant vote is what authorizes unattended swaps (autopilot, and with `treasury-execute` the app's
 plans), within the strategy it binds and the DAO's signed policy; the grant's proposal says so. The platform authorizes the app, not a member: the app gates its own members with the
@@ -554,3 +554,63 @@ its consents were revoked. Calls to a released identity or RPC answer 410 `agent
 Restoration needs a fresh owner-signed setup with a platform-issued nonce; consents or setups signed before release
 are refused under the existing `owner_stopped` code. The owner must separately sign fresh consent, unfreeze and restore.
 See [the release contract and its evidence](agent-release.md). Wallet owners only; DAO release is unavailable.
+
+
+DAO-owned app payouts (2026-11-12 candidate): a DAO may set up `area: "payables"`, then vote on
+`agent_create` with `role: "payout"` under its setup consent. After creation, consent with `read` and
+`payout` covers the existing app-scoped payout request/status flow and, on that Payables agent,
+`owner/prepare` with `signer: "dao"` for a `payout` grant, revocation, policy edits, freeze/unfreeze
+and `approval_vote`. The app receives the DAO proposal, never signing bytes; follow `owner/status`
+until the agent finds and submits the signature. Approval verifies provider evidence again before
+submission. `/dao-votes` remains for Treasury proposals. Vote success does not establish settlement;
+follow `payouts/status` with the original request ID. `owner` remains unavailable in DAO consent.
+Contract and gateway integration tests are in `test/app-dao.test.ts`; this candidate is not deployed
+or mainnet-observed. Paperwork has adopted the pinned local artifact and passed local simulated acceptance;
+its source remains in its separate repository, and hosted support is unverified. The existing policy controls whether payouts are held: apps must
+review that `owner_approval` is enabled when promising a vote per payout.
+
+
+Paperwork handoff for its owning session (checkout `/Users/jlwaugh/agencies/dao/demo`):
+
+- Local package: `.test-artifacts/contract/multiagency-sdk-0.5.9.tgz` in the platform checkout;
+  `pnpm contract:pack` writes its SHA-256 and provenance. This is a local package, not a published release.
+- Update the app's pinned SDK while preserving its current dependency edits. Test against a platform
+  snapshot containing the matching gateway changes; installing the SDK alone does not enable a host.
+- Extend `src/server/platform/port.ts` and `client.ts`: the payout adapter currently forces wallet signing,
+  requires an owner key on creation, and refuses replies with only `dao` as `unreadable_intent`.
+  Preserve the selected signer and DAO proposal reply as the market adapter already does. DAO creation
+  omits `owner` entirely and uses `role: "payout"`; the platform derives ownership from setup.
+- Use `app.daoSetups.file` / `state` for the existing setup text with `area: "payables"`,
+  then prepare creation under the returned temporary setup consent. Use `app.daoConsents.file` / `state`
+  with the existing consent text carrying `read` and `payout`, omitting `owner`. Each is a DAO vote.
+- Request `grant_issue`, `label: "payout"` with `signer: "dao"`. The app's stack adapter currently
+  substitutes `invoices`; that substitution is wallet-only and is not admitted by this DAO contract.
+- Keep app-scoped `payouts/request` and its durable job/request ID. Prepare `approval_vote` with the
+  provider approval UUID, original payment correlation ID and exact verdict, `signer: "dao"`.
+  Persist the returned owner-action correlation ID and proposal. Members file the returned DAO
+  proposal; poll `owner/status`. Do not call `owner/submit` or sign the hash with a member's wallet key.
+- Render the provider-verified `payment.terms` for review and preserve the immutable job comparison.
+  Public DAO proposal wording stays generic for confidential payouts. A passed vote is followed by
+  `payouts/status`; neither a proposal passing nor owner-action success proves payout settlement.
+- Add app tests for DAO setup/consent recovery, creation without wallet ownership, payout grant,
+  approve/reject, expired votes, restart after signature submission, and unchanged job/request identity
+  after an unknown reply. Keep existing wallet coverage. Demonstrate with the simulated provider first.
+
+The user retained Paperwork ownership in its other session on 2026-11-12. This platform change does
+not edit that checkout. Deployment, SDK publication and live money actions remain the user's.
+
+
+Release review (2026-11-12): the paired Paperwork local acceptance report identifies the same frozen
+snapshot and SDK checksum as the platform manifest. Its reject/revise/approve, settlement and wallet
+cases each record one successful simulated payment; its recovery case uses a clean database handoff
+to another OS process. These are app-session observations with matching retained log hashes, not a
+fresh rerun by the platform reviewer. The app's tested source manifest differs from its current tree
+only in README and TASKS documentation. SIGKILL recovery, provider-response loss, hosted member-wallet
+filing, actual quorum and mainnet settlement remain unverified.
+
+Access-filing recovery limitation: `DaoRequests.file` chooses a fresh nonce for each setup or consent
+filing. Retrying identical saved text after a lost reply can therefore leave another request/hash;
+it does not recover the first identity. Paperwork's fixture checks reuse of the text, not gateway
+idempotence. Once an ID is known, observe that ID; do not treat a replacement as proof that the first
+request lapsed. Unobserved requests remain bounded by their vote and consent expiries. This is distinct
+from payout-request and owner-signature recovery and does not establish another money send.

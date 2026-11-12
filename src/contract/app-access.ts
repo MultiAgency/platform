@@ -107,9 +107,9 @@ export const AppSigner = z.enum(["wallet", "dao"]);
  * The scopes a DAO's consent may carry: reads, Treasury settings, autopilot and proposals the DAO approves by vote, and
  * with `treasury-execute` the app's plans within the policy and the strategy the DAO's grant binds, without a vote
  * each time; and with `treasury-orders` its separately approved limit orders. Not `owner` (the platform files a DAO's
- * owner actions itself) or `payout` (not yet).
+ * owner actions itself); `payout` covers held payouts and their separately voted owner actions.
  */
-export const DAO_CONSENT_SCOPES = ["read", "treasury", "treasury-execute", "treasury-orders", "market"] as const satisfies readonly AppScope[];
+export const DAO_CONSENT_SCOPES = ["read", "treasury", "treasury-execute", "treasury-orders", "market", "payout"] as const satisfies readonly AppScope[];
 /**
  * What a DAO's `treasury` consent doesn't cover although a wallet owner's does: the linked treasury account. A DAO-owned
  * agent's link is the DAO itself, fixed at setup (src/hosted-binding.ts): an app never changes which DAO it answers to.
@@ -117,7 +117,7 @@ export const DAO_CONSENT_SCOPES = ["read", "treasury", "treasury-execute", "trea
 export const DAO_APP_REFUSED = ["treasury/link", "treasury/unlink"] as const;
 /** Whether a DAO's consent scopes cover a procedure: as `appScopesCover`, less `DAO_APP_REFUSED`. */
 export const daoScopesCover = (scopes: readonly AppScope[], path: string) =>
-  appScopesCover(scopes, path) && !(DAO_APP_REFUSED as readonly string[]).includes(path);
+  scopes.every(scope => (DAO_CONSENT_SCOPES as readonly string[]).includes(scope)) && appScopesCover(scopes, path) && !(DAO_APP_REFUSED as readonly string[]).includes(path);
 
 /** `GET /apps/v1/agents/<agent>`: what the owner's consent must name. */
 export const appAgent = z.looseObject({ agent: z.string(), owner: z.string(), agentId: z.string().nullable(), created: z.boolean(),
@@ -135,22 +135,22 @@ export const appConsentView = z.looseObject({ id: z.string(), deployment: z.stri
  * `signer: "dao"` and answers the proposal a member files; the agent submits the DAO's signature once the vote passes.
  * Each is a provider owner intent that expires in minutes, so the vote must pass within `expiresAt`.
  */
-export const DAO_APP_ACTIONS = ["grant_issue", "grant_revoke", "policy_update", "agent_freeze", "agent_unfreeze"] as const;
+export const DAO_APP_ACTIONS = ["grant_issue", "grant_revoke", "policy_update", "agent_freeze", "agent_unfreeze", "approval_vote"] as const;
 /**
- * Whether a parsed owner action is one an app may ask a DAO to vote on: a Treasury or market grant, the revocation of a grant
- * (which only removes authority), a policy edit that changes something, freeze or unfreeze, or, under
- * a DAO's setup consent only, the Treasury agent's creation (its owner is the DAO's derived account, never given).
+ * Whether a parsed owner action is one an app may ask a DAO to vote on: a Treasury, market or payout grant, the revocation of a grant
+ * (which only removes authority), a policy edit that changes something, freeze, unfreeze or a held-payout vote, or, under
+ * a DAO's setup consent only, the agent's creation (its owner is the DAO's derived account, never given).
  */
 export function appMayAskDao(action: { type: string; label?: string; owner?: unknown; role?: string; payees?: readonly unknown[]; changes?: object }) {
-  if (action.type === "agent_create") return action.owner === undefined && !action.payees?.length && ["treasury", "market"].includes(action.role ?? "treasury");
+  if (action.type === "agent_create") return action.owner === undefined && !action.payees?.length && ["treasury", "market", "payout"].includes(action.role ?? "treasury");
   if (action.type === "policy_update") {
     // On-chain edits too: like a wallet owner, members rely on the provider's preview of the encrypted policy.
     return Object.keys(action.changes ?? {}).length > 0;
   }
-  return (DAO_APP_ACTIONS as readonly string[]).includes(action.type) && (action.type !== "grant_issue" || action.label === "treasury" || action.label === "market");
+  return (DAO_APP_ACTIONS as readonly string[]).includes(action.type) && (action.type !== "grant_issue" || action.label === "treasury" || action.label === "market" || action.label === "payout");
 }
-export type AppDaoAction = Of<"agent_freeze"> | Of<"agent_unfreeze"> | (Of<"grant_issue"> & { label: "treasury" | "market" }) | Of<"grant_revoke"> | Of<"policy_update">
-  | { type: "agent_create"; role?: "treasury" | "market" };
+export type AppDaoAction = Of<"agent_freeze"> | Of<"agent_unfreeze"> | (Of<"grant_issue"> & { label: "treasury" | "market" | "payout" }) | Of<"grant_revoke"> | Of<"policy_update">
+  | Of<"approval_vote"> | { type: "agent_create"; role?: "treasury" | "market" | "payout" };
 /**
  * The policy fields a DAO's `market` consent may ask the DAO to change on its market agent: its caps only (user,
  * 2026-11-11), raised, lowered or removed (`limits` is replaced whole; budgets and the hourly count take null). A cap can't move money by itself: every hire is paid only after the DAO's vote on its exact terms, and a
@@ -171,8 +171,8 @@ export function daoMarketMayAsk(action: { type: string; label?: string; changes?
   const fields = Object.entries(action.changes ?? {}).filter(([, value]) => value !== undefined).map(([field]) => field);
   return fields.length > 0 && fields.every(field => (DAO_MARKET_POLICY_FIELDS as readonly string[]).includes(field));
 }
-/** The areas a DAO may set up a hosted agent for through an app: Treasury, and a market agent whose hires it votes on (user, 2026-11-09). */
-export const DAO_SETUP_AREAS = ["treasury", "market"] as const;
+/** The areas a DAO may set up a hosted agent for through an app: Treasury, market and Payables. */
+export const DAO_SETUP_AREAS = ["treasury", "market", "payables"] as const;
 
 /** A NEAR transaction for a DAO member's wallet to sign, as near-kit builds it (receiver and function-call actions). */
 const memberTransaction = z.looseObject({ receiverId: z.string(), actions: z.array(z.looseObject({ type: z.literal("FunctionCall"), params: z.looseObject({}) })) });
@@ -280,3 +280,9 @@ export const APP_GATEWAY_CODES = ["invalid_request", "not_found", "signature_inv
   "signed_expired", "vote_lapsed", "dao_stopped", "owner_stopped", "not_owner", "not_allowed", "setup_unavailable", "access_ended", "proposal_unanswered",
   "proposal_not_open", "order_unanswered", "order_not_open", "relay_unresolved", "signature_changed", "expires_too_soon", "setup_failed", "agent_refused", "too_many_consents", "dao_requests_limited", "brief_mismatch", "agent_released", "request_conflict"] as const;
 export type AppGatewayCode = (typeof APP_GATEWAY_CODES)[number];
+
+/** Payout consent prepares only payout-agent owner actions; every action still needs the DAO's signature. */
+export function daoPayoutMayAsk(action: { type: string; label?: string }) {
+  if (action.type === "grant_issue") return action.label === "payout";
+  return ["approval_vote", "grant_revoke", "policy_update", "agent_freeze", "agent_unfreeze"].includes(action.type);
+}

@@ -151,7 +151,7 @@ test("a DAO files its consent for a vote: the platform picks the nonce and answe
 
 test("a DAO's consent carries only read, treasury, treasury-execute and market, and only for its own agent as it is now", async t => {
   const { port, state, staging, production, file } = await harness(t);
-  for (const scopes of [["owner"], ["read", "payout"], ["treasury", "owner"]] as const)
+  for (const scopes of [["owner"], ["treasury", "owner"]] as const)
     assert.equal((await file({ scopes })).status, 400, scopes.join(","));
   assert.equal((await file({ owner: "other.sputnik-dao.near" })).status, 403, "another DAO");
   assert.equal((await file({ deployment: "production" })).status, 400, "another deployment's text");
@@ -623,7 +623,6 @@ test("a DAO sets up its hosted Treasury agent by vote; the setup consent asks on
   const { port, state, forwarded, staging, vote, setups } = await harness(t);
   const setupText = (over = {}) => setupMessage({ host: HOST, deployment: "staging", organization: "org_1", owner: DAO, area: "treasury", expiresAt: later(3), ...over });
   const fileSetup = (over = {}) => call(port, "/apps/v1/dao-setups", "POST", staging, { message: setupText(over) });
-  assert.equal((await fileSetup({ area: "payables" })).status, 400, "Treasury only");
   state.setupAreas = ["payables"];
   assert.equal((await fileSetup()).status, 403, "a host that doesn't set up Treasury agents files no vote the DAO would waste");
   state.setupAreas = ["treasury", "payables"];
@@ -1530,4 +1529,65 @@ test("a market consent's policy edit may raise, lower or remove caps, and nothin
   assert.equal(daoMarketMayAsk({ type: "grant_issue", label: "treasury" }), false);
   assert.equal(daoMarketMayAsk({ type: "agent_create" }), false);
   for (const type of ["grant_revoke", "agent_freeze", "agent_unfreeze"]) assert.equal(daoMarketMayAsk({ type }), true, type);
+});
+
+
+test("DAO payout contracts admit setup, consent and exact held-payout votes", async () => {
+  const { DAO_CONSENT_SCOPES, DAO_SETUP_AREAS, appMayAskDao, daoPayoutMayAsk, daoScopesCover } = await import("../src/contract/app-access.js");
+  assert.ok(DAO_CONSENT_SCOPES.includes("payout"));
+  assert.ok(DAO_SETUP_AREAS.includes("payables"));
+  assert.equal(appMayAskDao({ type: "agent_create", role: "payout" }), true);
+  assert.equal(appMayAskDao({ type: "approval_vote" }), true);
+  assert.equal(appMayAskDao({ type: "grant_issue", label: "payout" }), true);
+  assert.equal(daoScopesCover(["owner"], "owner/submit"), false);
+  assert.equal(daoScopesCover(["payout"], "payouts/request"), true);
+  for (const type of ["approval_vote", "agent_freeze", "agent_unfreeze", "grant_revoke", "policy_update"])
+    assert.equal(daoPayoutMayAsk({ type }), true);
+  assert.equal(daoPayoutMayAsk({ type: "grant_issue", label: "payout" }), true);
+  assert.equal(daoPayoutMayAsk({ type: "grant_issue", label: "treasury" }), false);
+});
+test("a DAO sets up a payables agent by vote on a host that sets them up, and creates it as a payables agent", async t => {
+  const { port, state, staging, vote, setups } = await harness(t);
+  const setupText = (over = {}) => setupMessage({ host: HOST, deployment: "staging", organization: "org_1", owner: DAO, area: "payables", expiresAt: later(3), ...over });
+  const fileSetup = (over = {}) => call(port, "/apps/v1/dao-setups", "POST", staging, { message: setupText(over) });
+
+  state.setupAreas = ["treasury", "payables"];
+  const filed = await fileSetup();
+  assert.equal(filed.status, 201, JSON.stringify(filed.body));
+  assert.match(filed.body.request.description, /set up a hosted payables agent owned by this DAO/);
+  vote(filed.body.request.hash);
+  state.providerId = null;
+  const reserved = await call(port, `/apps/v1/dao-setups/${filed.body.request.hash}`, "GET", staging);
+  assert.equal(reserved.body.state, "reserved", JSON.stringify(reserved.body));
+  assert.deepEqual(setups, [{ owner: DAO, kind: "dao", area: "payables", deployment: "staging", organization: "org_1" }]);
+  const prepare = (action: object) => call(port, "/apps/v1/o/org_1/a/own-dao/rpc/owner/prepare", "POST", staging, { json: { action, signer: "dao" } });
+  state.replies["/rpc/owner/prepare"] = { status: 200, json: { correlationId: "c-create", preview: { summary: "Create" }, expiresAt: later(0.007), digest: null,
+    dao: { owner: "x", transaction: { receiverId: "v1.signer", actions: [] }, proposal: null, proposalAndVote: null } } };
+  assert.equal((await prepare({ type: "agent_create", role: "market" })).status, 403);
+  assert.equal((await prepare({ type: "agent_create", role: "payout" })).status, 200, "forwarded: the agent binds its role to its area");
+});
+
+test("payout consent forwards DAO votes and grants only on its payout agent", async t => {
+  const { port, state, staging, file, vote, forwarded } = await harness(t);
+  const setup = await call(port, "/apps/v1/dao-setups", "POST", staging, { message: setupMessage({ host: HOST, deployment: "staging", organization: "org_1", owner: DAO, area: "payables", expiresAt: later(3) }) });
+  assert.equal(setup.status, 201);
+  vote(setup.body.request.hash); state.providerId = null;
+  assert.equal((await call(port, `/apps/v1/dao-setups/${setup.body.request.hash}`, "GET", staging)).body.state, "reserved");
+  state.signature = null; state.providerId = "provider-id";
+  const filed = await file({ agent: "own-dao", scopes: ["read", "payout"] });
+  assert.equal(filed.status, 201);
+  vote(filed.body.request.hash);
+  assert.equal((await call(port, `/apps/v1/dao-consents/${filed.body.request.hash}`, "GET", staging)).body.state, "signed");
+  state.replies["/rpc/owner/prepare"] = { status: 200, json: { correlationId: "c-vote", preview: { summary: "Vote" }, expiresAt: later(0.007), digest: null,
+    dao: { owner: "x", transaction: { receiverId: "v1.signer", actions: [] }, proposal: null, proposalAndVote: null } } };
+  const prepare = (action: object) => call(port, "/apps/v1/o/org_1/a/own-dao/rpc/owner/prepare", "POST", staging, { json: { action, signer: "dao" } });
+  for (const action of [{ type: "grant_issue", label: "payout" }, { type: "approval_vote", approvalId: "00000000-0000-4000-8000-000000000001", correlationId: "p-1", verdict: "approve" },
+    { type: "approval_vote", approvalId: "00000000-0000-4000-8000-000000000001", correlationId: "p-1", verdict: "reject" }]) {
+    const reply = await prepare(action);
+    assert.equal(reply.status, 200, JSON.stringify(reply.body));
+    assert.ok(reply.body.json.dao); assert.equal(reply.body.json.intent, undefined);
+    assert.deepEqual(forwarded.at(-1)!.body.json.action, action);
+  }
+  assert.equal((await prepare({ type: "grant_issue", label: "treasury" })).status, 403);
+  assert.equal((await call(port, "/apps/v1/o/org_1/a/own-dao/rpc/owner/submit", "POST", staging, { json: { correlationId: "c-vote", signedData: {} } })).status, 403);
 });

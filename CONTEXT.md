@@ -434,7 +434,7 @@ one only as a confirm page link), `payout` (payout requests, their status, held 
 agent, a wallet owner's linked treasury account, and **Treasury proposals**) and
 `treasury-execute`, only beside `treasury` (plans prepared and executed without a signature per swap, only under a
 grant binding the plan's strategy). A **DAO consent** is the same text signed by the DAO's own vote (its derived
-key, through a passed `v1.signer` proposal the platform files); it carries only `read`, `treasury` and, as the DAO's
+key, through a passed `v1.signer` proposal the platform files); it carries `read`, `payout`, `market`, `treasury-orders`, `treasury` and, as the DAO's
 opt-in, `treasury-execute`; the DAO's grant vote is what authorizes unattended swaps; and its agent's
 ownership by the DAO's derived account is re-read on every call. Under it the platform files the DAO's votes on the
 app's Treasury proposals and on the Treasury grant, its revocation, a policy edit, freeze and unfreeze, and a DAO sets
@@ -531,3 +531,10 @@ release marker blocks dispatch and owner actions before the gateway ends consent
 process. Nothing is deleted. A fresh owner-signed setup restores the same identity; the owner separately consents,
 unfreezes and restores the provider agent. Old consents never revive. Offline- and stack-tested candidate; not observed
 on mainnet. DAO release is not implemented. See docs/agent-release.md.
+
+
+**DAO app payout support (candidate)**: DAO app setup includes Payables (`role: "payout"` at creation).
+Its `payout` consent admits app-scoped payout requests and payout-agent owner actions, including the
+payout grant and a separate held-payout approval vote through `owner/prepare`, signer `dao`.
+The agent verifies provider evidence before submitting the DAO signature. This extension is local,
+not deployed or mainnet-observed; see docs/app-access.md.
