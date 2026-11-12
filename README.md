@@ -286,9 +286,9 @@ Each line is a gap; the linked page says how the rest is known. The
 - Railway Infrastructure as Code is prepared in `.railway/railway.ts`, with the platform package retaining its exact
   authoring inputs. The owner applied the staging and production plans on 2026-11-12 UTC; both resulting deployments
   reached `SUCCESS` and passed 18 of 18 platform smoke checks. The corrected authoring produced zero-change plans in
-  both environments. Cutover is needed only if a service still selects Config as Code. Existing deployed images
-  still contain legacy JSON, whose announced
-  cutoff is 2026-12-01; applying settings does not upload the new package that omits those files. A package's files do
+  both environments. Cutover is needed only if a service still selects Config as Code. The original release uploads
+  included legacy JSON, whose announced cutoff is 2026-12-01; applying settings does not upload the new package that
+  omits those files. A package's files do
   not establish remote configuration ownership. See
   [operations](docs/operations.md#railway-infrastructure-as-code).
 - Guided walkthroughs and short guides (`/demos`) are tested with offline browser fixtures, not on the deployed hosts,
