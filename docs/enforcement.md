@@ -232,7 +232,7 @@ are covered in the Treasury app's `test/browser/strategy.cjs`; they are not depl
 **Provider SDK 0.8.2 (introduced in SDK 0.5.6, 2026-11-10).** The dependency and lockfile pin 0.8.2 exactly.
 Official SDK source `416597b0c63a426b225b98b6d175c03bfb6a7947` adds limit-order methods and signed 1Click
 quote inputs for native EVM/Solana sign-intent. The tagged 0.5.6 and 0.5.7 platform releases expose neither
-feature; the unreleased 0.5.8 path adds limit orders only. Policy reads/previews accept the provider's `limit_order`
+feature; the 0.5.8 path adds limit orders only. Policy reads/previews accept the provider's `limit_order`
 action and price-deviation setting without changing its signed policy or dropping that evidence during unrelated edits.
 The transport and existing money methods remain compatible in offline tests. A lost reply still makes one transport
 attempt with the original idempotency key. New documented errors, including `invalid_address` at 409 and limit-order
@@ -1204,7 +1204,7 @@ required for restoration, and old consents stay ended. Lifecycle and money locks
 fencing. Provider archive/restore refusal semantics remain per pinned docs (`ce381df`), with no mainnet observation;
 DAO release and incomplete-transition rollback are not covered. See [agent release](agent-release.md) for tests and limits.
 
-## Treasury limit orders (unreleased 0.5.8 feature in progress)
+## Treasury limit orders (SDK 0.5.8; platform rollout pending)
 
 The owner must sign a policy revision enabling `limit_order` and a deviation ceiling, then sign each immutable
 order's exact terms. A dedicated `treasury-orders` app consent and live Treasury grant are also required by this

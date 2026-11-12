@@ -43,9 +43,9 @@ setting. Unrelated policy edits preserve both. An older app SDK can reject a pol
 with exhaustive action switches need to handle the additional value. This changes evidence reading, not authorization.
 
 In the tagged 0.5.6 and 0.5.7 releases, default Treasury, Payables and Market policies omit limit orders and native
-signing; the router, app scopes and dispatch path expose no order or native-signing operation. The unreleased 0.5.8
+signing; the router, app scopes and dispatch path expose no order or native-signing operation. The 0.5.8
 limit-order change adds an owner-signed per-order permission, an explicit `treasury-orders` app consent, an opt-in
-policy action, guarded placement through `dispatch`, and retained fill/cancellation observations. This change is in progress and
+policy action, guarded placement through `dispatch`, and retained fill/cancellation observations. The platform path
 has focused offline tests only; it has not been placed on mainnet through the platform. Native signing remains outside
 this change and has no fill/cancellation lifecycle or cumulative accounting here. See [Treasury limit orders](limit-orders.md)
 for the exact boundaries and evidence.

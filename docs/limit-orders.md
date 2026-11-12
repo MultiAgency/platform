@@ -1,6 +1,6 @@
 # Treasury limit orders
 
-**Status (2026-11-11): unreleased SDK 0.5.8 feature in progress.** The tagged and published SDK 0.5.7 release does
+**Status (2026-11-11): SDK 0.5.8 source merged; platform rollout pending.** The tagged and published SDK 0.5.7 release does
 not expose limit-order spending. The new Treasury path has focused offline tests, but no order has been placed, filled,
 paid out, or canceled on mainnet through this platform. The production provider did not support the limit-order routes
 in the read-only check. Do not treat a dry preview or placement `SUCCESS` as a completed trade.
@@ -90,7 +90,10 @@ not prove final payout. A freeze
 may attempt cancellation, but resting fills can still occur, so freeze and agent release must account for every
 known order's live fill and payout state. Release checks all locally tracked orders and each provider-listed order
 by live ID; the provider list can lag, so an external order omitted from it still needs operator reconciliation.
-The production provider did not expose the order-list route in the 2026-11-10 read-only check. On that observed
+The production provider did not expose the order-list route in the 2026-11-10 read-only check. A 2026-11-11
+unauthenticated GET recheck returned `404 not_found` for a synthetic agent's order-list path, while the known
+`/v1/agents` route returned `401 invalid_api_key`; the demo order-list path returned `401 invalid_api_key`.
+Those responses show route recognition only, not authenticated order-list behavior. On the observed production
 provider, the 0.5.8 hosted-agent release check fails closed for every agent, including one with no local orders,
 once its other prechecks pass. This is an availability gate for a production platform rollout; a missing route is
 not evidence that no older or external order can still pay out.
@@ -148,7 +151,11 @@ block later sends and agent release in offline faults; recovery still polls unre
 surfacing the missing evidence. [PR #78](https://github.com/MultiAgency/platform/pull/78) records the SDK candidate's
 source-frozen local gates and separate Bun consumer check. The Treasury app PR records the tarball it tested and its
 own consumer tests. Any SDK source commit after those runs requires a new candidate, Bun check and app retest; the
-release artifact must match what the app actually tested. No cross-repository end-to-end order flow has been run.
+release artifact must match what the app actually tested. The explicit
+[offline cross-repository HTTP gate](../test/cross-repo/treasury-orders/README.md) starts the actual platform gateway
+and Treasury app server with simulated provider, chain, owner key and funds. Its result records the exact platform
+commit, app commit and SDK package; a run on earlier source cannot verify a later release candidate. It does not test
+a browser wallet, platform restart or deployed provider.
 Live placement, cancellation, payout behavior, the production route, and the deployed provider's policy enforcement
 remain unverified. Native EVM/Solana `sign-intent` is a separate design with different protections and is not enabled
 by this order path.

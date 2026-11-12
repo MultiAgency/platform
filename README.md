@@ -168,11 +168,11 @@ Each line is a gap; the linked page says how the rest is known. The
   configuration (`deploy/platform.json`) doesn't set up Treasury agents yet; staging's does. A proposal's approval is the platform's check, not the provider's: whoever holds
   the treasury grant can swap within the policy without it. Held swaps aren't used: what their vote commits to is
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
-- Treasury limit orders are an unreleased 0.5.8 feature in progress, behind an owner-signed policy opt-in, one exact
+- Treasury limit orders are in the 0.5.8 SDK source, with platform rollout pending. They require an owner-signed policy opt-in, one exact
   signature from the owner per order and a new `treasury-orders` app consent. The default policy still leaves them off. Its local
   placement, cancellation and recovery paths have offline tests. The separate Treasury app
-  [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records local consumer tests against an exact,
-  unpublished 0.5.8 package, including authenticated capability discovery and guarded continuation of a proven-unsent
+  [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records local consumer tests against an exact
+  0.5.8 candidate package, including authenticated capability discovery and guarded continuation of a proven-unsent
   cancellation. Every later SDK source commit changes package provenance and requires a matching app retest before
   release. The tagged and published 0.5.7 SDK does not contain these order routes.
   No live placement, fill or payout check has been completed. The demo provider answered authenticated dry previews

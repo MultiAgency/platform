@@ -399,6 +399,12 @@ Uncommitted changes are not included; commit first. It needs Docker for its last
 It deploys nothing, uses no credentials and touches no state directory. Deploying from those sources stays the owner's
 action.
 
+The explicit [Treasury order cross-repository gate](../test/cross-repo/treasury-orders/README.md) runs after a frozen
+SDK candidate and a matching Treasury app consumer build. It starts both real HTTP servers with simulated provider,
+chain, owner key and funds; `result.json` records the exact commits, SDK package and test fixture identities. It is
+separate from the default candidate E2E because the Treasury app is a different repository. Record its command and
+manifest in the private release record. It does not verify a browser wallet or deployed provider.
+
 The workspace E2E cases use a separate Portfolio executor, provider identity and store alongside the
 Payables executor and approve-only server. They cover full-document cross-agent navigation and back,
 wallet ownership per agent despite ignored legacy operator configuration, and forbidden direct reads and settings
