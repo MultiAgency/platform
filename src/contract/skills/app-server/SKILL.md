@@ -10,7 +10,7 @@ metadata:
   purpose: 'An app server''s access to agents: credential, consents, relayed owner actions, and payout requests by requestId with recovery by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.5.8'
+  library_version: '0.5.9'
 requires:
   - getting-started
   - owner-workflows
@@ -28,10 +28,12 @@ sources:
 Read getting-started and owner-workflows first. `appClient` runs on your server with the deployment's service credential
 (`tap_…`), issued by the platform operator: a server secret, never sent to a browser. A call reaches an agent only
 under a live owner consent for that Organization and agent, and only within the consent's scopes: `read`, `owner`,
-`payout`, and for Treasury `treasury` and `treasury-execute` (see treasury-app). No production MultiAgency host serves the `/apps/v1` routes yet; the operator runs them on a staging host for
-its own tests. Until a production host does, build against the SDK repository's local stack
-(`pnpm test:e2e:stack --app <deployment>`). Use only `/apps/v1` and the confirm page on the platform's host: it serves
-nothing else (no sign-in or owner page), and setup there is for Payables agents only.
+`payout`, and for Treasury `treasury`, `treasury-execute` and the separate `treasury-orders` (see treasury-app).
+The staging and production platform API hosts are headless: use `/apps/v1` and the confirm page, not owner sign-in
+or `/gw/me`. The checked-in staging config permits setup for Treasury, Payables and market agents; production
+currently permits Payables only. Build and test with the SDK repository's local stack
+(`pnpm test:e2e:stack --app <deployment>`). `app.capabilities()` reads the authenticated host's advertised app
+routes; a capability grants neither owner consent nor provider support.
 
 The local stack serves HTTPS with its own self-signed certificate, written to `<stack dir>/environment/localhost.crt`
 (the stack prints `<stack dir>/state.json` when ready). Trust that certificate only, never turn verification off. In
@@ -344,7 +346,7 @@ withdrawal is approved or rejected like a transfer (0.5.5; offline- and stack-te
 
 ## Hire a listed agent on the agent market
 
-A market agent (0.5.6 base released; 0.5.8 binding candidate passed full offline, browser and narrow stack checks
+A market agent (0.5.6 base released; pre-reconciliation binding candidate `ae60790` passed full offline, browser and narrow stack checks
 on 2026-11-11; not yet observed through the platform on mainnet)
 hires listed agents on the NEAR AI Agent Market over x402. Set one up for an Organization like any hosted agent, with
 `area: "market"` and `agent_create` `role: "market"`; the owner consents with `market` (and `read`, `owner`) and grants
@@ -398,7 +400,8 @@ credit for inspection. An unknown x402 attempt stays poll-only.
 
 The full hire price must fit the policy's USDC per-transaction ceiling, including funds already on the key; dispatch
 rechecks it after funding. Daily/monthly caps and budgets count the provider's top-ups. Older readers reject shared
-market records below 0.5.6 and version 3 funding lines below 0.5.8. Stop writers and inspect legacy unbound top-ups
+market records below 0.5.6 and version 3 funding lines on any reader lacking the reviewed binding support.
+The released 0.5.8 limit-order package lacks that reader too; pin the exact source/package provenance. Stop writers and inspect legacy unbound top-ups
 before upgrade. Any submitted pre-binding top-up blocks further hires and sends to its key with
 `legacy_funding_review_required`, even if terminal. Preserve state, key, retained funds and pending payments. New
 hires need a separately reviewed fresh-key recovery; there is no automatic rotation or clearance.

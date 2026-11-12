@@ -23,6 +23,7 @@ function evidence(t: TestContext) {
   t.mock.method(api, "getAgent", async () => ({ id: process.env.AGENT_ID, wallet: { wallet_id: "fixture-wallet", near_account_id: "fixture.near" }, status: "ARCHIVED", owner: { type: "near", account_id: "alice.near" } }) as never);
   t.mock.method(api, "getPolicy", async () => ({ wallet_id: "fixture-wallet", policy: { frozen: true } }) as never);
   t.mock.method(api, "getBalances", async (_id: string, query: { source?: string }) => ({ near_account_id: "fixture.near", source: query.source, balances: [] }) as never);
+  t.mock.method(api, "listLimitOrders", async () => ({ data: [] }) as never);
 }
 test("release refuses unknown or held operations, leaves state intact, and makes no provider submission", async t => {
   evidence(t);
@@ -132,6 +133,37 @@ test("release refuses provider evidence naming another agent", async t => {
   evidence(t);
   t.mock.method(api, "getAgent", async () => ({ id: "another-agent", status: "ARCHIVED", owner: { type: "near", account_id: "alice.near" } }) as never);
   assert.deepEqual(await prepareRelease(input()), { state: "refused", reason: "owner_changed", balances: [] });
+  assert.equal(readFileSync(".env", "utf8"), "");
+});
+
+test("release waits for live limit-order fill and payout finality even with a balance override", async t => {
+  evidence(t);
+  let final = false;
+  t.mock.method(api, "listLimitOrders", async () => ({ data: [{ order_id: "resting-order" }] }) as never);
+  t.mock.method(api, "getLimitOrder", async () => ({ order_id: "resting-order", fill_status: final ? "canceled" : "partially_filled",
+    payout_status: final ? "completed" : "in_progress", is_payout_status_final: final,
+    partial_fills: [{ fill: "retained" }], payouts: {} }) as never);
+  assert.deepEqual(await prepareRelease({ ...input(), allowBalance: true }), { state: "refused", reason: "limit_orders", balances: [] });
+  final = true;
+  assert.equal((await prepareRelease({ ...input(), allowBalance: true })).state, "prepared");
+});
+
+test("an unreadable provider order list cannot approve release", async t => {
+  evidence(t);
+  t.mock.method(api, "listLimitOrders", async () => { throw new Error("provider unavailable"); });
+  assert.deepEqual(await prepareRelease({ ...input(), allowBalance: true }), { state: "refused", reason: "limit_orders", balances: [] });
+  assert.equal(readFileSync(".env", "utf8"), "");
+});
+
+test("release refuses a successful order whose local proposal files were lost, even when provider list lags", async t => {
+  evidence(t);
+  const key = `limit-order:${"b".repeat(32)}`;
+  record({ at: new Date().toISOString(), idempotencyKey: key, kind: "limit-order", journalVersion: 2,
+    method: "limit_order", request: { base_asset: ASSETS.wNEAR, quote_asset: ASSETS.USDC, side: "sell",
+      quantity: "1", price: "1", deadline: new Date(Date.now() + 3600000).toISOString(), confidential: true } });
+  claimSubmission(key, readOps()[0]!.request);
+  record({ idempotencyKey: key, correlation_id: "funded-order-correlation", status: "SUCCESS" });
+  assert.deepEqual(await prepareRelease({ ...input(), allowBalance: true }), { state: "refused", reason: "limit_orders", balances: [] });
   assert.equal(readFileSync(".env", "utf8"), "");
 });
 

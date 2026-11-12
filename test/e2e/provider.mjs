@@ -289,6 +289,8 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         // Provider records (the ledger's audit trail): each swap's events, newest first; no other kind is recorded by this simulator.
         if (agent && route === '/provider/audit') return json(res, { data: { events: swaps.filter(s => s.agent === agent.id).reverse().flatMap(swapEvents) } });
         if (agent && /^\/provider\/(requests|deposits|deposit_history)$/.test(route)) return json(res, { data: { events: [] } });
+        // This simulator places no resting orders; release still requires a live provider list read.
+        if (agent && route === '/limit-orders') return json(res, { data: [] });
         // Deposits, transfers, withdrawals, swaps and shields, oldest first.
         if (agent && route === '/history') return json(res, { data: [...credits.filter(c => c.agent === agent.id).map(depositStatus),
           ...transfers.filter(p => p.agent === agent.id).map(status), ...swaps.filter(s => s.agent === agent.id).map(swapStatus),

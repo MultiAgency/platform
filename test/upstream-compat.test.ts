@@ -96,7 +96,7 @@ test("SDK 0.8.2 limit-order policy evidence survives overview and unrelated owne
   assert.deepEqual(sends, [], "reading and preparing do not place or cancel an order");
 });
 
-test("upgrading the provider SDK enables no new platform spending route or default policy permission", async () => {
+test("limit-order routes require a dedicated app consent and owner policy opt-in; native signing stays off", async () => {
   const { treasuryPolicy, marketPolicy } = await import("../src/policy.js");
   const { appScopesCover } = await import("../src/contract/app-access.js");
   const { AppScope } = await import("../src/contract/app-consent.js");
@@ -105,10 +105,15 @@ test("upgrading the provider SDK enables no new platform spending route or defau
     assert.equal(p.actions.includes("limit_order"), false);
     assert.equal(p.native, undefined);
   }
-  for (const path of ["limitOrders/place", "limitOrders/cancel", "native/evm/signIntent", "native/solana/signIntent"]) {
+  for (const path of ["limitOrders/place", "limitOrders/cancel"]) {
+    assert.equal(appScopesCover(["treasury", "treasury-execute"], path), false);
+    assert.equal(appScopesCover(["treasury", "treasury-orders"], path), true);
+    assert.equal(mayCall({canSign:true,canPropose:true,canVote:true,canExecute:true,canManage:true}, path), true);
+  }
+  for (const path of ["native/evm/signIntent", "native/solana/signIntent"]) {
     assert.equal(appScopesCover(AppScope.options, path), false);
     assert.equal(mayCall({canSign:true,canPropose:true,canVote:true,canExecute:true,canManage:true}, path), false);
   }
-  assert.equal("limitOrders" in router, false);
+  assert.equal("limitOrders" in router, true);
   assert.equal("native" in router, false);
 });

@@ -55,9 +55,22 @@ The canonical list is the README's [Not done yet](../README.md#not-done-yet). Th
   the policy without it.
 - The autopilot hasn't run unattended for days on mainnet.
 
-The 0.5.6 release uses provider SDK 0.8.2, with policy evidence compatibility tested for `limit_order` and unchanged
-refusal/idempotency behavior. This adds no order execution or native signing route. The dependency review uses pinned
-public source and official skills; the deployed provider version remains unverified. See
+The tagged 0.5.6 SDK uses provider SDK 0.8.2, with policy evidence compatibility tested for `limit_order` and unchanged
+refusal/idempotency behavior. The tagged and published 0.5.7 SDK also lacks order routes. The 0.5.8 Treasury
+limit-order feature has local order routes, owner signatures, a dedicated app consent and offline recovery tests. No
+live order was placed by this platform. The separate Treasury app
+[PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records the exact frozen 0.5.8 SDK package
+and local consumer tests for credentialed capability discovery, cancellation continuation and retained decisions.
+Each later SDK source commit changes that package's provenance and needs a matching app retest. App hosted acceptance,
+deployed provider support and live order outcomes remain open.
+The [cross-repository HTTP gate](../test/cross-repo/treasury-orders/README.md) exercises both real servers against a
+simulated provider and chain; its result names the exact source and package it checked. It is separate from browser
+wallet and deployed provider evidence.
+Production provider order routes were absent in the 2026-11-10 read-only check.
+Consequently, a 0.5.8 platform using that provider would refuse hosted-agent release after its other prechecks,
+including for agents with no local orders; a working order-list route or separately reviewed absence proof is a
+production rollout gate ([release check](agent-release.md#release)).
+Native signing remains out of scope. See [limit orders](limit-orders.md) and
 [provider SDK upgrade](provider-sdk-082.md).
 
 ## Checking it yourself
@@ -82,15 +95,18 @@ Cumulative caps and budgets still account for provider withdrawals. Downgrade be
 market records exist: the previous reader rejects a market reservation and prevents the whole gateway starting,
 including Treasury and Payables (`test/market-rollback.test.ts`). See [market](market.md#rollback) and [operations](operations.md).
 
-The unreleased 0.5.8 market funding-binding candidate records the caller, request ID, approved terms and payment key
+The unreleased 0.5.9 market funding-binding candidate records the caller, request ID, approved terms and payment key
 before a top-up. Deterministic funding stages and final destination-receipt checks keep an unproved or still-owned
-credit reserved to its hire (`test/market-binding-journal.test.ts`, `test/market-funding-proof.test.ts`; the 0.5.8
-candidate passed the full offline suite, browser checks and narrow stack E2E on 2026-11-11). The full E2E suite with
+credit reserved to its hire (`test/market-binding-journal.test.ts`, `test/market-funding-proof.test.ts`; the earlier
+`ae60790` market candidate passed the full offline suite, browser checks and narrow stack E2E on 2026-11-11). The full E2E suite with
 the Treasury skill fixture was not run. The public journal-history export reports version 3 binding and landing
 metadata as `market_metadata_not_exported` gaps, without exposing its private payload or treating it as payment
-evidence (`test/journal-history.test.ts`, offline-tested). A 0.5.6 reader rejects the first version 3 journal line
-(`test/market-binding-rollback.test.ts`); the released 0.5.7 reader uses the same journal version. Submitted 0.5.6 or
-0.5.7 top-ups cannot be retroactively bound and block new hires on
+evidence (`test/journal-history.test.ts`, offline-tested). The combined Treasury-order reader also omits order
+placement/cancellation preparations as `method_not_exported` and isolated final-payout markers as
+`cancel_final_not_exported`; the unchanged public schema receives no private order terms or fabricated settlement.
+The frozen 0.5.6/0.5.7 and signed 0.5.8 readers reject the first version 3 journal line
+(`test/market-binding-rollback.test.ts`). Pin the exact reviewed source and package provenance. Submitted 0.5.6 through
+0.5.8 top-ups cannot be retroactively bound and block new hires on
 their old key. No supported fresh-key recovery or automatic clearance exists yet; hashless or unavailable receipt
 evidence also needs reviewed recovery. This candidate is not ready for a market-agent rollout. See
 [market](market.md#rollback) and [operations](operations.md).

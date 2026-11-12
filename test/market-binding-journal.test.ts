@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { beforeEach, test } from "node:test";
 import { freshDirectory, TSX } from "./fixtures/harness.js";
 import { acquireMoneyLock } from "../src/lock.js";
-import { claimSubmission, marketStageKey, opsLog, readMarketBindings, readOps, record, recordMarketBinding, recordMarketLanding } from "../src/ops.js";
+import { blocksDispatch, claimSubmission, marketStageKey, opsLog, readMarketBindings, readOps, record, recordMarketBinding, recordMarketLanding } from "../src/ops.js";
 import { requestKey } from "../src/request-key.js";
 import { ASSETS } from "../src/policy.js";
 import { briefDigest, OPEN_ACCOUNT_WNEAR, type HireTerms } from "../src/market/x402.js";
@@ -34,6 +34,54 @@ test("a v3 hire binding survives lock recovery and is not projected as a money o
   await lock.release();
   assert.deepEqual(readOps(), [], "resolveUnsubmitted must never retire a binding as an unsent operation");
   assert.deepEqual(readMarketBindings()[0]?.landed, {});
+});
+
+const cancelPreparation = {
+  at: "2026-11-11T12:00:00.000Z", idempotencyKey: `limit-order-cancel:${"b".repeat(32)}`,
+  kind: "limit-order-cancel", method: "limit_order_cancel" as const, journalVersion: 2 as const,
+  request: { proposalId: "b".repeat(32), orderId: "mixed-journal-order" },
+  policyRevision: null, policyDigest: null, originalOrderPolicyDigest: `sha256:${"c".repeat(64)}`,
+};
+const cancelClaim = { idempotencyKey: cancelPreparation.idempotencyKey, submissionState: "SUBMISSION_ATTEMPTED" as const };
+const cancelFinal = { idempotencyKey: cancelPreparation.idempotencyKey, cancelFinal: true as const };
+
+test("one journal keeps a v3 market binding separate from a claimed limit-order cancellation", () => {
+  recordMarketBinding(binding());
+  const savedBinding = readMarketBindings();
+  record(cancelPreparation);
+  claimSubmission(cancelPreparation.idempotencyKey, cancelPreparation.request);
+  const [claimed] = readOps();
+  assert.equal(readOps().length, 1, "the v3 binding is not projected as an operation");
+  assert.equal(claimed?.method, "limit_order_cancel");
+  assert.equal(claimed?.originalOrderPolicyDigest, cancelPreparation.originalOrderPolicyDigest,
+    "the shared parser retains the original cancellation mandate");
+  assert.equal(claimed?.submissionState, "SUBMISSION_ATTEMPTED");
+  assert.equal(blocksDispatch(claimed!), true, "a submission claim does not prove final payout");
+  assert.deepEqual(readMarketBindings(), savedBinding);
+  record(cancelFinal);
+  const [completed] = readOps();
+  assert.equal(completed?.cancelFinal, true);
+  assert.equal(blocksDispatch(completed!), false);
+  assert.deepEqual(readMarketBindings(), savedBinding, "cancel completion never consumes or retires market metadata");
+});
+
+for (const [name, lines] of Object.entries({
+  "unversioned cancellation": [{ ...cancelPreparation, journalVersion: undefined }, cancelClaim],
+  "repeated submission claim": [cancelPreparation, cancelClaim, cancelClaim],
+  "completion before submission": [cancelPreparation, cancelFinal],
+  "acceptance presented as final payout": [cancelPreparation, cancelClaim,
+    { idempotencyKey: cancelPreparation.idempotencyKey, correlation_id: "cancel-acceptance", status: "SUCCESS" }],
+  "refusal after submission": [cancelPreparation, cancelClaim,
+    { idempotencyKey: cancelPreparation.idempotencyKey, refused: "never_submitted" }],
+  "repeated final payout": [cancelPreparation, cancelClaim, cancelFinal, cancelFinal],
+})) test(`v3 market metadata cannot hide ${name} from either journal projection`, () => {
+  recordMarketBinding(binding());
+  const raw = readFileSync(opsLog(), "utf8") + lines.map(line => JSON.stringify(line)).join("\n") + "\n";
+  writeFileSync(opsLog(), raw);
+  assert.throws(readOps, /Invalid operation journal/);
+  assert.throws(readMarketBindings, /Invalid operation journal/,
+    "reading only market bindings must still validate cancellation lifecycle evidence");
+  assert.equal(readFileSync(opsLog(), "utf8"), raw, "both failed projections preserve every original byte");
 });
 
 for (const landedBeforeRestart of [false, true]) test(

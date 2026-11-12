@@ -54,6 +54,19 @@ unexecuted, and a `requestId` an app sends again then makes a new proposal there
 again. Rolling forward, an agent's own directory wins over such a duplicate. Stop writers before copying state; never start the destination before stopping the
 source. The lease coordinates processes on one host only.
 
+The separate Treasury limit-order feature writes additive records beneath `.proposals/limit-orders/<agent id>/`:
+the exact owner-approved order, one placement identity, complete fill and payout observations, and a one-way
+cancellation claim. Preserve the whole `.proposals/` tree and `.ops/` journal together, after stopping the executor.
+The new `limit_order` and `limit_order_cancel` journal methods make a host that has attempted either action
+incompatible with the tagged 0.5.7 reader; it refuses the journal rather than silently discarding the send.
+Do not roll that agent back to 0.5.7 after an order attempt. A host with only new proposal records has not crossed the
+journal boundary, but its older build ignores those proposals; keep them intact and do not resend their `requestId`s
+until the compatible build returns. See [limit orders](limit-orders.md).
+
+DAO order votes add `limit_order` request records under `.app-access/dao-requests/`. Preserve that directory with
+the rest of `.app-access/`. A pre-feature gateway reader may reject these records; finish or explicitly review an
+in-flight DAO vote before rolling the gateway back, even if no order was placed.
+
 ## Work-order executors
 
 Work-order support is locally implemented and offline-tested, not deployed or mainnet-observed.
@@ -334,15 +347,17 @@ canonical list and every instance settings file, including payment keys, and rec
 build. Do not delete entries, strip new fields/scopes or restore older shared state to force a downgrade. No downgrade
 conversion has been tested; one needs a separate compatibility review and a state-preserving procedure.
 
-The unreleased 0.5.8 market funding binding adds version 3 lines to the same `.ops/<agent>.jsonl`: a durable request
+The unreleased 0.5.9 market funding binding adds version 3 lines to the same `.ops/<agent>.jsonl`: a durable request
 binding before any top-up and a landing marker only after an exact destination receipt is final and included in a later final
-chain view. A 0.5.6 reader rejects a journal with either line (`test/market-binding-rollback.test.ts`), and the
-released 0.5.7 reader uses the same journal version. After the first version 3 line, recover that market executor on
-a compatible 0.5.8-or-later build. Do not remove or rewrite the lines to force a downgrade.
+chain view. The frozen 0.5.6/0.5.7 and signed 0.5.8 readers reject the first binding line
+(`test/market-binding-rollback.test.ts`). After the first version 3 line, recover that market executor on
+the exact reviewed binding-capable reader, pinned by source commit and package provenance. The released
+0.5.8 source lacks these version 3 readers; retain exact source and package provenance for the 0.5.9 reader. Do not remove or
+rewrite the lines to force a downgrade.
 The original bond for a DAO hire proposal is in a private `.app-access/dao-requests/<hash>.proposal-bond` sidecar
 written before its request JSON. Keep it in the full state backup. The released 0.5.7 gateway ignores the sidecar and
-can read the strict request JSON; a lost filing answer can be reconstructed from the sidecar by the 0.5.8 gateway.
-Before starting a 0.5.8 market executor, stop all executors sharing its state and inspect every legacy 0.5.6 or 0.5.7
+can read the strict request JSON; a lost filing answer can be reconstructed from the sidecar by the 0.5.9 gateway.
+Before starting a 0.5.9 market executor, stop all executors sharing its state and inspect every legacy 0.5.6 through 0.5.8
 `market-topup` line, which did not bind a requestId. Reconcile its provider correlation and status, on-chain credit,
 retained payment-key balance and any outstanding x402 payment. A submitted legacy unbound top-up makes the new
 executor refuse further hires and sends to that key with `legacy_funding_review_required`, even if the provider
@@ -351,7 +366,7 @@ above and all instance settings, including the old key, together. New hires requ
 reviewed procedure to provision an isolated fresh key after the old funds and any pending payment are accounted for.
 No supported fresh-key recovery route, automatic rotation, clearance, migration or state-preserving downgrade
 conversion exists.
-Rollout remains held until the stopped-writer audit establishes which market keys have submitted 0.5.6 or 0.5.7
+Rollout remains held until the stopped-writer audit establishes which market keys have submitted 0.5.6 through 0.5.8
 unbound top-ups and pending x402 payments, and confirms that the provider route supplies a destination transaction
 with a final receipt the executor can verify. Any affected key needs a separate reviewed recovery design.
 For new top-ups, provider `SUCCESS` without an independently verified final destination receipt does not release the

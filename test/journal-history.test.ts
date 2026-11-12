@@ -69,6 +69,50 @@ test("every legacy or v2 operation line shape projects without a malformed gap",
   ]);
 });
 
+test("limit-order history keeps the public schema and omits private terms and unsupported finality", () => {
+  const at = "2026-11-11T00:00:00Z";
+  const source = [
+    { at, idempotencyKey: "limit-order:proposal", kind: "limit-order", method: "limit_order", journalVersion: 2,
+      request: { base_asset: "private-base", quantity: "987654321", price: "123.456" } },
+    { at, idempotencyKey: "limit-order:proposal", submissionState: "SUBMISSION_ATTEMPTED" },
+    { at, idempotencyKey: "limit-order:proposal", correlation_id: "placement-op", status: "SUCCESS" },
+    { at, idempotencyKey: "limit-order-cancel:proposal", kind: "limit-order-cancel", method: "limit_order_cancel", journalVersion: 2,
+      request: { order_id: "private-provider-order" } },
+    { at, idempotencyKey: "limit-order-cancel:proposal", submissionState: "SUBMISSION_ATTEMPTED" },
+    { at, idempotencyKey: "limit-order-cancel:proposal", cancelFinal: true },
+    { ...row, idempotencyKey: "adjacent-swap", status: "SENT" },
+  ].map(line => JSON.stringify(line)).join("\n");
+  const history = parseJournalHistory("agent", source);
+  assert.deepEqual(history.gaps, [
+    { code: "method_not_exported", line: 1 },
+    { code: "method_not_exported", line: 4 },
+    { code: "cancel_final_not_exported", line: 6 },
+  ]);
+  assert.deepEqual(history.records.map(({ line, type, method, status }) => ({ line, type, method, status })), [
+    { line: 1, type: "request", method: undefined, status: undefined },
+    { line: 2, type: "submission-claim", method: undefined, status: undefined },
+    { line: 3, type: "status", method: undefined, status: "SUCCESS" },
+    { line: 4, type: "request", method: undefined, status: undefined },
+    { line: 5, type: "submission-claim", method: undefined, status: undefined },
+    { line: 7, type: "status", method: undefined, status: "SENT" },
+  ], "cancel completion does not fabricate a correlated operation status");
+  assert.doesNotThrow(() => JournalHistorySchema.parse(history));
+  assert.doesNotMatch(JSON.stringify(history), /private-base|987654321|123\.456|private-provider-order|cancelFinal/);
+});
+
+for (const [name, line] of Object.entries({
+  "false completion": { cancelFinal: false },
+  "mixed request": { cancelFinal: true, request: {} },
+  "mixed claim": { cancelFinal: true, submissionState: "SUBMISSION_ATTEMPTED" },
+  "mixed outcome": { cancelFinal: true, correlation_id: "order-op", status: "SUCCESS" },
+  "mixed refusal": { cancelFinal: true, refused: "never_submitted" },
+  "mixed authorization": { cancelFinal: true, authorization: { version: 1 } },
+})) test(`invalid cancellation completion (${name}) stays a malformed gap`, () => {
+  assert.deepEqual(parseJournalHistory("agent", JSON.stringify({ at: row.at, idempotencyKey: "cancel", ...line })), {
+    agentId: "agent", records: [], gaps: [{ code: "malformed_line", line: 1 }],
+  });
+});
+
 const marketKey = requestKey("app:fixture:acme", "hire-1");
 const marketBinding = {
   at: "2026-11-11T00:00:00Z", idempotencyKey: marketKey, kind: "market-binding", journalVersion: 3,

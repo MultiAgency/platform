@@ -1,0 +1,141 @@
+diff --git a/test/e2e/provider.mjs b/test/e2e/provider.mjs
+index ff11fda..4986653 100644
+--- a/test/e2e/provider.mjs
++++ b/test/e2e/provider.mjs
+@@ -124,7 +124,8 @@ export async function provider(directory, { treasury = false, account = OWNER, p
+   // The configured agent plus any the owner creates (work orders, hosted agents). Each keeps its own policy, grants and
+   // funding; a Treasury one its own balances.
+   const agents = new Map([[id, { id, owner, wallet, policy, revision: 1, grants, funded: BigInt(payoutFunding), ...(treasury && { treasury: treasuryState(100000000n) }) }]]);
+-  const requests = [], errors = [], transfers = [], intents = [], swaps = [], shields = [], deposits = [];
++  const requests = [], errors = [], transfers = [], intents = [], swaps = [], shields = [], deposits = [], orders = [];
++  let dropNextOrderPlace = false, dropNextOrderCancel = false;
+   /**
+    * Funds that reached an agent's confidential balance: each is a SUCCESS deposit in its history, shaped as one was observed
+    * on staging (2026-11-11), whose transaction FastNEAR's transaction API answers with the token's NEP-141 transfer to the
+@@ -281,14 +282,25 @@ export async function provider(directory, { treasury = false, account = OWNER, p
+         // Provider records (the ledger's audit trail): each swap's events, newest first; no other kind is recorded by this simulator.
+         if (agent && route === '/provider/audit') return json(res, { data: { events: swaps.filter(s => s.agent === agent.id).reverse().flatMap(swapEvents) } });
+         if (agent && /^\/provider\/(requests|deposits|deposit_history)$/.test(route)) return json(res, { data: { events: [] } });
+-        // This simulator places no resting orders; release still requires a live provider list read.
+-        if (agent && route === '/limit-orders') return json(res, { data: [] });
++        if (agent && route === '/limit-orders') {
++          const limit = Number(url.searchParams.get('limit') ?? 50), offset = Number(url.searchParams.get('offset') ?? 0);
++          return json(res, { data: orders.filter(order => order.agent === agent.id).slice(offset, offset + limit)
++            .map(order => ({ order_id: order.order_id })) });
++        }
++        const orderId = route.match(/^\/limit-orders\/([^/]+)$/)?.[1];
++        const order = orderId && orders.find(row => row.agent === agent?.id && row.order_id === orderId);
++        if (order) return json(res, { order_id: order.order_id, ...order.body, fill_status: order.fill_status,
++          payout_status: order.payout_status, is_payout_status_final: order.is_payout_status_final,
++          partial_fills: order.partial_fills, payouts: order.payouts });
+         // Deposits, transfers, withdrawals, swaps and shields, oldest first.
+         if (agent && route === '/history') return json(res, { data: [...credits.filter(c => c.agent === agent.id).map(depositStatus),
+           ...transfers.filter(p => p.agent === agent.id).map(status), ...swaps.filter(s => s.agent === agent.id).map(swapStatus),
+           ...shields.filter(s => s.agent === agent.id).map(shieldStatus)].sort((a, b) => a.created_at.localeCompare(b.created_at)), next_cursor: null });
+         if (url.pathname === '/v1/status') {
+           const correlation = url.searchParams.get('correlation_id');
++          const order = orders.find(row => row.correlation_id === correlation);
++          if (order) return json(res, { correlation_id: correlation, agent_id: order.agent,
++            type: 'limit_order', status: 'SUCCESS', details: { order_id: order.order_id } });
+           const payment = transfers.find(p => p.correlation === correlation);
+           if (payment) return json(res, status(payment));
+           const swap = swaps.find(s => s.correlation_id === correlation);
+@@ -303,6 +315,44 @@ export async function provider(directory, { treasury = false, account = OWNER, p
+         const payment = agent && transfers.find(p => p.agent === agent.id && route === `/approvals/${p.approval}`);
+         if (payment) return json(res, approval(payment));
+       }
++      if (agent?.treasury && req.method === 'POST' && route === '/limit-orders') {
++        const base = TOKENS.find(token => token.asset_id === body.base_asset);
++        const quote = TOKENS.find(token => token.asset_id === body.quote_asset);
++        const price = fraction(body.price);
++        if (!base || !quote || base === quote || body.side !== 'buy' || body.confidential !== true ||
++          !/^[1-9]\d*$/.test(body.quantity) || !price || !Date.parse(body.deadline))
++          throw new Error('Unexpected offline limit-order terms');
++        const numerator = BigInt(body.quantity) * price.numerator * 10n ** BigInt(quote.decimals);
++        const denominator = price.denominator * 10n ** BigInt(base.decimals);
++        const spend = (numerator + denominator - 1n) / denominator;
++        if (body.dry === true) return json(res, { type: 'limit_order', dry: true, warnings: [],
++          quote: { spend_asset: quote.asset_id, spend_amount: spend.toString() }, owner_approval: false, fee: {} });
++        if (!liveGrant(agent, req.headers['x-grant-token']) || !agent.policy.actions.includes('limit_order'))
++          return refusal(res, 403, 'policy_denied', 'policy', 'The local agent lacks order authority');
++        if (!entry.key || orders.some(order => order.key === entry.key)) throw new Error('Missing or repeated order identity');
++        const balance = agent.treasury.confidential.get(quote.asset_id);
++        if (spend > balance) return refusal(res, 400, 'insufficient_balance', 'balance', 'The simulated order spend exceeds balance');
++        agent.treasury.confidential.set(quote.asset_id, balance - spend);
++        const order = { order_id: `local-order-${orders.length + 1}`, correlation_id: randomUUID(), agent: agent.id,
++          key: entry.key, body: Object.fromEntries(Object.entries(body).filter(([name]) => name !== 'dry')),
++          fill_status: 'open', payout_status: 'not_started', is_payout_status_final: false,
++          partial_fills: [], payouts: {}, cancelPosts: 0 };
++        orders.push(order);
++        if (dropNextOrderPlace) { dropNextOrderPlace = false; return res.destroy(); }
++        return json(res, { correlation_id: order.correlation_id });
++      }
++      const cancelOrderId = route.match(/^\/limit-orders\/([^/]+)\/cancel$/)?.[1];
++      if (agent?.treasury && req.method === 'POST' && cancelOrderId) {
++        const order = orders.find(row => row.agent === agent.id && row.order_id === cancelOrderId);
++        if (!order) return refusal(res, 404, 'order_not_found', 'request', 'No simulated order has this identity');
++        if (!liveGrant(agent, req.headers['x-grant-token']))
++          return refusal(res, 403, 'grant_denied', 'grant', 'The local agent lacks a live grant');
++        order.cancelPosts++;
++        if (order.cancelPosts > 1) throw new Error('Repeated simulated cancellation POST');
++        order.fill_status = 'pending_cancel';
++        if (dropNextOrderCancel) { dropNextOrderCancel = false; return res.destroy(); }
++        return json(res, { order_id: order.order_id, fill_status: order.fill_status });
++      }
+       if (agent?.treasury && req.method === 'POST' && route === '/swap') {
+         if (!liveGrant(agent, req.headers['x-grant-token'])) throw new Error('Missing swap grant');
+         const treasuryBalances = agent.treasury.confidential;
+@@ -466,6 +516,35 @@ export async function provider(directory, { treasury = false, account = OWNER, p
+   });
+   const port = await listen(server);
+   return { id, token: credential.token, url: `http://127.0.0.1:${port}`, requests, errors, transfers, intents, grants, swaps, shields, deposits,
++    /** Test-only order lifecycle controls; every HTTP route above still goes through the real platform gateway. */
++    orderState: () => ({ orders: orders.map(order => ({ orderId: order.order_id, correlationId: order.correlation_id,
++      fillStatus: order.fill_status, payoutStatus: order.payout_status, finalPayout: order.is_payout_status_final,
++      cancelPosts: order.cancelPosts })),
++      placementPosts: requests.filter(row => row.method === 'POST' && row.path === `/v1/agents/${id}/limit-orders` && row.body?.dry !== true).length,
++      cancelPosts: orders.reduce((count, order) => count + order.cancelPosts, 0) }),
++    dropOrderPlaceReply() { dropNextOrderPlace = true; },
++    dropOrderCancelReply() { dropNextOrderCancel = true; },
++    orderFill(orderId) {
++      const order = orders.find(row => row.order_id === orderId);
++      if (!order || order.fill_status !== 'open') throw new Error('Only a resting order can receive the simulated partial fill');
++      order.fill_status = 'partially_filled'; order.payout_status = 'in_progress';
++      order.partial_fills = [{ quantity: '250000000000000000000000', price: order.body.price, fill_id: 'local-fill-1' }];
++      order.payouts = { 'local-fill-1': { status: 'in_progress' } };
++    },
++    orderFillComplete(orderId) {
++      const order = orders.find(row => row.order_id === orderId);
++      if (!order || order.fill_status !== 'partially_filled') throw new Error('Only a partial order can fill without a final payout');
++      order.fill_status = 'filled'; order.payout_status = 'in_progress'; order.is_payout_status_final = false;
++      order.partial_fills.push({ quantity: '750000000000000000000000', price: order.body.price, fill_id: 'local-fill-2' });
++      order.payouts['local-fill-2'] = { status: 'in_progress' };
++    },
++    orderPayoutFinal(orderId, fillStatus = 'filled', payoutStatus = 'completed') {
++      const order = orders.find(row => row.order_id === orderId);
++      if (!order || !['filled', 'canceled'].includes(fillStatus) || !['completed', 'failed'].includes(payoutStatus))
++        throw new Error('Give an existing order and terminal fill/payout states');
++      order.fill_status = fillStatus; order.payout_status = payoutStatus; order.is_payout_status_final = true;
++      order.payouts = Object.fromEntries(order.partial_fills.map(fill => [fill.fill_id, { status: payoutStatus }]));
++    },
+     /** Agents the owner created through signed `agent_create`, in creation order. */
+     created: () => [...agents.keys()].filter(agent => agent !== id),
+     /** Simulated inbound USDC deposit to a created agent's confidential balance. Not a provider observation of a real transfer. */
+diff --git a/test/e2e/stack-controls.mjs b/test/e2e/stack-controls.mjs
+index defa963..cfb9606 100644
+--- a/test/e2e/stack-controls.mjs
++++ b/test/e2e/stack-controls.mjs
+@@ -108,6 +108,13 @@ export function stackControls(stack, { owner, payees = [] }) {
+     },
+     /** A listed token's USD price moves (a positive decimal): every later quote and valuation uses it. */
+     setPrice: ({ asset, price }) => portfolio().setPrice(asset, price),
++    orderState: () => portfolio().orderState(),
++    dropOrderPlaceReply: () => portfolio().dropOrderPlaceReply(),
++    dropOrderCancelReply: () => portfolio().dropOrderCancelReply(),
++    orderFill: ({ orderId }) => portfolio().orderFill(orderId),
++    orderFillComplete: ({ orderId }) => portfolio().orderFillComplete(orderId),
++    orderPayoutFinal: ({ orderId, fillStatus = 'filled', payoutStatus = 'completed' }) =>
++      portfolio().orderPayoutFinal(orderId, fillStatus, payoutStatus),
+     /** Funds arriving on `portfolio`'s public balance outside a confidential deposit (raw units): what a sweep shields. */
+     fundPublic: ({ asset, amount }) => portfolio().fundPublic(asset, amount),
+     /**

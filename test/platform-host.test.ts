@@ -97,6 +97,8 @@ test("a headless host serves only app access and the confirm page, and sets up o
 
   // App access answers as on any host: a credential is required, and a browser is refused.
   assert.equal((await call("/apps/v1/agents/own-000000000000000000000000")).status, 401);
+  assert.equal((await call("/apps/v1/capabilities")).status, 401);
+  assert.deepEqual(JSON.parse((await app("/capabilities")).body), { capabilities: [] }, "Payables-only headless host has no Treasury order routes");
   assert.equal((await call("/apps/v1/agents/own-000000000000000000000000", { headers: { authorization: `Bearer ${token}`, origin: "https://app.test" } })).status, 403);
   assert.equal((await call("/apps/v1/agents/x", { headers: { host: "other.test", authorization: `Bearer ${token}` } })).status, 421);
   // The confirm page's calls pass; any other path under /confirm/ is the host's 404, never a page of the web build.
@@ -134,6 +136,15 @@ test("a headless host serves only app access and the confirm page, and sets up o
   const payables = await app("/setup", await signedSetup("payables"));
   assert.equal(payables.status, 201, `${payables.body} ${diagnostics()}`);
   assert.match(JSON.parse(payables.body).agent, /^own-[0-9a-f]{24}$/);
+});
+
+test("a headless Treasury app host advertises order routes only through credentialed app discovery", { timeout: 60_000 }, async t => {
+  const { token, call, app } = await startGateway(t, { host: HOST, headless: true, appSetup: ["treasury", "payables"], agents: [] });
+  const discovered = await app("/capabilities");
+  assert.deepEqual([discovered.status, JSON.parse(discovered.body)], [200, { capabilities: ["treasury-limit-orders-v1"] }]);
+  assert.equal((await call("/apps/v1/capabilities", { headers: { authorization: `Bearer ${token}`, cookie: "session=1" } })).status, 403);
+  assert.deepEqual([(await call("/gw/me", { headers: { authorization: `Bearer ${token}` } })).status,
+    (await call("/gw/me")).status ], [404, 404], "headless owner frontend discovery stays absent");
 });
 
 test("app setup follows appSetup, not selfService: on a prototype host without selfService, sign-in setup is refused and app setup works", { timeout: 60_000 }, async t => {

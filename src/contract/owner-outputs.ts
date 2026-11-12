@@ -15,6 +15,7 @@ import { appConfirm } from "./app-access.js";
 import { ownerCompensationView } from "../compensation-contract.js";
 import { RecordingSchema } from "./run-log-schema.js";
 import { proposalList, proposalView } from "./treasury-proposals.js";
+import { limitOrderListOutput, limitOrderQuoteOutput, limitOrderView } from "./limit-orders.js";
 // Server modules with filesystem, crypto or AG-UI dependencies stay out of this browser-safe package: their shapes are
 // restated here, and test/contract-owner.test.ts proves every handler output is accepted by these schemas.
 
@@ -146,7 +147,7 @@ const votedPayment = z.looseObject({ correlationId: z.string(), verdict: z.enum(
  * How a journal operation was sent. `x402` is a market hire's payment (docs/market.md): an SDK before it refuses a
  * market agent's operations, and only a market agent's.
  */
-export const OPERATION_METHODS = ["swap", "transfer", "shield", "unshield", "withdraw", "x402"] as const;
+export const OPERATION_METHODS = ["swap", "transfer", "shield", "unshield", "withdraw", "x402", "limit_order", "limit_order_cancel"] as const;
 /** ops.ts Op: one journal operation folded with its outcome. Optional fields are absent from older lines. */
 const op = z.looseObject({
   at: z.string(),
@@ -850,6 +851,15 @@ export const ownerOutputs = {
   "proposals/reject": proposalView,
   "proposals/withdraw": proposalView,
   "proposals/execute": proposalView,
+  "limitOrders/quote": limitOrderQuoteOutput,
+  "limitOrders/create": limitOrderView,
+  "limitOrders/get": limitOrderView,
+  "limitOrders/list": limitOrderListOutput,
+  "limitOrders/approve": limitOrderView,
+  "limitOrders/reject": limitOrderView,
+  "limitOrders/place": limitOrderView,
+  "limitOrders/cancel": limitOrderView,
+  "limitOrders/refresh": limitOrderView,
 } as const;
 
 /** Procedures whose output is an event stream: `ownerOutputs` holds the schema of one yielded event. */

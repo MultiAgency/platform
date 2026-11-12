@@ -18,13 +18,14 @@ import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import { proposalText, proposalView } from "../contract/treasury-proposals.js";
+import { limitOrderId, limitOrderText, limitOrderView } from "../contract/limit-orders.js";
 import { hireTerms, marketBrief, payoutRequestId } from "../contract/inputs.js";
 import { hireText, marketApproveInput, MAX_HIRE_APPROVAL_MS } from "../contract/market.js";
 import { marketHireOutput } from "../contract/owner-outputs.js";
 import { createHash } from "node:crypto";
 import type { Router } from "../router.js";
 import { agentOrigin } from "./agent-origin.js";
-import { chainDaoVotes, daoConsent, type DaoConsentRequest, type DaoFiled, type DaoRequest, DaoHireFilingUnavailable, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoHire, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
+import { chainDaoVotes, daoConsent, type DaoConsentRequest, type DaoFiled, type DaoRequest, DaoHireFilingUnavailable, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoHire, publicDaoOrder, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
 import { AuthorityUnanswered, chainDaoOwner, type DaoOwnerReads, resolveDaoAuthority, resolveWalletAuthority } from "./machine-authority.js";
 import { forwardRpc } from "./rpc-proxy.js";
 import { issueNonce, nonceIssuedAt } from "./consent-nonce.js";
@@ -45,8 +46,8 @@ const mayUse = hourlyLimit(DEFAULT_REQUESTS_PER_HOUR);
  * own, the same size as the credential's: ordinary traffic can't use it up and waste a signature, and they still can't
  * be used to get around the limit (#59).
  */
-const SIGNED = /^\/apps\/v1\/(?:setup|consents|consent-nonces|o\/[A-Za-z0-9_-]{1,128}\/a\/[a-z0-9-]{1,32}\/rpc\/owner\/submit)$/;
-const RELAYS = /^\/apps\/v1\/dao-(?:setups|consents|votes|hires)\/[a-f0-9]{64}$/;
+const SIGNED = /^\/apps\/v1\/(?:setup|consents|consent-nonces|o\/[A-Za-z0-9_-]{1,128}\/a\/[a-z0-9-]{1,32}\/rpc\/(?:owner\/submit|limitOrders\/(?:approve|reject)))$/;
+const RELAYS = /^\/apps\/v1\/dao-(?:setups|consents|votes|hires|limit-orders)\/[a-f0-9]{64}$/;
 const budgetOf = (method: string | undefined, pathname: string) =>
   method === "POST" && SIGNED.test(pathname) || method === "GET" && RELAYS.test(pathname) ? "signed" as const : "shared" as const;
 /** The shared budget, with a slice kept for each other Organization seen this hour (#59, `fair-share.ts`). */
@@ -66,6 +67,8 @@ const daoHireFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0
   recoverProposal: z.literal("dao-checked").optional() });
 const daoVoteFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), agent: z.string().regex(/^[a-z0-9-]{1,32}$/),
   proposal: z.string().min(1).max(128), verdict: z.enum(["approve", "reject"]) });
+const daoOrderFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), agent: z.string().regex(/^[a-z0-9-]{1,32}$/),
+  order: limitOrderId, verdict: z.enum(["approve", "reject"]) });
 /** The gateway's own call to an agent, as this app under one of its consents: the agent applies its usual checks. */
 const agentCall = (agent: AgentEntry, deployment: string, host: string, organization: string, consent: string, live: string[]): RouterClient<Router> =>
   createORPCClient(new RPCLink({ origin: agentOrigin(agent), url: "/rpc", headers: { "x-gateway-actor": `app:${deployment}:${organization}`,
@@ -200,16 +203,23 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   };
   const ownerStopped = () => json(res, 409, { code: "owner_stopped", error: "The owner stopped or released this agent, and this text may have been signed before that. Nothing was stored; ask the platform for a consent nonce and ask the owner to sign the text with it." });
   const stoppedAnswer = () => json(res, 409, { code: "dao_stopped", error: "The DAO stopped this agent after this consent was filed. Nothing was stored; file a new consent for the DAO's vote." });
-  /** A DAO-owned agent this app reaches under a live DAO consent with `treasury`, as it is now; or why not. */
-  /** A DAO's agent for this app and Organization, and its live DAO consents carrying `scope`: `treasury` for votes, `market` for hires. */
-  const daoAgent = async (name: string, organization: string, scope: "treasury" | "market" = "treasury") => {
+  // Capability discovery is credentialed but grants no owner authority. It names only app routes this host can serve,
+  // not an active agent release, the provider's deployed routes, or a live consent.
+  if (pathname === "/apps/v1/capabilities") {
+    if (req.method !== "GET") { json(res, 405, { code: "invalid_request", error: "Use GET" }); return true; }
+    const treasury = options.setupAreas?.includes("treasury") || selected.some(a => a.area === "treasury" && reachable(a, credential.deployment));
+    json(res, 200, { capabilities: treasury ? ["treasury-limit-orders-v1"] : [] }); return true;
+  }
+  /** A DAO's agent for this app and Organization, with live DAO consents carrying the requested scope. Orders need both Treasury scopes. */
+  const daoAgent = async (name: string, organization: string, scope: "treasury" | "treasury-orders" | "market" = "treasury") => {
     const agent = selected.find(a => a.name === name && reachable(a, credential.deployment, organization));
     if (!agent) return { code: "no_consent", error: "This host has no such agent for this app and Organization" };
     const authority = await resolveDaoAuthority(agent, daoOwner);
     if (!authority) return { code: "owner_changed", error: "This agent isn't owned by a DAO's derived account now" };
     if (authority.agentId === null) return { code: "not_created", error: "This DAO's agent isn't created yet" };
     const covering = consents.live({ deployment: credential.deployment, host, organization, agent: name })
-      .filter(c => c.signer === "dao" && c.owner === agent.owner && c.agentId === authority.agentId && c.scopes.includes(scope));
+      .filter(c => c.signer === "dao" && c.owner === agent.owner && c.agentId === authority.agentId && c.scopes.includes(scope)
+        && (scope !== "treasury-orders" || c.scopes.includes("treasury")));
     if (!covering.length) return { code: "no_consent", error: `No live DAO consent with ${scope} covers this Organization and agent` };
     // The longest-lived one, so a vote filed under it has the most time to pass.
     const consent = covering.reduce((best, c) => c.expiresAt > best.expiresAt ? c : best);
@@ -505,6 +515,92 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     json(res, 200, { state: "relayed", request: publicDaoVote(relayed), proposalState: relayed.relayed!.state }); return true;
   }
 
+  // A DAO signs one exact proposed order under a consent carrying both Treasury scopes. The vote only approves or
+  // rejects the immutable terms; the agent's guarded placement is a separate operation.
+  if (pathname === "/apps/v1/dao-limit-orders") {
+    if (req.method !== "POST") { json(res, 405, { code: "invalid_request", error: "Use POST" }); return true; }
+    const body = daoOrderFiling.safeParse(await readJson(req));
+    if (!body.success) { json(res, 400, { code: "invalid_request", error: "Send organization, agent, order and verdict (approve or reject)." }); return true; }
+    const { organization, agent: name, order: id, verdict } = body.data;
+    const found = await daoAgent(name, organization, "treasury-orders");
+    if ("error" in found) { json(res, 403, found); return true; }
+    const { agent, authority, consent, live } = found;
+    let order: z.infer<typeof limitOrderView>;
+    try { order = limitOrderView.parse(await agentCall(agent, credential.deployment, host, organization, consent.id, live).limitOrders.get({ id })); }
+    catch { json(res, 409, { code: "order_unanswered", error: "The agent didn't answer this order for this app. Nothing was filed." }); return true; }
+    if (order.id !== id || order.deployment !== credential.deployment || order.organization !== organization || order.agentId !== consent.agentId) {
+      json(res, 409, { code: "order_unanswered", error: "The agent's order is not this app's proposed order. Nothing was filed." }); return true;
+    }
+    if (order.state !== "proposed") { json(res, 409, { code: "order_not_open", error: `This order is ${order.state}; the DAO can't vote on it now. Nothing was filed.` }); return true; }
+    const validUntil = Math.min(Date.parse(order.expiresAt), Date.parse(order.order.deadline), consent.expiresAt);
+    if (!Number.isFinite(validUntil) || validUntil <= Date.now() + 60_000) {
+      json(res, 409, { code: "expires_too_soon", error: "This order, or the consent it would be relayed under, expires too soon for a vote. Nothing was filed." }); return true;
+    }
+    const mayFileOrderVote = () => stillAuthorized() && consents.live({ deployment: credential.deployment, host, organization, agent: name })
+      .some(c => c.id === consent.id && c.scopes.includes("treasury") && c.scopes.includes("treasury-orders"));
+    const filedResult = await daoRequests.file({ kind: "limit_order", deployment: credential.deployment, host: host.toLowerCase(), organization,
+      dao: agent.owner, agent: name, agentId: consent.agentId, order: id, verdict, under: consent.id, expiresAt: validUntil,
+      message: limitOrderText(order, verdict), signer: { account_id: authority.signer.account_id, public_key: authority.signer.public_key } },
+      { bond: authority.policy.proposal_bond, stopping: () => stopping() || !mayFileOrderVote(),
+        log: record => ({ deployment: credential.deployment, credential: credential.id, event: "dao-order-filed", request: record.id,
+          consent: consent.id, organization, owner: agent.owner, agent: name, order: id, verdict }) });
+    if (!mayFileOrderVote()) { json(res, 403, { code: "access_ended", error: "Access ended before this DAO vote was filed. Nothing was stored." }); return true; }
+    const filed = daoFiled(filedResult);
+    if (!filed) return true;
+    json(res, 201, { request: publicDaoOrder(filed.record), transactions: filed.transactions }); return true;
+  }
+  const orderVoteState = pathname.match(/^\/apps\/v1\/dao-limit-orders\/([a-f0-9]{64})$/);
+  if (orderVoteState) {
+    if (req.method !== "GET") { json(res, 405, { code: "invalid_request", error: "Use GET" }); return true; }
+    const record = daoRequests.read(orderVoteState[1]!);
+    if (record?.kind !== "limit_order" || record.deployment !== credential.deployment || record.host !== host.toLowerCase()) {
+      json(res, 404, { code: "not_found", error: "No such DAO limit-order vote" }); return true;
+    }
+    if (record.relayed) { json(res, 200, { state: "relayed", request: publicDaoOrder(record), orderState: record.relayed.state }); return true; }
+    const signature = await daoSignature(record, () => ({ state: "pending", request: publicDaoOrder(record) }));
+    if (!signature) return true;
+    const found = await daoAgent(record.agent, record.organization, "treasury-orders");
+    if ("error" in found || !found.live.includes(record.under)) {
+      json(res, 409, { code: "consent_ended", error: "The DAO signed, but its order consent for this app ended or the agent changed. Nothing was relayed." }); return true;
+    }
+    if (found.authority.signer.public_key !== record.signer.public_key || found.authority.agentId !== record.agentId) {
+      json(res, 409, { code: "agent_changed", error: "The DAO signed, but the agent is no longer that DAO's agent with that identity. Nothing was relayed." }); return true;
+    }
+    if (stopping()) { json(res, 503, { error: "Gateway is stopping. Nothing was relayed; read again." }); return true; }
+    if (!stillAuthorized() || !consents.live({ deployment: credential.deployment, host, organization: record.organization, agent: record.agent })
+      .some(c => c.id === record.under && c.scopes.includes("treasury") && c.scopes.includes("treasury-orders"))) {
+      json(res, 403, { code: "access_ended", error: "Access ended before relaying. Nothing was relayed." }); return true;
+    }
+    const signed = { message: record.message, nonce: record.nonce, publicKey: record.signer.public_key, signature: signature.toString("base64") };
+    const client = agentCall(found.agent, credential.deployment, host, record.organization, record.under, found.live).limitOrders;
+    const signedHash = createHash("sha256").update(signed.signature).digest("hex");
+    const relay = daoRequests.claimOrderRelay(record.id, signedHash);
+    if (relay === "mismatch") {
+      json(res, 409, { code: "signature_changed", error: "A different DAO signature was already claimed for this order vote. Reconcile the saved attempt before taking any action." }); return true;
+    }
+    let answer: unknown;
+    if (relay === "claimed") {
+      try { answer = await (record.verdict === "approve" ? client.approve : client.reject)({ id: record.order, signed }); }
+      catch { /* The claimed outcome is unknown. Read the agent receipt; never submit this signature again. */ }
+    }
+    if (answer === undefined) answer = await client.get({ id: record.order }).catch(() => undefined);
+    const accepted = limitOrderView.safeParse(answer);
+    const read = accepted.success ? accepted.data : null;
+    const applied = read && read.id === record.order && read.agentId === record.agentId &&
+      read.deployment === record.deployment && read.organization === record.organization &&
+      (record.verdict === "approve"
+        ? read.approvalSignatureHash === signedHash && !["proposed", "rejected", "withdrawn"].includes(read.state)
+        : read.rejectionSignatureHash === signedHash && read.state === "rejected");
+    if (!applied) {
+      json(res, 409, { code: "relay_unresolved", error: "The agent did not prove this exact DAO verdict was recorded. Poll this vote again; its saved signature will not be submitted again." }); return true;
+    }
+    const relayed = daoRequests.orderRelayed(record.id, read.state);
+    appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
+      event: "dao-order-relayed", request: record.id, consent: record.under, organization: record.organization, owner: record.dao,
+      agent: record.agent, order: record.order, verdict: record.verdict });
+    json(res, 200, { state: "relayed", request: publicDaoOrder(relayed), orderState: relayed.relayed!.state }); return true;
+  }
+
   // A DAO's approval of one market hire (docs/market.md): the platform files it from its own text of the hire's terms, and
   // relays the DAO's signature to the agent, which checks the key is its DAO owner's and then pays the hire once.
   if (pathname === "/apps/v1/dao-hires") {
@@ -740,9 +836,9 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   if (!byDao && prepared?.type === "agent_create" && prepared.owner?.public_key !== consent.publicKey) {
     json(res, 403, { code: "setup_key", access: "procedure", error: "Create the agent with the key that signed the setup" }); return true;
   }
-  // An owner's approval or rejection of a proposal: the platform checks it is the owner's, for this host, before the agent
-  // compares its text with the proposal's.
-  if (path === "proposals/approve" || path === "proposals/reject") {
+  // A Treasury proposal or limit order uses the same signed { id, signed } envelope. The gateway checks the owner's
+  // full-access key and this host before the agent compares the text with its immutable terms.
+  if (path === "proposals/approve" || path === "proposals/reject" || path === "limitOrders/approve" || path === "limitOrders/reject") {
     const problem = await proposalSignatureProblem(input, host, agent.owner, lookup);
     if (problem) { json(res, 400, { code: "signature_invalid", error: `${problem} Nothing was recorded.` }); return true; }
   }
@@ -800,10 +896,11 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     }
     return link(output.data);
   });
-  // A proposal is bound to the consent it was made under and the host its owner signs for; it is withdrawn once that
-  // consent is no longer among this app's live consents for the agent.
-  const context = path.startsWith("proposals/") ? { consent: consent.id, host: host.toLowerCase(),
-    consents: live.filter(c => matches(c) && c.scopes.includes("treasury")).map(c => c.id) } : undefined;
+  // Proposals and limit orders are bound to their own consent and the signing host. A renewed consent may follow one
+  // only if it carries the same scopes, so a plain Treasury consent cannot inherit an order's approval or placement.
+  const context = path.startsWith("proposals/") || path.startsWith("limitOrders/") ? { consent: consent.id, host: host.toLowerCase(),
+    consents: live.filter(c => matches(c) && c.scopes.includes("treasury") &&
+      (!path.startsWith("limitOrders/") || c.scopes.includes("treasury-orders"))).map(c => c.id) } : undefined;
   forwardRpc(req, res, agent, path, undefined, body, `app:${credential.deployment}:${organization}`, release || undefined, context);
   return true;
 }

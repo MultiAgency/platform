@@ -15,7 +15,8 @@ The owner-signed policy configures the provider controls below. The API document
 policy; independently verifying the binding from its plaintext to the signed payload remains open.
 
 - **Allowed input assets.** The provider's `assets` list restricts what may be spent. This executor
-  additionally requires swap outputs to be in the same list; that stricter check is local.
+  additionally requires swap outputs and limit-order acquired assets to be in the same list; that
+  stricter check is local.
 - **Permitted actions.** `actions`, with shield and unshield under `confidential`, and transfers only to
   `destinations`.
 - **Per-asset spending caps.** Per transaction, hour, day and month. A swap spends its input.
@@ -228,10 +229,11 @@ are covered in the Treasury app's `test/browser/strategy.cjs`; they are not depl
 
 ## Recovery limitation
 
-**Provider SDK 0.8.2 (released in 0.5.6, 2026-11-10).** The dependency and lockfile pin 0.8.2 exactly. Official SDK source
-`416597b0c63a426b225b98b6d175c03bfb6a7947` adds limit-order methods and signed 1Click quote inputs for native EVM/Solana
-sign-intent; the platform exposes neither feature. Policy reads/previews accept the provider's `limit_order` action
-and price-deviation setting without changing its signed policy or dropping that evidence during unrelated edits.
+**Provider SDK 0.8.2 (introduced in SDK 0.5.6, 2026-11-10).** The dependency and lockfile pin 0.8.2 exactly.
+Official SDK source `416597b0c63a426b225b98b6d175c03bfb6a7947` adds limit-order methods and signed 1Click
+quote inputs for native EVM/Solana sign-intent. The tagged 0.5.6 and 0.5.7 platform releases expose neither
+feature; the 0.5.8 path adds limit orders only. Policy reads/previews accept the provider's `limit_order`
+action and price-deviation setting without changing its signed policy or dropping that evidence during unrelated edits.
 The transport and existing money methods remain compatible in offline tests. A lost reply still makes one transport
 attempt with the original idempotency key. New documented errors, including `invalid_address` at 409 and limit-order
 price errors, do not become proven non-execution automatically: attempted sends remain unresolved under the existing
@@ -994,7 +996,7 @@ Limits:
   proposals are invalidated. The owner's own plans run without the floor. Read from the code, not tested.
 - A DAO's proposals are public, so a DAO's floor is public once its grant proposal is filed.
 
-### Market hires: the payment key (0.5.6 and 0.5.7 released; 0.5.8 binding candidate)
+### Market hires: the payment key (0.5.6 and 0.5.7 released; 0.5.9 binding candidate)
 
 A market agent hires listed agents on the NEAR AI Agent Market over x402 ([agent market](market.md)). The provider
 enforces every send up to the agent's payment key: the market policy lets the agent `withdraw` only USDC and wNEAR,
@@ -1007,7 +1009,7 @@ USD budgets still count provider withdrawals, not the timing or sum of later pay
 A DAO's approval deadline is checked after asynchronous signing and before every new claim; expiry stops paid-call
 retries without resolving an already attempted payment. Earlier top-ups remain recorded even if the final payment is
 refused. These boundaries are offline-tested in `test/market-deadline.test.ts` and `test/market-signing-race.test.ts`.
-The 0.5.8 candidate writes a version 3 binding of the caller, requestId, brief, approved terms and payment key before
+The 0.5.9 candidate writes a version 3 binding of the caller, requestId, brief, approved terms and payment key before
 any top-up. The opening and USDC stages use fixed keys derived from it. Different terms with the same ID refuse
 `request_conflict` even before x402 preparation; `market/status` sees a bound request as `funding` or
 `funding_review`, not `not_found`. A submitted stage reserves the payment key across hires until a final destination
@@ -1039,8 +1041,8 @@ never pay twice.
 The normal funding proof needs the provider's optional destination transaction hash and final NEAR receipt data. A
 same-chain route may be hashless, and ordinary RPC can lose old receipt history before delayed reconciliation. Those
 cases need reviewed recovery with independent archival evidence; there is no automatic recovery or proof inferred from
-the provider's terminal status. Before a 0.5.8 executor starts on existing market state, stop executors and inspect
-legacy unbound top-ups and retained key balances as described in [operations](operations.md). A submitted 0.5.6 or 0.5.7
+the provider's terminal status. Before a 0.5.9 executor starts on existing market state, stop executors and inspect
+legacy unbound top-ups and retained key balances as described in [operations](operations.md). A submitted 0.5.6 through 0.5.8
 top-up without a request binding causes `legacy_funding_review_required` on further hires and sends to that key,
 even if the provider calls it terminal. Preserve the old key and records; new hires require a separately designed
 and reviewed fresh-key recovery procedure after the old funds and any pending payment are accounted for. No
@@ -1225,3 +1227,23 @@ assets on the key are not enumerated. All settings, records and keys remain reco
 required for restoration, and old consents stay ended. Lifecycle and money locks coordinate one host, not distributed
 fencing. Provider archive/restore refusal semantics remain per pinned docs (`ce381df`), with no mainnet observation;
 DAO release and incomplete-transition rollback are not covered. See [agent release](agent-release.md) for tests and limits.
+
+## Treasury limit orders (SDK 0.5.8; platform rollout pending)
+
+The owner must sign a policy revision enabling `limit_order` and a deviation ceiling, then sign each immutable
+order's exact terms. A dedicated `treasury-orders` app consent and live Treasury grant are also required by this
+platform. These application bindings do not prove a bypassed holder of the grant cannot place another order within
+the provider's policy. Provider enforcement of price deviation, asset caps, USD budget and action permission is per
+[pinned Agent API documentation](https://github.com/NEAR-Intents-Agent-API/skills/blob/0b81bba6fca6356a2db81d0ede08e9cb928d08e1/near-intents-agent-api/references/limit-orders.md),
+not independently established on the running service.
+
+The local output-asset authorization applies to both sides: a sell acquires quote, a buy acquires base. Orders are
+refused while a Treasury cash floor is configured, because a resting order cannot be valued as one settled swap.
+Placement rechecks the policy, strategy, grant, signed gross spend and an unwarned dry preview under the money lock;
+one journal claim precedes one provider call. A lost answer stays unresolved. Provider placement `SUCCESS` identifies
+a funded order, not a filled trade. Complete means closed fill and final completed payouts from a live order read;
+partial fills, pending cancellation, failed payout and unreadable finality remain reviewable. A cancel is claimed once,
+then only read after an ambiguous reply. Hosted-agent release refuses tracked or listed orders with open or unreadable
+finality even with a balance override; a lagging provider list cannot prove the absence of an external order.
+These paths have offline tests, but no live placement, fill, cancellation or payout observation.
+The production provider route was absent in the 2026-11-10 read-only check. See [limit orders](limit-orders.md).

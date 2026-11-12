@@ -10,7 +10,7 @@ metadata:
   purpose: 'Orients an app or agent author: the three clients, the identities and their server-side limits, result kinds and when to send again, and the supported surface of this package version.'
   type: lifecycle
   library: '@multiagency/sdk'
-  library_version: '0.5.8'
+  library_version: '0.5.9'
 sources:
   - 'MultiAgency/platform:src/contract/index.ts'
   - 'MultiAgency/platform:src/contract/payee-entry.ts'

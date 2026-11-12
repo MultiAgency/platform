@@ -13,8 +13,8 @@ import { breaksCashFloor, cashChange, cashUsd, withinRunCeiling } from "./strate
 /**
  * The one authorization rule every money action passes before it is sent. The provider enforces the
  * policy itself (identity, actions, payees, limits, budgets) when the action reaches it; this refuses
- * only what it can't see: a policy not in force, a grant for another purpose, what a swap buys, a
- * public, duplicate, unfunded or over-cap payout, a changed plan, a swap under the strategy's cash floor, and, before the owner signs, a release the
+ * only what it can't see: a policy not in force, a grant for another purpose, what a swap or order acquires, a
+ * public, duplicate, unfunded or over-cap payout, a changed plan, a swap or resting order under the strategy's cash floor, and, before the owner signs, a release the
  * policy no longer allows. Pure: the caller reads the facts, this decides. Facts are typed per purpose, so
  * missing evidence is a type error, never a skipped rule.
  */
@@ -132,7 +132,7 @@ export function authorize(action: Action, c: Case): Refusal | null {
       return refuse("grant_purpose_denied", `A "${grant.label}" grant does not allow ${purpose} sends`);
   }
 
-  // The provider checks only what a swap spends, so what it buys is checked here, for every purpose.
+  // The provider checks what a swap or limit order spends, so what it acquires is checked here.
   const buys = outputAssetRefusal(action, policy);
   if (buys) return refuse("asset_out_not_allowed", buys);
 
@@ -235,6 +235,11 @@ export function authorize(action: Action, c: Case): Refusal | null {
     // Only a payout request withdraws.
     if (action.method === "withdraw") return refuse("withdraw_not_allowed", "Only a payout request withdraws");
     const { plan: sending, strategy, tokens } = c.facts;
+    if (action.method === "limit_order") {
+      if (c.purpose === "autopilot") return refuse("order_requires_owner_signature", "A limit order needs the owner's signature over its exact terms");
+      if (strategy.cashFloor) return refuse("cash_floor_order_unsupported", "A resting order cannot be placed while the strategy has a cash floor");
+      if (sending) return refuse("order_not_plan_bound", "A limit order uses its own signed proposal, not a swap plan");
+    }
     // Under a cash floor, a swap without a plan-bound valuation can't be counted against it.
     if ((c.purpose === "autopilot" || strategy.cashFloor) && action.method === "swap" && sending?.leg.type !== "swap")
       return refuse("valuation_unavailable", c.purpose === "autopilot" ? "An automatic swap needs a plan-bound valuation"

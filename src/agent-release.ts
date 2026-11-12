@@ -12,6 +12,8 @@ import { paymentKey } from "./market/payment-key.js";
 import { hasUnprovenMarketFunding } from "./market/binding-guard.js";
 import { ASSETS } from "./policy.js";
 import { releaseBalance, releaseCheckOutput, releaseRefusal } from "./contract/agent-release.js";
+import { allProviderOrdersComplete, orderFinality, refreshTrackedOrder } from "./limit-orders/observe.js";
+import { assertSuccessfulOrderEvidence, orderProposalIds, readOrderFinal, readOrderPlacement } from "./limit-orders/store.js";
 
 const view = z.object({ near_account_id: z.string().min(1), source: z.enum(["public", "confidential"]), balances: z.array(z.object({ asset_id: z.string(), balance_raw: z.string().regex(/^[0-9]+$/) })) });
 const near = new Near(mainnet);
@@ -49,6 +51,24 @@ export function prepareRelease(input: { agentId: string; owner: string; allowBal
       if (ops.some(isHeld)) return refused("held");
       const actions = ownerActions();
       if (actions.some(a => a.phase === "open" || a.phase === "submitted")) return refused("owner_action");
+      // A funded placement can keep filling after archive or freeze. Even an explicit balance
+      // override cannot release hosting while a tracked or listed order lacks final payout
+      // evidence. The provider list may lag, so external orders still need operator review.
+      try {
+        assertSuccessfulOrderEvidence(ops);
+        for (const id of orderProposalIds()) {
+          const final = readOrderFinal(id);
+          if (final?.state !== "claimed") continue;
+          const placed = readOrderPlacement(id);
+          if (!placed) {
+            const op = ops.find(o => o.idempotencyKey === final.operationKey);
+            if (!op || op.status === "SUCCESS" || blocksDispatch(op)) return refused("limit_orders");
+            continue;
+          }
+          if (orderFinality(await refreshTrackedOrder(id)) !== "complete") return refused("limit_orders");
+        }
+        if (!(await allProviderOrdersComplete())) return refused("limit_orders");
+      } catch { return refused("limit_orders"); }
       const balances: z.output<typeof releaseBalance>[] = [];
       for (const [source, raw] of [["public", open], ["confidential", confidential]] as const) {
         const read = view.parse(raw);
