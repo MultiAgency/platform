@@ -12,7 +12,11 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
-## 0.5.9 (2026-11-12)
+## 0.5.9 (unreleased)
+
+- **Final receipt completeness:** omitted receipt bodies are recovered by exact RPC ID only from outcomes
+  already named by the final transaction (at most 16). IDs and executors must match; unavailable or conflicting
+  evidence retains `funding_review`. This does not qualify the deployed Market route.
 
 - DAO consents admit `payout`; app setup admits Payables and `agent_create` role `payout`.
   On a Payables agent, payout consent covers preparing its payout grant, revocation, policy edits,
@@ -26,6 +30,80 @@ platform-only fixes are listed separately.
   settlement, clean database handoff to a separate process, and wallet jobs. This is not SIGKILL,
   provider-response-loss, deployed-host or mainnet evidence. The tested artifact predates this changelog
   entry; publication needs a fresh committed release artifact and its release checks.
+
+- **DAO hire filing can resume a pending proposal:** `daoHires.file` with the same request ID and terms returns
+  `repeated: true` with null transactions by default, preserving the older SDK's safe behavior. After checking the
+  DAO for prior submission, the app may repeat with `recoverProposal: "dao-checked"` to recover the original proposal.
+  The app must never replay `proposalAndVote`, whose proposal ID may have moved. A request whose signed approval expired without being relayed
+  can be filed anew with the same terms. A proposal under an ended consent or changed signer is never recovered.
+  The original proposal bond is retained in a private sidecar so the strict 0.5.7 DAO request reader can still load
+  the request before any version 3 money journal entry. This extends the
+  0.5.7 request-ID behavior; offline-tested
+  (`test/app-dao.test.ts`).
+
+- **Market hire funding is bound before a top-up** (addition; offline-tested; no platform mainnet hire observation):
+  `market/hire` durably binds the caller, `requestId`, brief, approved terms and payment key before funding. The
+  opening and USDC stages have deterministic identities, so a retry follows the recorded withdrawal. A changed hire
+  under the same ID refuses `request_conflict` even when no x402 payment was prepared. `market/status` can now answer
+  `funding` or `funding_review` for a bound hire without a payment; `not_found` means no binding or payment exists.
+  `funding_review` includes provider `SUCCESS` without final destination proof and `UNKNOWN`/`UNCERTAIN`; status
+  can still retry read-only proof reconciliation. It also covers a lost funding acceptance reply with no provider
+  correlation to poll; that attempted stage needs reviewed recovery and cannot be resubmitted. A destination
+  transaction cannot prove two funding stages.
+  **Breaking for exhaustive switches:** these are new `marketHireOutput.state` values. If verified USDC funding
+  still leaves the key below the approved price, the hire refuses `funding_shortfall` and retains the credit. Apps
+  should read `market/status` after a lost answer, show unresolved funding for review, and keep the same ID and terms when asking
+  a DAO for a fresh vote after its approval expires. Status can record receipt evidence after expiry without a new
+  money send; it does not resume an unsubmitted leg or resend an attempted x402 payment.
+
+- **Legacy funding refuses new hires:** a submitted 0.5.6, 0.5.7 or 0.5.8 market top-up has no request binding. The binding-capable host in this change
+  refuses further hires and sends to that payment key with stable code `legacy_funding_review_required`, even if its
+  provider status is terminal. Preserve its old key and records and account for retained funds and any pending
+  payment; new hires require a separately designed and reviewed procedure to provision an isolated fresh key.
+  No supported fresh-key recovery route, automatic rotation or clearance exists yet.
+
+- **DAO hire relay verification:** `APP_GATEWAY_CODES` adds `agent_answer_unverified` when the agent's reply cannot
+  establish a recorded hire state. The gateway leaves the signed approval available for another read instead of
+  marking it relayed. The SDK retains this validated code on an `AppRouteResult` of kind `unavailable` with HTTP 502;
+  read the same approval hash and hire request ID again without inferring whether money moved. A proxy error or an
+  unrecognized code remains plain `unavailable`. **Breaking for exhaustive switches:** this adds an `AppGatewayCode`
+  value and an optional `code` on `unavailable`.
+
+Platform changes in this unreleased version, outside the package:
+
+- **Hosted release retains unproven funding:** a submitted market top-up without final landing proof refuses
+  `unresolved`, including legacy unbound top-ups and provider `SUCCESS` with zero visible balances. `allowBalance`
+  does not bypass this check. Proven landed funds keep the existing explicit balance choice; the binding and proof
+  remain preserved for restoration. Offline-tested in `test/agent-release.test.ts`.
+
+- **Journal-history export names omitted market metadata:** version 3 binding and landing envelopes produce
+  `market_metadata_not_exported` gaps rather than `malformed_line`. The public record schema stays unchanged, private
+  terms are omitted, and neither envelope becomes payment evidence. Mixed or unsupported record shapes remain
+  malformed. Offline-tested in `test/journal-history.test.ts`.
+
+- **Key-wide funding reservation and receipt proof:** a submitted market top-up holds the payment key across hires
+  until an exact destination credit is verified from a final receipt and included by a later final chain view.
+  Landed funds remain reserved to that request until x402 is recorded or its binding is terminally closed, so a
+  new ID cannot consume them while the first hire waits for a fresh vote. A verified USDC shortfall closes that
+  binding with `funding_shortfall`, retaining the funds for review before a new request. Provider `SUCCESS`,
+  `FAILED`, `REFUNDED`, or a key balance is not sufficient proof. A locally proven never-submitted or refused stage
+  closes its binding's reservation; a provider `FAILED` or `REFUNDED` after submission does not. The provider's optional
+  destination transaction hash is needed for the normal proof path; hashless same-chain routes and receipt history
+  unavailable from ordinary RPC require reviewed recovery with independent archival evidence. There is no automatic
+  recovery yet. The new version 3 binding/landing journal lines add a rollback boundary: a 0.5.6, 0.5.7 or 0.5.8 executor
+  rejects that agent's journal after the first such line. Stop executors, inspect legacy 0.5.6 through 0.5.8 unbound
+  market top-ups and retained key balances before upgrade, and preserve the complete state and key; see [operations](operations.md).
+
+- **Public history preserves the combined journal boundary:** unsupported limit-order preparations and isolated
+  cancellation-final markers produce explicit omission gaps, without exposing private order terms or treating
+  cancellation acceptance as settlement. Mixed version 3 Market and version 2 cancellation records retain strict
+  validation. Offline-tested (`test/journal-history.test.ts`, `test/market-binding-journal.test.ts`).
+
+**Rollout hold:** this is a review candidate. Before starting a 0.5.9 market executor, stop all writers sharing its
+state and audit submitted 0.5.6 through 0.5.8 unbound top-ups, retained payment-key funds and pending x402 payments.
+Confirm the provider route supplies a destination transaction and independently verifiable final receipt; affected
+keys need a separately reviewed recovery design. No platform hire has been observed on mainnet. Exact candidate,
+package/consumer and image verification remain separate from these source checks.
 
 ## 0.5.8 (2026-11-11)
 
@@ -48,8 +126,8 @@ platform-only fixes are listed separately.
   rejection signatures so a DAO vote relay can reconcile a lost HTTP answer without signing or sending again. This
   feature is absent from the tagged 0.5.7 package. Its platform path has offline tests. The separate Treasury app
   [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records the exact frozen SDK package it tested,
-  its checksum and local consumer results. These change notes ship inside the package, so each later SDK source
-  commit requires a new candidate and exact app retest. App release, hosted route and live order lifecycle checks
+  its checksum and local consumer results. These change notes ship inside the package, so a package built from later
+  SDK source requires a new candidate and exact app retest. App release, hosted route and live order lifecycle checks
   remain open.
   See [limit orders](limit-orders.md).
 - **App host capability discovery** (addition): `appClient.capabilities()` reads the authenticated

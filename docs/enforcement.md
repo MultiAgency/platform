@@ -996,7 +996,7 @@ Limits:
   proposals are invalidated. The owner's own plans run without the floor. Read from the code, not tested.
 - A DAO's proposals are public, so a DAO's floor is public once its grant proposal is filed.
 
-### Market hires: the payment key (0.5.6, offline-tested)
+### Market hires: the payment key (0.5.6 and 0.5.7 released; 0.5.9 binding candidate)
 
 A market agent hires listed agents on the NEAR AI Agent Market over x402 ([agent market](market.md)). The provider
 enforces every send up to the agent's payment key: the market policy lets the agent `withdraw` only USDC and wNEAR,
@@ -1009,10 +1009,24 @@ USD budgets still count provider withdrawals, not the timing or sum of later pay
 A DAO's approval deadline is checked after asynchronous signing and before every new claim; expiry stops paid-call
 retries without resolving an already attempted payment. Earlier top-ups remain recorded even if the final payment is
 refused. These boundaries are offline-tested in `test/market-deadline.test.ts` and `test/market-signing-race.test.ts`.
-The x402 payment operation binds the caller's requestId to the approved terms. A top-up before payment preparation
-does not: if approval expires after funding, `market/status` can answer `not_found`, and another signed approval can
-use the same ID for different terms. The top-up remains in the money journal; apps must inspect it and the key's
-balance before another hire. A durable pre-funding request binding needs separate state and rollback coverage.
+The 0.5.9 candidate writes a version 3 binding of the caller, requestId, brief, approved terms and payment key before
+any top-up. The opening and USDC stages use fixed keys derived from it. Different terms with the same ID refuse
+`request_conflict` even before x402 preparation; `market/status` sees a bound request as `funding` or
+`funding_review`, not `not_found`. A submitted stage reserves the payment key across hires until a final destination
+receipt proves the exact credit and a later final chain view includes it. A lost funding acceptance reply with no
+provider correlation also answers `funding_review`; it cannot be polled or automatically replayed. Hosted release
+refuses submitted funding without final proof, including legacy unbound top-ups, even with zero balances and an
+explicit balance override. Proven landed funds retain the existing release balance choice and preserved binding.
+Landed funds remain reserved to the original
+request until its x402 payment is recorded or its binding is terminally closed; a new ID cannot spend them while an
+expired approval waits for a fresh same-ID vote. Provider `SUCCESS` alone, a balance increase, or a
+`FAILED`/`REFUNDED` status after submission is insufficient to release an unproven funding reservation. A locally
+proven never-submitted or refused stage closes its binding's reservation. The provider may report a
+delivered amount below the requested withdrawal; if verified USDC funding still leaves the key below the approved price, the hire
+refuses `funding_shortfall` while retaining the credited funds and closing that request's reservation.
+An expired DAO approval still permits status reads and recording receipt evidence without a new send, but continuing
+an unsubmitted leg needs a fresh signed vote on the same terms and ID. Neither the binding nor these checks turn a
+prior top-up into a payment or prove that a market task was delivered.
 The last leg, the key's signed `ft_transfer` to the market, is not the provider's: its
 payee, asset, amount and window are the platform's checks (the market's published payee, the exact terms approved,
 `authorize`'s `market` purpose), and a payment's outcome is read from the chain, never from the market's answer. What
@@ -1024,6 +1038,16 @@ A wNEAR top-up is capped at what opens the key's account (0.02 NEAR), whatever t
 only when the key's balance dropped by exactly its amount: anyone sending USDC to the payment key meanwhile turns a
 paid hire `unknown`, which blocks the agent's sends until a person reviews it. That fails safe; it can stall the agent,
 never pay twice.
+The normal funding proof needs the provider's optional destination transaction hash and final NEAR receipt data. A
+same-chain route may be hashless, and ordinary RPC can lose old receipt history before delayed reconciliation. Those
+cases need reviewed recovery with independent archival evidence; there is no automatic recovery or proof inferred from
+the provider's terminal status. Before a 0.5.9 executor starts on existing market state, stop executors and inspect
+legacy unbound top-ups and retained key balances as described in [operations](operations.md). A submitted 0.5.6 through 0.5.8
+top-up without a request binding causes `legacy_funding_review_required` on further hires and sends to that key,
+even if the provider calls it terminal. Preserve the old key and records; new hires require a separately designed
+and reviewed fresh-key recovery procedure after the old funds and any pending payment are accounted for. No
+supported recovery route or automatic rotation exists yet. Rollout remains held for the stopped-writer audit and a
+separately reviewed recovery design for affected keys.
 Two gaps: a paid call whose answer is lost after the market took it loses the task id, so the deliverable can't be
 fetched though the payment may settle (the payment itself still resolves from the chain); and the gateway can't tell
 a DAO's setup's area when it forwards `agent_create`, so a role the area doesn't bind is refused by the agent, not the gateway.
@@ -1193,7 +1217,7 @@ it does not establish:
   the agent is replaced, or while the owner's signing key is absent or not full-access on chain.
 
 
-### Hosted-agent release (0.5.6 candidate, offline- and stack-tested)
+### Hosted-agent release (0.5.6, offline- and stack-tested)
 
 The owner's provider archive is the authority to retire hosting; a separate explicit call under owner consent releases
 the slot. The executor rechecks archived/frozen provider evidence and every unresolved, held and open owner action under
@@ -1231,3 +1255,14 @@ identical text can produce another request/hash; saved-text reuse is not same-re
 Known IDs must be polled. This does not establish duplicate payout execution. DAO payout local
 acceptance does not cover SIGKILL recovery, provider-response loss, hosted member-wallet filing,
 actual quorum or mainnet settlement; see docs/app-access.md.
+
+
+### Final receipt completeness (0.5.9 candidate)
+
+The Market funding verifier does not discard unmatched receipt outcomes. If a final transaction omits receipt
+bodies, it reads at most 16 exact IDs already present in that transaction's outcomes and requires matching IDs
+and executors before checking credits. Missing, conflicting or unavailable bodies still refuse proof
+(`test/market-funding-proof.test.ts`, offline-tested). Two retained historical payout transactions replayed with
+exact separately captured receipt bodies on 2026-11-12; no Market-route deployment or new withdrawal is established.
+The deployed Market top-up route, external authority, retained balances and legacy-key recovery remain unverified;
+SDK package publication does not authorize a Market executor rollout or clear an affected key.

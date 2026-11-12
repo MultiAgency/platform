@@ -31,6 +31,9 @@ test('an app hires a listed agent through a market agent: paid once on delivery,
     expect(approved).toMatchObject({ handle: 'writer', amount: '500000', network: 'near:mainnet' });
     const hired = value(await agent.call('market/hire', { requestId: 'h-1', brief, approved }));
     expect(hired).toMatchObject({ requestId: 'h-1' });
+    expect(stack.simulated.requests.filter(request => request.path === '/chain' &&
+      request.body?.params?.method_name === 'ft_balance_of' && request.body.params.account_id?.startsWith('nep141:')),
+    'token balance reads use the raw contract account ID').toHaveLength(0);
     await expect.poll(async () => value(await agent.call('market/status', { requestId: 'h-1' })).state, { timeout: 30_000 }).toBe('paid');
     expect(value(await agent.call('market/status', { requestId: 'h-1' })).deliverable).toBe('the article');
     expect(value(await agent.call('market/account'))).toMatchObject({ opened: true, usdc: '0' });
@@ -53,6 +56,40 @@ test('an app hires a listed agent through a market agent: paid once on delivery,
     steps.push('market consent reaches no payout request');
   } finally {
     await info.attach('steps', { body: steps.join('\n'), contentType: 'text/plain' });
+    await stack.close();
+  }
+});
+
+test('a top-up with a mismatched final receipt cannot fund this or another hire', async ({}, info) => {
+  test.setTimeout(180_000);
+  const stack = await environment(info.outputPath('environment'), { headless: true, secondAccount: true, appSetup: ['payables', 'market'], market: true });
+  try {
+    const { app, ownerStep, consent, hostedAgent } = await connect(stack);
+    const name = await hostedAgent('org_1', 'market');
+    const created = value(await app.identity(name)).agentId;
+    await consent('org_1', name, ['owner', 'market', 'read']);
+    const agent = app.agent('org_1', name);
+    await ownerStep(agent, { type: 'grant_issue', label: 'market' });
+    stack.simulated.fund(created, 10_000_000n);
+    const account = value(await agent.call('market/account'));
+    stack.market.register(account.account);
+
+    const brief = 'An article\nWrite 300 words on NEAR Intents.';
+    const approved = value(await agent.call('market/quote', { handle: 'writer', brief }));
+    // The provider reports SUCCESS and the key is credited in the simulator, but the final receipt names a
+    // different account. A balance increase alone must never release this hire's funding reservation.
+    stack.market.mismatchNextFundingReceipt();
+    expect(value(await agent.call('market/hire', { requestId: 'h-bad-proof', brief, approved })).state).toBe('funding_review');
+    expect(value(await agent.call('market/status', { requestId: 'h-bad-proof' })).state).toBe('funding_review');
+    expect(value(await agent.call('market/hire', { requestId: 'h-bad-proof', brief, approved })).state).toBe('funding_review');
+    expect(value(await agent.call('market/hire', { requestId: 'h-other', brief, approved })).state).toBe('funding');
+
+    const withdrawals = stack.simulated.requests.filter(request => request.method === 'POST' && request.path.endsWith('/withdraw'));
+    expect(withdrawals, 'only the opening top-up was submitted').toHaveLength(1);
+    expect(withdrawals[0].body.asset).toBe('nep141:wrap.near');
+    expect(stack.market.calls.filter(call => call.payment !== null), 'neither hire sent an x402 payment').toHaveLength(0);
+    expect(stack.market.chain.accounts.get(account.account).transfers).toHaveLength(0);
+  } finally {
     await stack.close();
   }
 });

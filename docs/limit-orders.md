@@ -1,6 +1,6 @@
 # Treasury limit orders
 
-**Status (2026-11-11): SDK 0.5.8 source merged; platform rollout pending.** The tagged and published SDK 0.5.7 release does
+**Status (2026-11-12): SDK 0.5.8 tagged and published; platform rollout pending.** The tagged and published SDK 0.5.7 release does
 not expose limit-order spending. The new Treasury path has focused offline tests, but no order has been placed, filled,
 paid out, or canceled on mainnet through this platform. The production provider did not support the limit-order routes
 in the read-only check. Do not treat a dry preview or placement `SUCCESS` as a completed trade.
@@ -118,8 +118,8 @@ SDK source commit, frozen candidate, tarball checksum and local test results. It
 through a portable file alias. An independent npm download matched its vendored tarball byte for byte (SHA-256
 `844fae568516dbc8d377d6f8dcceb8177be8a92c134db545d024ac25cf45d254`). That local evidence does not establish
 a deployed app, provider behavior or live order outcome. Before app release, recheck the vendored package against
-the SDK release artifact and review the release dependency pin. Every later SDK source commit changes
-package provenance and requires a new candidate and exact consumer retest. The tagged and published SDK 0.5.7 lacks
+the SDK release artifact and review the release dependency pin. A package built from later SDK source has different
+provenance and requires a new candidate and exact consumer retest. The tagged and published SDK 0.5.7 lacks
 these routes.
 
 The tested consumer discovers `treasury-limit-orders-v1` through authenticated `appClient.capabilities()`

@@ -6,7 +6,7 @@ import { agentId, executes } from "./env.js";
 import { assertCanDispatch, assertMoneyLock, type MoneyLock, withMoneyLock } from "./lock.js";
 import { mandateDigest, type ReviewedPolicy } from "./mandate.js";
 import { recipientState, registrationFor } from "./recipients.js";
-import { AuthorizationHeld, claimSubmission, heldOutgoing, isHeld, provenRefusal, readOps, record, submittedSwapValues } from "./ops.js";
+import { AuthorizationHeld, claimSubmission, heldOutgoing, isHeld, marketStageKey, provenRefusal, readMarketBindings, readOps, record, submittedSwapValues, type MarketStage } from "./ops.js";
 import { recordSubmissionEvidence } from "./submission-evidence.js";
 import { authorize, notInForce, type Case, type Purpose } from "./authorize.js";
 import type { Plan, PlannedAction } from "./plans.js";
@@ -23,9 +23,10 @@ import { contractOf } from "./chain.js";
 import { payees } from "./market/client.js";
 import { recordTask } from "./market/evidence.js";
 import { paidHire, PaymentNotSubmitted, signedPayment } from "./market/pay.js";
+import { legacyMarketFunding, pendingMarketFunding } from "./market/binding-guard.js";
 import { paymentKey } from "./market/payment-key.js";
 import { readChainView } from "./market/resolution.js";
-import { publishedPayee, type HireTerms, type X402Request } from "./market/x402.js";
+import { OPEN_ACCOUNT_WNEAR, publishedPayee, sameTerms, termsOf, type HireTerms, type X402Request } from "./market/x402.js";
 import { approvalExpired } from "./market/approval.js";
 import { calculateLimitOrderSpend, assertLimitOrderPreviewSpend } from "./limit-orders/terms.js";
 import { cancellationClaimPhase, claimOrderCancellation, claimOrderProposal, loadOrderProposal, readOrderApproval,
@@ -58,7 +59,7 @@ type X402Action = Extract<Action, { method: "x402" }>;
 /** A market hire's payment, taken by the market: its identity on chain and the task it pays for. Its outcome is the chain's. */
 export type X402Sent = { paymentId: string; taskId: string; state: string };
 /** The hire a market send is for, as approved: what its payment must pay and its top-up may fund. */
-export type MarketSend = { hire: HireTerms; approvalExpiresAt?: number };
+export type MarketSend = { hire: HireTerms; bindingKey: string; stage?: MarketStage; approvalExpiresAt?: number };
 
 /** First submissions only. Remote deduplication semantics are not assumed. */
 const FIRST_SUBMISSION = Symbol("first submission in this dispatch");
@@ -200,6 +201,42 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action | C
   // send in this run may have become unresolved, or ownership may have been lost during the reads above.
   assertCanDispatch(lock);
   const priorOps = readOps();
+  // A market top-up is tied to the hire before funding, and no send may overlap an unproved credit to this shared key.
+  // This check is at the dispatch boundary, so another internal caller cannot bypass the hire's binding.
+  if (market) {
+    const binding = readMarketBindings().find(item => item.idempotencyKey === market.bindingKey);
+    const currentKey = paymentKey();
+    if (!binding || !key || binding.paymentAccount !== key.account || binding.publicKey !== key.publicKey ||
+        binding.paymentAccount !== currentKey.account || binding.publicKey !== currentKey.publicKey ||
+        !sameTerms(binding.approved, market.hire))
+      throw new LocalRefusal("market_binding_mismatch", "This market send has no matching durable hire and payment key. Nothing was sent.");
+    // A locally refused funding stage closes this hire, even after policy changes make another stage or payment
+    // otherwise sendable. Its released key may serve a different request, never a continuation of the closed one.
+    if (binding.refused || priorOps.some(op => op.refused !== undefined &&
+        (op.idempotencyKey === marketStageKey(binding.idempotencyKey, "open") ||
+         op.idempotencyKey === marketStageKey(binding.idempotencyKey, "usdc"))))
+      throw new LocalRefusal("market_binding_closed", "This hire's funding ended in a recorded refusal. Use its status; no further payment was sent.");
+    if (action.method === "withdraw") {
+      if (!market.stage || requestKey !== marketStageKey(binding.idempotencyKey, market.stage) ||
+          action.request.recipient !== binding.paymentAccount ||
+          action.request.asset !== (market.stage === "open" ? ASSETS.wNEAR : ASSETS.USDC) ||
+          (market.stage === "open" && action.request.amount !== OPEN_ACCOUNT_WNEAR))
+        throw new LocalRefusal("market_binding_mismatch", "This top-up does not match its bound funding stage. Nothing was sent.");
+    } else if (action.method === "x402") {
+      if (market.stage || requestKey !== binding.idempotencyKey || action.request.payer !== binding.paymentAccount ||
+          action.request.publicKey !== binding.publicKey || action.request.brief !== binding.brief ||
+          !sameTerms(binding.approved, termsOf(action.request)))
+        throw new LocalRefusal("market_binding_mismatch", "This payment does not match its bound hire. Nothing was sent.");
+    } else throw new LocalRefusal("market_binding_mismatch", "This action is not a bound market send. Nothing was sent.");
+    if (pendingMarketFunding(binding.paymentAccount, binding.idempotencyKey))
+      throw new LocalRefusal("funding_pending", "This payment key is reserved by another hire or an unproved top-up. No market payment or funding was sent.");
+    if (legacyMarketFunding(binding.paymentAccount))
+      throw new LocalRefusal("legacy_funding_review_required", "This payment key has an older unbound top-up. Preserve it for reviewed recovery. Nothing was sent.");
+  }
+  if (payee && !market && legacyMarketFunding(payee))
+    throw new LocalRefusal("legacy_funding_review_required", "This payment key has an older unbound top-up. Preserve it for reviewed recovery. Nothing was sent.");
+  if (payee && !market && pendingMarketFunding(payee))
+    throw new LocalRefusal("funding_pending", "This payment key is reserved by an earlier hire's funding. No payment to it was sent.");
   if (preparedKey && requestKey) throw new Error("An operation has one identity");
   // A request's key was already recorded once: `record` refuses a second preparation, before anything is sent.
   const idempotencyKey = preparedKey ?? requestKey ?? `${kind}:${createIdempotencyKey()}`;
@@ -243,7 +280,7 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action | C
     : "treasury";
   // A payout request is a payout, judged as one, or nothing: under a grant for other work it would skip the payout checks.
   // A hire's payment carries its request's identity too, and is judged as a market send.
-  if (requestKey && purpose !== "payout" && !(purpose === "market" && action.method === "x402"))
+  if (requestKey && purpose !== "payout" && !(purpose === "market" && (action.method === "x402" || action.method === "withdraw" && !!market?.stage)))
     refuseLocally("grant_purpose_denied", "A payout request is sent only under a payout grant; this agent's grant is for other work.");
   const common = { now, agentId: agentId(), view, grant };
   const held = priorOps.filter(isHeld);

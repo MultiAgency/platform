@@ -172,7 +172,10 @@ export async function provider(directory, { treasury = false, account = OWNER, p
     execution_outcome: { outcome: { status: { SuccessValue: '' }, logs: [`EVENT_JSON:${JSON.stringify({ standard: 'nep141', version: '1.0.0', event: 'ft_transfer',
       data: [{ old_owner_id: 'funder.near', new_owner_id: c.address, amount: c.amount }] })}`] } } }] });
   const status = payment => ({ correlation_id: payment.correlation, agent_id: payment.agent, type: payment.type ?? 'transfer', status: payment.status,
-    created_at: payment.at, updated_at: payment.at, failure_code: payment.failure ?? null, details: { approval_id: payment.approval, ...payment.details } });
+    created_at: payment.at, updated_at: payment.at, failure_code: payment.failure ?? null, details: { approval_id: payment.approval, ...payment.details,
+      ...(payment.destinationTxHash && { amount_out: payment.amountOut, destination_tx_hash: payment.destinationTxHash,
+        request: { asset: payment.body.asset, amount: payment.body.amount, chain: payment.body.chain,
+          recipient: payment.body.recipient, confidential: payment.body.confidential } }) } });
   // A held withdrawal's approval, as observed on mainnet (2026-10-30, docs/enforcement.md): `request_data` adds `chain` and
   // `destination_asset` (here the token withdrawn); the hash is the transfer's with `flow` `withdraw`, without `destination_asset`.
   const approval = payment => {
@@ -206,9 +209,12 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         return json(res, { account_txs: daoVotes.filter(v => body.account_id === DAO && v.height >= (body.from_tx_block_height ?? 0))
           .map(v => ({ transaction_hash: v.hash })), resume_token: null });
       if (url.pathname === '/fastnear/v0/transactions')
-        return json(res, { transactions: [...daoVotes.filter(v => body.tx_hashes.includes(v.hash)).map(v => ({ receipts: [{ execution_outcome: { outcome: { status: {
-          SuccessValue: Buffer.from(JSON.stringify({ scheme: 'Ed25519', signature: [...v.signature] })).toString('base64') } } } }] })),
-          ...[{ depositTransactions }, ...peers].flatMap(p => p.depositTransactions(body.tx_hashes))] });
+        return json(res, { transactions: [
+          ...daoVotes.filter(v => body.tx_hashes.includes(v.hash)).map(v => ({ receipts: [{ execution_outcome: { outcome: { status: {
+            SuccessValue: Buffer.from(JSON.stringify({ scheme: 'Ed25519', signature: [...v.signature] })).toString('base64') } } } }] })),
+          ...[{ depositTransactions }, ...peers].flatMap(p => p.depositTransactions(body.tx_hashes)),
+          ...body.tx_hashes.map(hash => market?.indexedFunding(hash)).filter(Boolean),
+        ] });
       if (url.pathname === '/chain' && body.method === 'status')
         return json(res, { jsonrpc: '2.0', id: body.id, result: { version: { version: 'local', build: 'local' }, chain_id: 'mainnet',
           genesis_hash: '11111111111111111111111111111111', protocol_version: 1, latest_protocol_version: 1, rpc_addr: 'local', node_public_key: PUBLIC_KEY,
@@ -217,6 +223,8 @@ export async function provider(directory, { treasury = false, account = OWNER, p
             latest_block_time: new Date().toISOString(), syncing: false } } });
       if (url.pathname === '/chain') {
         const { params, id: requestId } = body;
+        const fundingProof = market?.proofRequest(body);
+        if (fundingProof) return json(res, fundingProof);
         if (params.request_type === 'view_access_key' && [account, ...payees, ...accounts].includes(params.account_id) && params.public_key === PUBLIC_KEY)
           return json(res, { jsonrpc: '2.0', id: requestId, result: { nonce: 1, permission: 'FullAccess', block_height: 1, block_hash: '11111111111111111111111111111111' } });
         const view = result => json(res, { jsonrpc: '2.0', id: requestId, result: { result: [...Buffer.from(JSON.stringify(result))], logs: [], block_height: 1, block_hash: '11111111111111111111111111111111' } });
@@ -355,9 +363,11 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         if (BigInt(body.amount) > BigInt(agent.policy.limits.per_transaction[body.asset]) || (body.asset === USDC && BigInt(body.amount) > agent.funded - spent(agent))) throw new Error('Withdrawal exceeds policy limit or funded balance');
         // A market agent's top-up isn't held: it lands on its payment key at once (wNEAR opens the key's account).
         if (isMarket(agent)) {
-          const payment = { type: 'withdraw', agent: agent.id, body, key: entry.key, correlation: randomUUID(), approval: null, status: 'SUCCESS', at: new Date().toISOString() };
+          if (!market) throw new Error('Market funding needs a simulated chain');
+          const { amountOut, destinationTxHash } = market.fundWithdrawal({ recipient: body.recipient, asset: body.asset, amount: body.amount });
+          const payment = { type: 'withdraw', agent: agent.id, body, key: entry.key, correlation: randomUUID(), approval: null,
+            status: 'SUCCESS', amountOut, destinationTxHash, at: new Date().toISOString() };
           transfers.push(payment);
-          market?.fund(body.recipient, body.asset === USDC ? body.amount : '0');
           return json(res, { correlation_id: payment.correlation });
         }
         if (nextPayoutRefusal) { const { code, status: refused } = nextPayoutRefusal; nextPayoutRefusal = null; return refusal(res, refused, code, PAYOUT_REFUSALS[code], 'Refused by the simulated provider'); }

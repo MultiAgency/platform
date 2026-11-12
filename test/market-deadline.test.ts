@@ -12,8 +12,9 @@ const sim = await market({ agents: {
 Object.assign(process.env, { MARKET_URL: sim.url, NEAR_RPC_URL: sim.rpc, AGENT_GRANT_TOKEN: "ngt_fixture", HOSTED_OWNER_KIND: "dao" });
 const { api } = await import("../src/api.js");
 const { approveHire, hireStatus, quoteHire } = await import("../src/market/hire.js");
+const { fundingProof } = await import("../src/market/funding-proof.js");
 const { hireText } = await import("../src/contract/market.js");
-const { readOps } = await import("../src/ops.js");
+const { claimSubmission, readMarketBindings, readOps, record } = await import("../src/ops.js");
 const { ASSETS, marketPolicy } = await import("../src/policy.js");
 const { authorityFixture, fixtureGrant, policyView, timedPrices } = await import("./fixtures/authority.js");
 const { freshDirectory } = await import("./fixtures/harness.js");
@@ -22,6 +23,7 @@ const context = { actor: APP, host: HOST };
 const daoKey = generateKey().secretKey;
 const owner = { type: "near" as const, account_id: "dao-owner.near", public_key: parseKey(daoKey).publicKey.toString() };
 let key: string, withdrawals: { asset: string; amount: string; recipient: string }[], paidBefore: number;
+let fundingProofAvailable: boolean;
 freshDirectory("market-deadline");
 after(() => sim.close());
 beforeEach(context => {
@@ -32,6 +34,7 @@ beforeEach(context => {
   key = Buffer.from(parseKey(secret).publicKey.data).toString("hex");
   sim.register(key);
   withdrawals = [];
+  fundingProofAvailable = true;
   paidBefore = sim.calls.filter(c => c.payment !== null).length;
   for (const [name, method] of Object.entries(authorityFixture())) t.mock.method(api, name as keyof typeof api, method as never);
   t.mock.method(api, "getAgent", async () => ({ id: process.env.AGENT_ID!, owner }));
@@ -39,7 +42,13 @@ beforeEach(context => {
   t.mock.method(api, "getPolicy", async () => policyView(marketPolicy(key)));
   t.mock.method(api, "getTokens", async () => timedPrices([{ asset_id: ASSETS.USDC, symbol: "USDC", decimals: 6, price: 1 },
     { asset_id: ASSETS.wNEAR, symbol: "wNEAR", decimals: 24, price: 2 }]));
-  t.mock.method(api, "getStatus", async (correlation_id: string) => ({ correlation_id, status: "SUCCESS" }));
+  t.mock.method(api, "getStatus", async (correlation_id: string) => {
+    const withdrawal = withdrawals[Number(correlation_id.replace("top-up-", "")) - 1];
+    return { correlation_id, type: "withdraw", status: "SUCCESS", details: withdrawal
+      ? { destination_tx_hash: "2".repeat(44), amount_out: withdrawal.amount } : {} };
+  });
+  t.mock.method(fundingProof, "verify", async (input: { destinationTxHash?: string | null; recipient: string; asset: string; amount: string }) =>
+    fundingProofAvailable ? { ...input, destinationTxHash: input.destinationTxHash!, blockHeight: sim.chain.height.toString() } : null);
   t.mock.method(api, "forGrant", () => ({ withdraw: async (_id: string, request: { asset: string; amount: string; recipient: string }) => {
     withdrawals.push(request);
     sim.fund(request.recipient, request.asset === ASSETS.USDC ? request.amount : "0");
@@ -111,6 +120,44 @@ test("expiry during finality after the opening top-up prevents a second top-up a
   assert.equal(paidCalls(), 0);
   assert.equal(readOps().find(op => op.correlationId)?.status, "SUCCESS");
   assert.doesNotMatch(result instanceof Error ? result.message : JSON.stringify(result), /nothing was sent|nothing took effect/i);
+});
+
+test("status proves a top-up after approval expiry; only a fresh same-terms vote resumes payment", async t => {
+  sim.fund(key, "0");
+  fundingProofAvailable = false;
+  const input = await approval("proof-after-expiry", "writer", BRIEF, 1_000);
+  const first = await attempt(input) as { state: string };
+  assert.equal(first.state, "funding_review");
+  assert.equal(withdrawals.length, 1);
+  assert.equal(paidCalls(), 0);
+  t.mock.timers.tick(2_000);
+  fundingProofAvailable = true;
+  assert.equal((await hireStatus(APP, input.requestId)).state, "funding_review");
+  expired(await attempt(input));
+  assert.equal(paidCalls(), 0);
+  const other = await approval("other-while-reserved", "writer", BRIEF, 10_000);
+  assert.equal((await attempt(other) as { state: string }).state, "funding");
+  assert.equal(withdrawals.length, 1, "another request cannot consume the first hire's landed funds");
+  assert.equal(paidCalls(), 0);
+  const renewed = await approval(input.requestId, "writer", BRIEF, 10_000);
+  assert.equal((await attempt(renewed) as { state: string }).state, "unknown");
+  assert.equal(withdrawals.length, 1, "the earlier top-up is never resubmitted");
+  assert.equal(paidCalls(), 1);
+});
+
+test("a prior unbound top-up to this key blocks new hires before a binding or send", async () => {
+  sim.fund(key, "500000");
+  const request = { asset: ASSETS.USDC, amount: "500000", chain: "near", recipient: key, confidential: true };
+  const legacyKey = "market-topup:old-random-id";
+  record({ at: new Date().toISOString(), idempotencyKey: legacyKey, kind: "market-topup", method: "withdraw",
+    journalVersion: 2, request });
+  claimSubmission(legacyKey, request);
+  record({ idempotencyKey: legacyKey, correlation_id: "old-top-up", status: "SUCCESS" });
+  const result = await attempt(await approval("after-legacy", "writer", BRIEF, 10_000));
+  assert.equal((result as { data?: { code?: string } }).data?.code, "legacy_funding_review_required");
+  assert.equal(readMarketBindings().length, 0);
+  assert.equal(withdrawals.length, 0);
+  assert.equal(paidCalls(), 0);
 });
 
 test("DAO approval expiring during final delegate signing prevents the claim and paid POST", async t => {

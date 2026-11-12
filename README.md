@@ -158,7 +158,7 @@ Each line is a gap; the linked page says how the rest is known. The
   ([platform production](docs/platform-production.md)). Mainnet-observed on staging: confidential USDC payouts (2026-10-28) and
   withdrawals of wNEAR or USDC to agreed NEAR accounts (2026-10-30), and DAO-owned agents (below) ([mainnet log](docs/mainnet-log.md)).
   Approving a held withdrawal is offline- and stack-tested, not mainnet-observed, and its signature doesn't bind
-  `destination_asset` ([enforcement](docs/enforcement.md)); at most 32 reserved hosted agents per host, and at most 16 Organization agents per app deployment on a host. Wallet-owned reservations can be explicitly released in the 0.5.6 candidate after owner-signed archive (offline- and stack-tested, not deployed; [release](docs/agent-release.md)); DAO release remains unimplemented (#46). A dishonest app can still get a blind NEP-366 signature
+  `destination_asset` ([enforcement](docs/enforcement.md)); at most 32 reserved hosted agents per host, and at most 16 Organization agents per app deployment on a host. Wallet-owned reservations can be explicitly released since 0.5.6 after owner-signed archive (offline- and stack-tested, with no mainnet observation through this platform; [release](docs/agent-release.md)); DAO release remains unimplemented (#46). A dishonest app can still get a blind NEP-366 signature
   by having the owner sign the confirm link's text on its own page; a held payout's vote text names no payee or amount,
   so the app's display is the only place the owner sees them; an owner who signs the platform's sign-in text on an
   app's page gives it a full session; a service credential is a bearer. See [app access](docs/app-access.md).
@@ -172,12 +172,12 @@ Each line is a gap; the linked page says how the rest is known. The
   configuration (`deploy/platform.json`) doesn't set up Treasury agents yet; staging's does. A proposal's approval is the platform's check, not the provider's: whoever holds
   the treasury grant can swap within the policy without it. Held swaps aren't used: what their vote commits to is
   unobserved ([enforcement](docs/enforcement.md#treasury-proposals-offline--and-stack-tested)).
-- Treasury limit orders are in the 0.5.8 SDK source, with platform rollout pending. They require an owner-signed policy opt-in, one exact
+- Treasury limit orders shipped in the tagged and published 0.5.8 SDK, with platform rollout pending. They require an owner-signed policy opt-in, one exact
   signature from the owner per order and a new `treasury-orders` app consent. The default policy still leaves them off. Its local
   placement, cancellation and recovery paths have offline tests. The separate Treasury app
   [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records local consumer tests against an exact
-  0.5.8 candidate package, including authenticated capability discovery and guarded continuation of a proven-unsent
-  cancellation. Every later SDK source commit changes package provenance and requires a matching app retest before
+  published 0.5.8 package, including authenticated capability discovery and guarded continuation of a proven-unsent
+  cancellation. A package built from later SDK source has different provenance and needs a matching app retest before
   release. The tagged and published 0.5.7 SDK does not contain these order routes.
   No live placement, fill or payout check has been completed. The demo provider answered authenticated dry previews
   on 2026-11-10; production did not expose these routes in that read-only check ([limit orders](docs/limit-orders.md)).

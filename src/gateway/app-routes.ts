@@ -2,6 +2,7 @@ import { releaseInput, appReleaseOutput } from "../contract/agent-release.js";
 import type { HostedAgents } from "./hosted-agents.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { daoPolicy } from "../chain.js";
+import { proposalTransaction } from "../dao-owner.js";
 import { z } from "zod";
 import type { Area } from "../contract/areas.js";
 import { readJson, sendJson as json } from "../http.js";
@@ -24,7 +25,7 @@ import { marketHireOutput } from "../contract/owner-outputs.js";
 import { createHash } from "node:crypto";
 import type { Router } from "../router.js";
 import { agentOrigin } from "./agent-origin.js";
-import { chainDaoVotes, daoConsent, type DaoConsentRequest, type DaoFiled, type DaoRequest, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoHire, publicDaoOrder, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
+import { chainDaoVotes, daoConsent, type DaoConsentRequest, type DaoFiled, type DaoRequest, DaoHireFilingUnavailable, DaoRequests, daoSetupConsent, type DaoVotes, publicDaoHire, publicDaoOrder, publicDaoRequest, publicDaoSetup, publicDaoVote, verifyDaoConsentText, verifyDaoSetupText } from "./app-dao.js";
 import { AuthorityUnanswered, chainDaoOwner, type DaoOwnerReads, resolveDaoAuthority, resolveWalletAuthority } from "./machine-authority.js";
 import { forwardRpc } from "./rpc-proxy.js";
 import { issueNonce, nonceIssuedAt } from "./consent-nonce.js";
@@ -33,6 +34,7 @@ import { fairShare, type Decision } from "./fair-share.js";
 import { setupRequest } from "./hosted-agents.js";
 
 const ROOT = ".app-access";
+class AppAccessEnded extends Error {}
 const credentials = new AppCredentials(ROOT), consents = new AppConsents(ROOT);
 export const confirms = new AppConfirms(ROOT);
 export const APP_ROOT = ROOT;
@@ -61,7 +63,8 @@ const reservationQuery = z.strictObject({ organization: z.string().regex(/^[A-Za
 const daoConsentFiling = z.strictObject({ message: z.string().min(1).max(2_048) });
 /** A DAO's approval of one market hire, as an app asks for it: the terms it quoted, the brief, and how long the approval may last. */
 const daoHireFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), agent: z.string().regex(/^[a-z0-9-]{1,32}$/),
-  requestId: payoutRequestId, brief: marketBrief, approved: hireTerms, validUntil: z.iso.datetime() });
+  requestId: payoutRequestId, brief: marketBrief, approved: hireTerms, validUntil: z.iso.datetime(),
+  recoverProposal: z.literal("dao-checked").optional() });
 const daoVoteFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), agent: z.string().regex(/^[a-z0-9-]{1,32}$/),
   proposal: z.string().min(1).max(128), verdict: z.enum(["approve", "reject"]) });
 const daoOrderFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), agent: z.string().regex(/^[a-z0-9-]{1,32}$/),
@@ -106,6 +109,16 @@ export async function appRoutes(req: IncomingMessage, res: ServerResponse, pathn
   if (!pathname.startsWith("/apps/")) return false;
   try { return await route(req, res, pathname, host, selected, stopping, options); }
   catch (error) {
+    if (error instanceof AppAccessEnded) {
+      if (res.headersSent) res.destroy();
+      else json(res, 403, { code: "access_ended", error: "App access ended before filing. Nothing was filed." });
+      return true;
+    }
+    if (error instanceof DaoHireFilingUnavailable) {
+      if (res.headersSent) res.destroy();
+      else json(res, 503, { error: error.message });
+      return true;
+    }
     // An unanswered check decides nothing: the app reads again or resends the same body, never asks for a new signature.
     if (!(error instanceof AuthorityUnanswered)) throw error;
     if (res.headersSent) res.destroy();
@@ -153,7 +166,9 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   const daoSignature = async (record: DaoRequest, pending: () => object): Promise<Buffer | null> => {
     const followed = await daoRequests.follow(record);
     if (followed.state === "signed") return followed.signature;
-    if (followed.state === "expired") json(res, 410, { code: "signed_expired", error: `What the DAO signed expired at ${new Date(record.expiresAt).toISOString()}. Nothing was done; file it again.` });
+    if (followed.state === "expired") json(res, 410, { code: "signed_expired", error: record.kind === "hire"
+      ? `What the DAO signed expired at ${new Date(record.expiresAt).toISOString()}. Prior funding may remain on the payment key. Inspect market/status for requestId ${record.requestId}, then file a fresh vote with the same terms and same requestId.`
+      : `What the DAO signed expired at ${new Date(record.expiresAt).toISOString()}. Nothing was done; file it again.` });
     else if (followed.state === "lapsed") json(res, 410, { code: "vote_lapsed", error: `The DAO's vote didn't pass before ${new Date(record.votingUntil).toISOString()}. Nothing was done; file it again.` });
     else if (followed.state === "unreadable") json(res, 503, { error: "The DAO's proposals couldn't be read now. Nothing changed; read again." });
     else json(res, 200, pending());
@@ -592,32 +607,75 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     if (req.method !== "POST") { json(res, 405, { code: "invalid_request", error: "Use POST" }); return true; }
     const body = daoHireFiling.safeParse(await readJson(req));
     if (!body.success) { json(res, 400, { code: "invalid_request", error: "Send organization, agent, requestId, brief, approved (a market/quote answer) and validUntil." }); return true; }
-    const { organization, agent: name, requestId, brief, approved, validUntil } = body.data;
+    const { organization, agent: name, requestId, brief, approved, validUntil, recoverProposal } = body.data;
     if (createHash("sha256").update(brief).digest("hex") !== approved.brief) { json(res, 400, { code: "brief_mismatch", error: "The brief isn't the one these terms were quoted for. Nothing was filed." }); return true; }
-    const found = await daoAgent(name, organization, "market");
-    if ("error" in found) { json(res, 403, found); return true; }
-    const { agent, authority, consent } = found;
-    // One requestId, one hire (#70): an earlier filing with other terms refuses; one with the same terms that is relayed,
-    // signed or still within its vote is the answer, and nothing new is filed. One that lapsed unsigned may be filed again.
-    const earlier = daoRequests.hires(credential.deployment, organization, name, requestId);
-    if (earlier.some(r => r.brief !== brief || JSON.stringify(r.approved) !== JSON.stringify(approved))) {
-      json(res, 409, { code: "request_conflict", error: "This requestId was already filed with other terms. Nothing was filed." }); return true;
-    }
-    const current = earlier.find(r => r.relayed !== null || Boolean(r.signature) || r.votingUntil > Date.now());
-    // Nothing to file, so no transactions: an SDK reads the answer as before, with both left null.
-    if (current) { json(res, 200, { request: publicDaoHire(current), transactions: { proposal: null, proposalAndVote: null } }); return true; }
-    // The approval ends when the app asks, within the consent it is relayed under and Sputnik's default proposal period.
-    const until = Math.min(Date.parse(validUntil), consent.expiresAt, Date.now() + MAX_HIRE_APPROVAL_MS);
-    if (!Number.isFinite(until) || until <= Date.now() + 60_000) { json(res, 409, { code: "expires_too_soon", error: "This approval, or the consent it would be relayed under, ends too soon for a vote. Nothing was filed." }); return true; }
-    const ends = new Date(until).toISOString();
-    const filed = daoFiled(await daoRequests.file({ kind: "hire", deployment: credential.deployment, host: host.toLowerCase(), organization, dao: agent.owner,
-      agent: name, agentId: consent.agentId, requestId, approved, brief, validUntil: ends, under: consent.id, expiresAt: until,
-      message: hireText({ requestId, agentId: consent.agentId, deployment: credential.deployment, organization, approved, validUntil: ends }),
-      signer: { account_id: authority.signer.account_id, public_key: authority.signer.public_key } }, { bond: authority.policy.proposal_bond, stopping,
-      log: record => ({ deployment: credential.deployment, credential: credential.id, event: "dao-hire-filed", request: record.id,
-        consent: consent.id, organization, owner: agent.owner, agent: name, requestId }) }));
-    if (!filed) return true;
-    json(res, 201, { request: publicDaoHire(filed.record), transactions: filed.transactions }); return true;
+    await daoRequests.withHireFiling(credential.deployment, organization, name, requestId, async assertHeld => {
+      // Re-read the owner and live consent after waiting for another filer. The lock also covers the disk lookup below.
+      const found = await daoAgent(name, organization, "market");
+      if ("error" in found) { json(res, 403, found); return; }
+      const { agent, authority, consent } = found;
+      const accessLive = () => stillAuthorized() && consents.live({ deployment: credential.deployment, host, organization, agent: name }).some(c => c.id === consent.id);
+      if (!accessLive()) { json(res, 403, { code: "access_ended", error: "App access ended before filing. Nothing was filed." }); return; }
+      // An earlier filing with other terms refuses. A relayed request, or a live signed approval or vote, is answered
+      // again without filing. Funding may outlive approval, so an expired unrelayed request may get a fresh vote.
+      const earlier = daoRequests.hires(credential.deployment, organization, name, requestId);
+      if (earlier.some(r => r.brief !== brief || JSON.stringify(r.approved) !== JSON.stringify(approved))) {
+        json(res, 409, { code: "request_conflict", error: "This requestId was already filed with other terms. Nothing was filed." }); return;
+      }
+      const filingNow = Date.now();
+      const current = earlier.find(r => r.relayed !== null ||
+        (r.expiresAt > filingNow && (Boolean(r.signature) || r.votingUntil > filingNow)));
+      if (current) {
+        // A lost 201 may leave the app without the member's transaction. Legacy callers still get null: recovering
+        // a signable proposal requires an explicit request after the app checks the DAO for prior submission.
+        // A signed/relayed request gets no transaction, and old records without the original bond fail closed.
+        let proposal = null;
+        if (recoverProposal && !current.relayed && !current.signature && current.votingUntil > filingNow && current.expiresAt > filingNow) {
+          const originalConsentLive = () => consents.live({ deployment: credential.deployment, host,
+            organization, agent: name }).some(c => c.id === current.under);
+          if (current.host !== host.toLowerCase() || !originalConsentLive()) {
+            json(res, 409, { code: "consent_ended", error: "The original DAO hire consent or host is no longer live. No proposal was returned." }); return;
+          }
+          if (current.dao !== agent.owner || current.agentId !== authority.agentId ||
+              current.signer.account_id !== authority.signer.account_id ||
+              current.signer.public_key !== authority.signer.public_key) {
+            json(res, 409, { code: "agent_changed", error: "The DAO hire's original agent or signer changed. No proposal was returned." }); return;
+          }
+          const originalBond = daoRequests.hireProposalBond(current.id);
+          const followed = await daoRequests.follow(current);
+          // A credential, consent or filing lock can end during the chain read. Never return a signable proposal
+          // to a caller that lost access while we checked whether the original proposal was submitted.
+          assertHeld();
+          if (!accessLive()) throw new AppAccessEnded();
+          if (!originalConsentLive()) {
+            json(res, 409, { code: "consent_ended", error: "The original DAO hire consent ended during the chain read. No proposal was returned." }); return;
+          }
+          if (followed.state === "unreadable") {
+            json(res, 503, { error: "The DAO's vote couldn't be checked now. Retry the same requestId and terms." }); return;
+          }
+          const latest = daoRequests.read(current.id);
+          const afterRead = Date.now();
+          if (followed.state === "pending" && originalBond !== null && latest?.kind === "hire" &&
+              !latest.signature && !latest.relayed && latest.votingUntil > afterRead && latest.expiresAt > afterRead)
+            proposal = proposalTransaction(latest.dao, latest.id, latest.description, originalBond);
+        }
+        json(res, 200, { request: publicDaoHire(current), transactions: { proposal, proposalAndVote: null }, repeated: true }); return;
+      }
+      // The approval ends when the app asks, within the consent it is relayed under and Sputnik's default proposal period.
+      const until = Math.min(Date.parse(validUntil), consent.expiresAt, Date.now() + MAX_HIRE_APPROVAL_MS);
+      if (!Number.isFinite(until) || until <= Date.now() + 60_000) { json(res, 409, { code: "expires_too_soon", error: "This approval, or the consent it would be relayed under, ends too soon for a vote. Nothing was filed." }); return; }
+      const ends = new Date(until).toISOString();
+      const filed = daoFiled(await daoRequests.file({ kind: "hire", deployment: credential.deployment, host: host.toLowerCase(), organization, dao: agent.owner,
+        agent: name, agentId: consent.agentId, requestId, approved, brief, validUntil: ends, under: consent.id, expiresAt: until,
+        message: hireText({ requestId, agentId: consent.agentId, deployment: credential.deployment, organization, approved, validUntil: ends }),
+        signer: { account_id: authority.signer.account_id, public_key: authority.signer.public_key } }, { bond: authority.policy.proposal_bond, stopping,
+        assertHeld: () => { assertHeld(); if (!accessLive()) throw new AppAccessEnded(); },
+        log: record => ({ deployment: credential.deployment, credential: credential.id, event: "dao-hire-filed", request: record.id,
+          consent: consent.id, organization, owner: agent.owner, agent: name, requestId }) }));
+      if (!filed) return;
+      json(res, 201, { request: publicDaoHire(filed.record), transactions: filed.transactions, repeated: false });
+    });
+    return true;
   }
   const hireState = pathname.match(/^\/apps\/v1\/dao-hires\/([a-f0-9]{64})$/);
   if (hireState) {
@@ -646,7 +704,16 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     catch (error) {
       json(res, 409, { code: "agent_refused", error: `The agent refused the DAO's approval: ${error instanceof Error ? error.message : "refused"}. Reading again relays the same signature.` }); return true;
     }
-    const relayed = daoRequests.hireRelayed(record.id, marketHireOutput.safeParse(answer).data?.state ?? "unknown");
+    const parsed = marketHireOutput.safeParse(answer);
+    if (!parsed.success || parsed.data.requestId !== record.requestId || parsed.data.state === "not_found") {
+      json(res, 502, { code: "agent_answer_unverified", error: "The agent gave no recorded hire outcome. Reading again checks the same approval." }); return true;
+    }
+    if (parsed.data.state === "funding" || parsed.data.state === "funding_review") {
+      // Funding may still be pending or require review. Keep the signed approval available for another read;
+      // once it expires, daoSignature requires a new vote over the same hire terms.
+      json(res, 200, { state: "pending", request: publicDaoHire(record), hireState: parsed.data.state }); return true;
+    }
+    const relayed = daoRequests.hireRelayed(record.id, parsed.data.state);
     appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
       event: "dao-hire-relayed", request: record.id, consent: record.under, organization: record.organization, owner: record.dao, agent: record.agent,
       requestId: record.requestId });

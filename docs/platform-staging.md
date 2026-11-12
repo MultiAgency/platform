@@ -55,7 +55,7 @@ and owner-action review in [operations](operations.md#railway-infrastructure-as-
    services and variables) and add one empty service, `gateway`, with its own volume at `/data`, one replica,
    healthcheck `/health`.
 2. Variables: `DASHBOARD_FILE=/app/deploy/platform-staging.json` (host `api.dev.multiagency.ai`, `headless`, app setup
-   for Payables, no configured agents: every agent is a hosted agent created through app setup), `NEAR_INTENTS_AGENT_API_KEY` (a separate
+   for Treasury, Payables and Market, no configured agents: every agent is a hosted agent created through app setup), `NEAR_INTENTS_AGENT_API_KEY` (a separate
    key for staging from the same partner account, so it can be revoked without touching production's), `NEAR_INTENTS_AGENT_API_URL`,
    `FASTNEAR_API_KEY`, and a new `SESSION_SECRET`. No `DAO_ENV`, `PAYOUT_ENV` or `RESTORE_*`.
 3. After reviewed infrastructure apply and any required cutover, the owner deploys the release candidate's `platform`
@@ -355,15 +355,28 @@ which so far is offline- and stack-tested against simulated votes only (`test/ap
 - **Then update the docs:** the inventory and the docs' "offline- and stack-tested" for the DAO path change only for
   what this run observed.
 
-## A market hire on staging (prepared, not run)
+## A market hire on staging (rollout held; prepared, not run)
 
-User-run, on mainnet, with small amounts of the user's own USDC and NEAR; never scheduled. It shows the market path
-through the platform end to end ([agent market](market.md)): a market agent set up and created through an app, the
-owner's consent and grant, its payment key registered and funded, one x402 hire paid on delivery, and the payment's
-outcome read from the chain. The hire is of the user's own listed agent `multi` on market.near.ai, so the user also does
-the worker's step; the market's own behaviour was observed from the local prototype first (Spikes in market.md).
+**0.5.9 rollout remains held. Do not start a 0.5.9 market executor or run the live steps below.** First stop all
+writers sharing its state and audit submitted 0.5.6 through 0.5.8 unbound top-ups, retained payment-key funds and
+pending x402 payments, preserving the complete state and key as described in [operations](operations.md).
+The deployed provider route must supply a destination transaction and an independently verifiable final receipt;
+affected keys need a separately reviewed recovery design. The exact 0.5.9 package, consumer and image gates also
+remain open ([change notes](sdk-changes.md#059-unreleased)). These source checks do not clear the hold.
 
-**Before starting**
+While the hold remains, inspect the preserved records and, where the existing host supports it, read
+`market/status` with the original `requestId`. Do not start an executor just to obtain status or call `market/hire`
+to resume a request. Status may reconcile receipt evidence; it does not resume an unsubmitted funding leg or resend
+an attempted x402 payment.
+
+This is a prepared plan for an owner-run mainnet observation with small amounts of the owner's own USDC and NEAR;
+never scheduled. After the rollout hold is cleared, it would exercise the market path through the platform end to
+end ([agent market](market.md)): a market agent set up and created through an app, the owner's consent and grant,
+its payment key registered and funded, one x402 hire paid on delivery, and the payment's outcome read from the chain.
+That platform run has not occurred. The proposed hire would use the owner's listed agent `multi` on market.near.ai,
+so the owner would also perform the worker's step; the earlier observations used the local prototype (Spikes in market.md).
+
+**Before starting, only after the rollout review clears the hold**
 - Staging runs a `platform` package whose `deploy/platform-staging.json` lists `market` in `appSetup` (0.5.6 brings the
   market code; this file brings the area).
 - A credential for the platform's test deployment `staging` (step 5 above, with `staging` as the deployment name).
@@ -374,7 +387,8 @@ the worker's step; the market's own behaviour was observed from the local protot
   payment key's account with a 0.02 NEAR top-up).
 - No other staging run in progress.
 
-**Steps.** Record each step's UTC time and outcome.
+**Conditional future steps, only after the hold is cleared and the owner chooses to run them.** Record each step's
+UTC time and outcome.
 1. Start the stand-in: `PLATFORM_URL=https://api.dev.multiagency.ai PLATFORM_APP_CREDENTIAL=tap_… PLATFORM_DEPLOYMENT=staging
    ORGANIZATION=org_market pnpm exec tsx scripts/staging-app.ts`, open `http://127.0.0.1:4318/` and connect the wallet.
 2. Area `market`: "Sign setup text", then "Create the agent". Creation opens the confirm page: check it shows the market
@@ -391,23 +405,32 @@ the worker's step; the market's own behaviour was observed from the local protot
    above its minimum, before it expires). "Refresh view" until both show in the agent's balances.
 7. Call `market/quote` with `{"handle":"multi","brief":"Staging hire\nReply with OK."}`. Copy the answer: these are the
    terms the owner approves (price, the market's payee, the window).
-8. Call `market/hire` with `{"requestId":"s-1","brief":"Staging hire\nReply with OK.","approved":<the quote>}`. Expect
-   `state: "unknown"` with a `taskId`: the market took the payment. Its two top-ups (wNEAR to open the key's account, USDC
-   of exactly the price) settle first.
-9. As `multi`'s worker, in another terminal:
+8. Once authorized by that review, call `market/hire` once with
+   `{"requestId":"s-1","brief":"Staging hire\nReply with OK.","approved":<the quote>}`. It may first return `funding` or
+   `funding_review` without a `taskId`: a bound hire can have a recorded top-up before any x402 payment exists.
+   Follow the same `requestId` with `market/status`; stop for `funding_review` under the rules below. Provider
+   `SUCCESS` or a visible balance alone does not prove that funding landed. Only proceed to the worker step when
+   status reports the recorded payment's `taskId`; `unknown` describes an unsettled payment, not a completed hire.
+9. Only after that payment and `taskId` exist, as `multi`'s worker in another terminal:
    `cd ~/agencies/market && T=$(grep '^MARKET_AGENT_TOKEN=' .env | cut -d= -f2-)`, then
    `curl -sS "https://market.near.ai/v1/agents/me/assignments?status=all&limit=5" -H "authorization: Bearer $T" | jq '.assignments[] | {id: .assignment.assignmentId, status: .assignment.status, title: .job.title}'`;
    for the `in_progress` one titled "Staging hire",
    `curl -sS -X POST "https://market.near.ai/v1/assignments/<id>/submit" -H "authorization: Bearer $T" -H 'content-type: application/json' -d '{"deliverableMarkdown":"OK: staging hire delivered."}'`,
    then `unset T`. Its id should equal the `taskId` from step 8.
-10. Call `market/status` with `{"requestId":"s-1"}` until `state: "paid"`, with the deliverable. `market/account` then
-    shows `opened: true` and the key's USDC back at what it held before the top-up.
+10. Follow `market/status` with `{"requestId":"s-1"}` until a recorded payment is `paid`, with its deliverable, or a
+    stop rule applies. Compare `market/account` with the private before-run record, accounting separately for any
+    retained funding; a balance change does not replace the bound final receipt proof.
 
 **Stop rules**
 - Stop at anything step 2's confirm page shows that isn't the market policy.
-- While `market/status` reads `unknown`, never hire the same thing under a new `requestId`. If the worker doesn't deliver,
-  the payment expires unused after the window: `market/status` then reads `not_charged`.
-- A refusal (`state: "refused"`, or a `refused` result) sent nothing: read its `code` before anything else.
+- Stop at `funding_review`, including a lost funding acceptance reply or a provider outcome without final landing
+  proof. Preserve the original request, funding journal, evidence and payment key for review. Do not use a new ID,
+  rotate the key, clear its reservation or treat `allowBalance` as clearance.
+- While status reads `funding` or `unknown`, follow only the original `requestId`; never hire the same thing under a
+  new ID. Status does not resume an unsubmitted leg. If an unused x402 payment authorization expires, `not_charged`
+  concerns that payment only: it does not prove that earlier top-ups were absent or returned.
+- A refusal (`state: "refused"`, or a `refused` result) sends no new x402 payment, but earlier recorded top-ups may
+  remain retained. Read its `code` and the same request's status, and preserve that funding for review.
 
 **Record**
 - **In `docs/mainnet-log.md`:** each step with the UTC date and the deployment id.
