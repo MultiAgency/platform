@@ -109,21 +109,19 @@ agent receipt remains unknown, so preserve its claim and reconcile it before rem
 
 ### Treasury app consumer handoff
 
-Treasury app [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11), observed at signed commit
-`4793aea` on 2026-11-11, was checked locally against the unpublished SDK 0.5.8 tarball from platform candidate
-`a575d2ea` (source `8b2da58`, SHA-256 `8559e5fb37a576ea1a99924d0bfc7223aee2e8965b8ea4a3b24cb1d8530def50`):
-typecheck, 929/929 offline tests, 90/90 browser scenarios, frontend and evidence checks, and an isolated Docker build
-with two fresh starts, 38 runtime checks and six startup refusals. The app keeps SDK 0.4.0 for legacy consumers and
-vendors 0.5.8 through a portable file alias. PR #11 remains draft and neither app nor SDK is released. This is
-prior-candidate evidence: an SDK source change, including these packaged change notes, requires a new frozen tarball
-and a final-package consumer retest before release. Review the release dependency pin against the published artifact.
-The tagged and published SDK 0.5.7 lacks these routes.
+The separate Treasury app [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records its exact
+SDK source commit, frozen candidate, tarball checksum and local test results. Its owner-signed consumer keeps SDK
+0.4.0 for legacy flows and vendors the unpublished 0.5.8 package through a portable file alias. That local evidence
+does not establish a deployed app, provider behavior or live order outcome. Before app release, match its vendored
+package to the SDK release artifact and review the release dependency pin. Every later SDK source commit changes
+package provenance and requires a new candidate and exact consumer retest. The tagged and published SDK 0.5.7 lacks
+these routes.
 
 The tested consumer discovers `treasury-limit-orders-v1` through authenticated `appClient.capabilities()`
 (`GET /apps/v1/capabilities`). Failed or malformed reads keep order and consent controls closed in its local tests.
-The tagged 0.5.7 platform source lacks that route, so its host cannot advertise this order capability. Retest the
-consumer with the final 0.5.8 tarball before release. The advertised capability means that the host has the app
-route; it does not grant consent, prove the active agent release supports it, or establish provider order support.
+The tagged 0.5.7 platform source lacks that route, so its host cannot advertise this order capability. The advertised
+capability means that the host has the app route; it does not grant consent, prove the active agent release supports it,
+or establish provider order support.
 
 The app session reports a separate consent carrying both `treasury` and `treasury-orders`, available even after the
 ordinary Treasury connection. Its server holds the app credential and calls the nine `limitOrders/*` methods through
@@ -147,12 +145,10 @@ partial fills and payouts, deduplicated unchanged reads, and rejection of mismat
 provider and do not establish live provider behavior. Gateway tests also cover DAO vote receipts, lost relay replies,
 concurrent polls, credential revocation during filing, and malformed successful responses. Missing local order files
 block later sends and agent release in offline faults; recovery still polls unrelated unknown operations before
-surfacing the missing evidence. Source-frozen platform candidate `a575d2ea` from commit `8b2da58` passed its full
-local gates, and its tarball passed a separate Bun consumer check; [PR #78](https://github.com/MultiAgency/platform/pull/78)
-records that run. Any subsequent commit needs a fresh candidate and Bun check before release. The app's checked
-tarball matches the prior candidate, but this documentation update changes the SDK package's bundled change notes
-and provenance, so final-package consumer retesting remains a release gate. No cross-repository end-to-end order flow
-has been run.
+surfacing the missing evidence. [PR #78](https://github.com/MultiAgency/platform/pull/78) records the SDK candidate's
+source-frozen local gates and separate Bun consumer check. The Treasury app PR records the tarball it tested and its
+own consumer tests. Any SDK source commit after those runs requires a new candidate, Bun check and app retest; the
+release artifact must match what the app actually tested. No cross-repository end-to-end order flow has been run.
 Live placement, cancellation, payout behavior, the production route, and the deployed provider's policy enforcement
 remain unverified. Native EVM/Solana `sign-intent` is a separate design with different protections and is not enabled
 by this order path.

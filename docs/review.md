@@ -58,11 +58,11 @@ The canonical list is the README's [Not done yet](../README.md#not-done-yet). Th
 The tagged 0.5.6 SDK uses provider SDK 0.8.2, with policy evidence compatibility tested for `limit_order` and unchanged
 refusal/idempotency behavior. The tagged and published 0.5.7 SDK also lacks order routes. An unreleased 0.5.8 Treasury
 limit-order feature has local order routes, owner signatures, a dedicated app consent and offline recovery tests. No
-live order was placed by this platform. Treasury app [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11),
-observed at signed commit `4793aea`, passed 929/929 offline tests and 90/90 browser scenarios on 2026-11-11 against
-the prior unpublished SDK candidate from `8b2da58`, including credentialed capability discovery and
-`cancelMayResume` handling. The app remains draft; a new SDK commit changes its package provenance, so final-package
-consumer retesting and app release remain open.
+live order was placed by this platform. The separate Treasury app
+[PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records the exact unpublished 0.5.8 SDK package
+and local consumer tests for credentialed capability discovery, cancellation continuation and retained decisions.
+Each later SDK source commit changes that package's provenance and needs a matching app retest. App hosted acceptance,
+deployed provider support and live order outcomes remain open.
 Production provider order routes were absent in the 2026-11-10 read-only check.
 Consequently, a 0.5.8 platform using that provider would refuse hosted-agent release after its other prechecks,
 including for agents with no local orders; a working order-list route or separately reviewed absence proof is a
