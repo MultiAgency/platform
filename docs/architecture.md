@@ -426,7 +426,8 @@ nonzero. An agent server that is told to stop starts no new send (a new one is r
 write-ahead record; a plan stops before its next leg) and waits up to 25 seconds for a send in flight
 (`src/server.ts`); one still running then is cut off and stays unresolved. The gateway replays no submission.
 Deployment grace must exceed the 35-second bound. The local IaC candidate, `.railway/railway.ts`, retains the legacy
-packages' 45-second setting; owner apply remains pending (see [operations](operations.md#railway-infrastructure-as-code)).
+packages' 45-second setting. The owner applied it on staging; production apply remains pending
+(see [operations](operations.md#railway-infrastructure-as-code)).
 The supervisor waits only for its direct children: an externally killed
 gateway, machine failure or detached descendant still needs the stopped-writer checks in
 [operations](operations.md). There is no automatic failover to another host.

@@ -18,13 +18,22 @@ sign-in there. Read-only checks on 2026-10-31T01:06Z: `/health` 200; `/apps/v1/a
 owner-app assets and `/build-manifest.json` 404; `POST /gw/session` 404. Switching needed no migration: the state
 directory, hosted agents and consents are kept, and the host is unchanged, so signed consents and setups stay valid.
 
-**Infrastructure as Code is a local candidate, not applied.** The reviewed `.railway/railway.ts` selects staging's
+**Infrastructure as Code applied by the owner, 2026-11-12 UTC.** The reviewed `.railway/railway.ts` selects staging's
 domain and existing `gateway-volume` at `/data`, one `us-west2` replica, `/health`, 5 restart retries and a 45-second
 drain. Variables remain managed in Railway, outside IaC. It does not change app setup or the SDK's public contract.
-Before uploading the first package without `railway.json`, the owner must complete the reviewed
-[apply and any required cutover](operations.md#railway-infrastructure-as-code). A plan reads state; it does not perform
-either step. The 0.5.7 package contains legacy JSON, which does not establish that the remote service selects it.
-Run plan/apply tooling from the source checkout with development dependencies, not from the production image.
+The owner applied the pinned plan from source `320f82e`, triggering deployment
+`fd2c5435-d155-43d8-b6de-e9586c1cea99`. It reached `SUCCESS` with one `RUNNING` instance and final image
+`sha256:d277711454604337afdce0de8a6b42867d8b88de4ef365c80760dfc6d6531873`; the early status snapshot's older image
+digest was provisional. A post-apply plan exposed representation drift for explicit `ON_FAILURE`; the subsequent
+authoring correction omits that default while retaining 5 retries. Its fresh staging plan returned zero changes and
+no diagnostics, without another apply. See the dated [apply and verification record](operations.md#railway-infrastructure-as-code).
+After `fd2c5435` reached `SUCCESS`, read-only verification matched the retained manifest and source below and all 243
+packaged runtime file hashes, with no mismatches; Node was 24.22.0. Platform smoke after success passed 18 of 18 checks.
+No new source package was uploaded: the running application remains 0.5.7, including its legacy JSON files, while
+future packages from this source omit them. The checks establish package identity, configuration and public host
+behavior, not new application or money-path acceptance. An image's files do not establish whether a remote service
+selects Config as Code. Run plan/apply tooling from the source checkout with development dependencies, not from the
+production image.
 
 **Restoration observed 2026-11-12 UTC:** the owner restored 0.5.7 as Railway deployment
 `c15b4206-aba2-4081-951f-8da53e3f7c5b`, image
@@ -32,8 +41,9 @@ Run plan/apply tooling from the source checkout with development dependencies, n
 `sha256:b7c3677887589af35bc4000fb4ac0ffa6ef62d447e477ad54771f750078d5d93`, naming source
 `cc90604699472d8cf9afb7fffdecd190c5a08389` and candidate `23e51842`. Read-only verification matched 243 packaged runtime
 file hashes to the manifest, and the owner's platform smoke passed 18 of 18 checks. The earlier deployment
-`70b2f02e` below had been removed. These checks establish the restored package and public host behavior; no money
-action or new application behavior was exercised. The IaC candidate was not applied by that restoration.
+`70b2f02e` below had been removed. These verification checks establish the restored package and public host behavior;
+they exercised no money action or new application behavior. Configuration apply was a later, separate owner action
+described above.
 
 Steps 1–2 record initial provisioning. For an existing staging service, retain the original service, volume, variables
 and hosted records; do not create an empty replacement or repeat setup to recover an outage. Follow the preservation

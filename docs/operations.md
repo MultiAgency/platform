@@ -159,7 +159,7 @@ and `deploy/railway.gateway.json` as its `railway.json`. The image runs `deploy/
 
 ### Railway Infrastructure as Code
 
-**Local candidate, not applied.** `.railway/railway.ts` replaces this source tree's legacy
+**Staging applied by the owner; production apply pending.** `.railway/railway.ts` replaces this source tree's legacy
 `deploy/railway.gateway.json`. The platform package retains the authoring file and `.railway/tsconfig.json` in its
 manifest and carries no `railway.json` or `railway.toml`. Earlier deployed packages, including staging's 0.5.7 and
 production's 0.5.4, contain legacy files; whether a service selects them is a separate remote setting. On 2026-11-05 the
@@ -175,7 +175,7 @@ Its intended settings are:
 |---|---|
 | Build | Dockerfile builder, the package's root `Dockerfile`; no change to its uploaded source |
 | Executor placement | One replica in `us-west2` |
-| Health and restart | `/health`, `ON_FAILURE`, at most 5 retries |
+| Health and restart | `/health`, Railway's default `ON_FAILURE` (not explicitly authored), at most 5 retries |
 | Shutdown | `drainingSeconds: 45` |
 | Persistent state | The existing `gateway-volume`, `us-west2`, 50,000 MB, mounted at `/data` |
 | Public domain | `api.dev.multiagency.ai` on staging; `api.multiagency.ai` on production; port 8080 |
@@ -216,23 +216,28 @@ is unchanged by this infrastructure change.
 4. Run a fresh plan and review the exact changes. Require the same volume and mount, one executor replica, 45-second
    drain, the staging domain, unchanged variables/source, and no unrelated resource changes. If anything else differs,
    keep the service paused and investigate. Save the reviewed plan outside `.railway/` only after its source is committed.
-   **Owner only:** apply that exact reviewed plan; no agent applies, cuts over, deploys or restarts as part of local work.
-5. The owner uploads the matching candidate package from outside a Git checkout, retaining the original volume and
-   instance settings. Follow the returned deployment ID to `SUCCESS`, verify the package/image identity, then run
+   **Owner only:** apply that exact reviewed plan; it may trigger a redeployment of the existing image. Follow its
+   exact returned deployment ID to `SUCCESS`, check logs and retain the original volume. No agent applies, cuts over,
+   deploys or restarts as part of local work.
+5. Shipping a new source package is a separate owner action. If authorized, the owner uploads the matching candidate
+   package from outside a Git checkout, retaining the original volume and instance settings. Follow that upload's
+   deployment ID to `SUCCESS`, verify the package/image identity, then run
    `PLATFORM_URL=https://api.dev.multiagency.ai pnpm smoke` and inspect agent logs/restarts. Gateway health alone does
    not show that its agents are available. Money actions and enabling schedules need their own authorization.
 6. Repeat context, ownership, plan, any required cutover, fresh plan and owner apply separately for production, followed
-   by its matching package and `PLATFORM_URL=https://api.multiagency.ai pnpm smoke`. Do not promote on staging smoke
+   by `PLATFORM_URL=https://api.multiagency.ai pnpm smoke` and inspection of any resulting redeployment. Upload a new
+   source package only as a separately authorized release. Do not promote on staging smoke
    alone when a feature's provider or live acceptance gate is still open.
 
-Cutover and apply are separate from deployment, and none has been performed by this local candidate. If cutover was
-needed, preserve its snapshot with the private release record; an owner considering `railway config migrate undo` must
-review the saved path, compatible package and retained state first. Restoring an old configuration path does not restore application
+Cutover, configuration apply and a source-package upload are distinct actions; apply can itself redeploy the existing
+image. If cutover was needed, preserve its snapshot with the private release record; an owner considering
+`railway config migrate undo` must review the saved path, compatible package and retained state first. Restoring an old
+configuration path does not restore application
 state or establish that an older writer is compatible. Record the dated plan, actual cutover/apply, deployment and
 read-only checks separately. `test/build-context.test.ts` and `test/platform-host.test.ts` cover the local authoring and
 packaged-input boundaries; they do not establish remote apply or live shutdown behavior.
 
-**Read-only plans, 2026-11-12 UTC.** CLI 5.71.0 evaluated this candidate authoring against both existing environments.
+**Initial read-only plans, 2026-11-12 UTC, source `320f82e`.** CLI 5.71.0 evaluated that authoring against both existing environments.
 Each plan returned no diagnostics and two `safe` update groups: select the Dockerfile builder, then set the 45-second
 drain, `/health`, `ON_FAILURE` and 5 restart retries. Neither plan changed a volume, domain, replica, source or variable;
 both reported variables unmanaged. These plans compare remote settings, not the legacy files' effective deployment
@@ -240,6 +245,25 @@ overrides, and establish neither apply nor a running release. The production mig
 selecting Config as Code, despite its deployed package containing `railway.json`; cutover must therefore be conditional.
 Raw plans and imports were kept outside tracked documentation. Re-plan before owner apply because configuration or source
 may have changed since these reads.
+
+**Owner apply on staging, 2026-11-12 UTC.** The owner applied the pinned staging plan from `320f82e`. It triggered
+deployment `fd2c5435-d155-43d8-b6de-e9586c1cea99`; no new source package was uploaded. An initial snapshot still showed
+it `DEPLOYING` with the earlier image digest provisionally attached, while the previous `c15b4206` instance remained
+running. The final observation showed `SUCCESS`, one `RUNNING` instance and image
+`sha256:d277711454604337afdce0de8a6b42867d8b88de4ef365c80760dfc6d6531873`; do not identify that rebuilt image by the
+initial digest. Its effective configuration showed one replica, `/health`, 45-second drain, `ON_FAILURE` and 5 retries.
+The original `gateway-volume` remained `READY` at `/data`, 50,000 MB.
+
+A post-apply plan retained one difference: `restartPolicyType` read `null`, despite the effective deployment naming
+`ON_FAILURE`. The subsequent source correction leaves [Railway's default restart policy](https://docs.railway.com/deployments/restart-policy)
+unauthored and retains 5 retries; repeatedly applying an explicit default would not fix representation drift. With
+that correction, a fresh staging plan returned zero changes and no diagnostics, without another apply. Production
+apply remains pending. After `fd2c5435` reached `SUCCESS`, read-only runtime verification matched manifest
+`sha256:b7c36778…`, source `cc90604` (0.5.7) and all 243 packaged runtime file hashes, with no mismatches; Node was
+24.22.0. Platform smoke after that success passed 18 of 18 checks. The [staging record](platform-staging.md) retains the
+full package and deployment identities. No staging reapply was needed for the default-policy correction. Applying
+settings did not upload the future package that removes legacy JSON; these checks do not establish new application
+behavior or mainnet money-path acceptance.
 
 Both services must use the same reviewed source and frozen lockfile. Rebuilding `dao`
 alone does not update the public invoice page. Preserve `AGREEMENTS_URL` and matching

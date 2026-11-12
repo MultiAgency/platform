@@ -18,7 +18,7 @@ export default defineRailway((ctx) => {
     replicas: { "us-west2": 1 },
     deploy: {
       drainingSeconds: 45,
-      restartPolicyType: "ON_FAILURE",
+      // Railway stores its default ON_FAILURE as unset; declaring it causes perpetual plan drift.
       restartPolicyMaxRetries: 5,
     },
     domains: [{

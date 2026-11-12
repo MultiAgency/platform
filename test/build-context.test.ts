@@ -59,8 +59,10 @@ test("evaluated Railway IaC retains each gateway's volume, one executor replica 
     assert.equal(gateway.configFile, undefined, "legacy Config as Code is not selected");
     assert.equal(gateway.variables, undefined, "no variable values or secrets are declared");
     assert.deepEqual(gateway.build, { builder: "DOCKERFILE", dockerfilePath: "Dockerfile" });
+    // Railway reads its ON_FAILURE default back as unset; declaring it would leave drift and propose another redeploy.
+    assert.equal(gateway.deploy?.restartPolicyType, undefined, "leave Railway's default unset so subsequent plans are idempotent");
     assert.deepEqual(gateway.deploy, {
-      drainingSeconds: 45, restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 5,
+      drainingSeconds: 45, restartPolicyMaxRetries: 5,
       healthcheckPath: "/health", multiRegionConfig: { "us-west2": { numReplicas: 1 } },
     });
     assert.deepEqual(gateway.networking, { customDomains: { [domain]: { port: 8080 } } });

@@ -63,7 +63,10 @@ named `gateway` partial selects `api.multiagency.ai`, the existing `gateway-volu
 The SDK's public contract and app setup are unchanged. Before deploying the first package without `railway.json`, the
 owner must perform the [staging and then production reviewed apply, with cutover only where required](operations.md#railway-infrastructure-as-code).
 Run those tools from the reviewed source checkout with development dependencies; the production image does not
-install the authoring SDK. No cutover or apply has been performed by this local candidate.
+install the authoring SDK. The owner has applied staging's configuration; production apply remains pending. Applying
+configuration can redeploy the existing image without uploading new source, so the resulting deployment needs its own
+status/log checks. Current production still holds the earlier package's legacy JSON files; future packages from this
+source omit them.
 
 1. In the platform's Railway project, production environment, bring in staging's `gateway` service with **Sync**
    (production as the receiving environment). Review the staged changes before deploying: Sync shows staging's whole
