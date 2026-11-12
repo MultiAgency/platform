@@ -53,20 +53,23 @@ async function freePort(host = '127.0.0.1') {
  *   no sign-in, owner app or contributor intake on its host.
  * `selfService`: owners (on the host) and app deployments (through `/apps/v1/setup`) may set up hosted agents; `hostedAreas` names the
  * areas a `frontendDist` host may set up.
- * `market`: a simulated agent market (market.mjs, docs/market.md) the gateway's hosted agents hire on: `true` for two
- *   listed agents, `writer` (delivers) and `refuser` (rejects every task), or its own `{ handle: { amount, windowSeconds,
- *   outcome, result } }`. The stand-in Agent API lands a market agent's top-ups on its chain. Add `market` to `appSetup`.
+ * `market`: a simulated agent market (market.mjs, docs/market.md) the gateway's hosted agents hire on: `true` for
+ *   `writer` (delivers), `refuser` (rejects), and `worker` (waits for its own token-scoped assignment submission),
+ *   or its own `{ handle: { amount, windowSeconds, outcome, result } }`. The stand-in Agent API lands a market agent's
+ *   top-ups on its chain. Add `market` to `appSetup`. `marketWebhookUrl` is local loopback only.
  */
 const MARKET_AGENTS = { writer: { amount: '500000', windowSeconds: 600, outcome: 'complete', result: 'the article' },
-  refuser: { amount: '500000', windowSeconds: 600, outcome: 'reject' } };
-export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoPortfolio = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false, appSetup = ['payables'], market = false } = {}) {
+  refuser: { amount: '500000', windowSeconds: 600, outcome: 'reject' },
+  worker: { amount: '500000', windowSeconds: 600, outcome: 'worker', name: 'Agency worker' } };
+export async function environment(directory, { workspace = false, portfolioOwner = PAYEE, independentFrontend = false, frontendDist, ownerApp, owner = OWNER, payees = [PAYEE], secondAccount = false, daoPortfolio = false, accounts: extraAccounts = [], payoutFunding, onChainPolicyEdits = false, selfService = false, hostedAreas = [], headless = false, appSetup = ['payables'], market = false, marketWebhookUrl = null, marketWebhookSecret = null } = {}) {
   await requireConfirmBuild();
   if (daoPortfolio) { workspace = true; portfolioOwner = DAO; }
   const dao = daoPortfolio;
   mkdirSync(directory, { recursive: true });
   const services = [], proxies = [];
   const accounts = [...(secondAccount || dao ? [SECOND] : []), ...(dao ? [OWNER, DAO_SIGNER] : []), ...extraAccounts];
-  const marketSim = market ? await simulatedMarket({ agents: market === true ? MARKET_AGENTS : market }) : null;
+  const marketSim = market ? await simulatedMarket({ agents: market === true ? MARKET_AGENTS : market,
+    webhookUrl: marketWebhookUrl, webhookSecret: marketWebhookSecret }) : null;
   // The gateway reads the chain through this simulator: it answers for the DAO whenever one owns an agent.
   const simulated = await provider(directory, { account: owner === DAO ? DAO_SIGNER : owner, payees, accounts, dao, onChainPolicyEdits, market: marketSim, ...(payoutFunding !== undefined && { payoutFunding }) });
   const portfolioDir = join(directory, 'portfolio');

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { request as httpsRequest } from 'node:https';
 import { join } from 'node:path';
 import { appClient } from '../../src/contract/app-client.ts';
@@ -62,6 +62,22 @@ async function withStack(info, args, use) {
   }
   expect(await exited, 'the stack stops on its stop file').toBe(0);
 }
+
+test('the market stack keeps worker credentials private and accepts only a local webhook URL', async ({}, info) => {
+  test.setTimeout(120_000);
+  await withStack(info, ['--no-browser', '--app', 'covenant', '--market', '--market-webhook-url', 'http://127.0.0.1:9/webhook'],
+    async (directory, state) => {
+      const { market } = state();
+      expect(market.agents).toEqual(['writer', 'refuser', 'worker']);
+      expect(statSync(market.workerCredentialsFile).mode & 0o777).toBe(0o600);
+      const credentials = JSON.parse(readFileSync(market.workerCredentialsFile, 'utf8'));
+      expect(credentials.worker).toMatchObject({ token: expect.stringMatching(/^aat_/), webhookSecret: expect.stringMatching(/^whsec_/) });
+      const publicState = readFileSync(join(directory, 'state.json'), 'utf8');
+      expect(publicState).not.toContain(credentials.worker.token);
+      expect(publicState).not.toContain(credentials.worker.webhookSecret);
+      expect(await controlFiles(directory)('marketRedeliver', { assignmentId: 'missing' })).toMatchObject({ ok: false });
+    });
+});
 
 test('a DAO-owned stack reads the DAO as public, then confidential once the daoConfidentialSetup control sets it up', async ({}, info) => {
   test.setTimeout(240_000);
