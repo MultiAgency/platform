@@ -114,9 +114,11 @@ agent receipt remains unknown, so preserve its claim and reconcile it before rem
 
 The separate Treasury app [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records its exact
 SDK source commit, frozen candidate, tarball checksum and local test results. Its owner-signed consumer keeps SDK
-0.4.0 for legacy flows and vendors the unpublished 0.5.8 package through a portable file alias. That local evidence
-does not establish a deployed app, provider behavior or live order outcome. Before app release, match its vendored
-package to the SDK release artifact and review the release dependency pin. Every later SDK source commit changes
+0.4.0 for legacy flows and vendors the [published 0.5.8 package](https://www.npmjs.com/package/@multiagency/sdk/v/0.5.8)
+through a portable file alias. An independent npm download matched its vendored tarball byte for byte (SHA-256
+`844fae568516dbc8d377d6f8dcceb8177be8a92c134db545d024ac25cf45d254`). That local evidence does not establish
+a deployed app, provider behavior or live order outcome. Before app release, recheck the vendored package against
+the SDK release artifact and review the release dependency pin. Every later SDK source commit changes
 package provenance and requires a new candidate and exact consumer retest. The tagged and published SDK 0.5.7 lacks
 these routes.
 

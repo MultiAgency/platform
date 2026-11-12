@@ -3,7 +3,8 @@
 The platform pins `@near-intents-agent-api/sdk` to **0.8.2** in `package.json` and `pnpm-lock.yaml`. Its release-age
 exception is scoped to that exact package version. Node 24 is required. The tagged 0.5.6 dependency update converted
 no existing state and exposed no new spending capability. The tagged 0.5.7 SDK also lacks order routes. A separate
-Treasury [limit-order feature](limit-orders.md) is in progress for SDK 0.5.8.
+Treasury [limit orders](limit-orders.md) shipped in the tagged and published SDK 0.5.8 library. Platform rollout and
+deployed provider order support remain separate, unverified gates.
 
 ## Source review (2026-11-10)
 
