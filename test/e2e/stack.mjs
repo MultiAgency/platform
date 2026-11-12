@@ -36,16 +36,19 @@ if (frontend && payablesDist) throw new Error('Use --frontend or --payables-rele
 // `--on-chain-policy-edits`: freeze, unfreeze and a policy edit that changes a provider-enforced field come back as NEP-366, held for the
 // platform's confirm page (see provider.mjs), for the Treasury agent and the Payables agent alike.
 const onChainPolicyEdits = args.includes('--on-chain-policy-edits');
-// `--market`: a simulated agent market (docs/market.md) with two listed agents, `writer` (delivers) and `refuser` (rejects),
-// and app setup of market agents. Use with `--app`: a market agent is an app's. Controls `marketRegister` and `marketAdvance`.
+// `--market`: simulated listed agents `writer` (delivers), `refuser` (rejects), and `worker` (token-scoped assignments).
+// `--market-webhook-url` sends signed worker events to a local HTTP loopback endpoint. Use with `--app`: a market agent is an app's.
+// Controls `marketRegister` and `marketAdvance`. Worker credentials are kept in a private file, not state.json.
 const marketSim = args.includes('--market');
 if (marketSim && !app) throw new Error('--market needs --app: a market agent is set up by an app');
+const marketWebhookUrl = values('--market-webhook-url').at(-1);
+if (marketWebhookUrl && !marketSim) throw new Error('--market-webhook-url needs --market');
 const directory = join(process.env.PROTO_E2E_ARTIFACTS, 'stack'), controls = join(directory, 'controls');
 mkdirSync(controls, { recursive: true });
 const stack = await environment(join(directory, 'environment'), { owner, payees, ...(builder && { accounts: [builder] }), ...(payoutFunding !== undefined && { payoutFunding: BigInt(payoutFunding) }),
   ...(frontend && { frontendDist: resolve(frontend) }), ...(treasury && { workspace: true, portfolioOwner: owner }), ...(daoTreasury && { daoPortfolio: true }),
   ...(app && { selfService: true, hostedAreas: ['payables'] }),
-  ...(onChainPolicyEdits && { onChainPolicyEdits }), ...(marketSim && { market: true }),
+  ...(onChainPolicyEdits && { onChainPolicyEdits }), ...(marketSim && { market: true, marketWebhookUrl }),
   ...(payablesDist && { ownerApp: { product: 'payables', a: resolve(payablesDist), b: resolve(payablesDist) } }) });
 const { simulated } = stack;
 // One browser, two wallet contexts (owner, payee) behind the same wallet boundary as the tests. Attach over CDP.
@@ -78,6 +81,9 @@ const commands = stackControls(stack, { owner, payees: [...payees, ...builder ? 
 // The app's service credential, readable only by this user: the token is never written to state.json.
 const credentialFile = join(directory, 'app-credential');
 if (app) writeFileSync(credentialFile, await appCredential(stack, app), { mode: 0o600 });
+const workerCredentialsFile = join(directory, 'market-worker-credentials.json');
+if (stack.market?.workerHandles.length) writeFileSync(workerCredentialsFile,
+  JSON.stringify(Object.fromEntries(stack.market.workerHandles.map(handle => [handle, stack.market.credentials(handle)]))), { mode: 0o600 });
 const state = () => ({
   dashboard: stack.dashboard, owner: `${stack.dashboard}/a/payout/`, payee: stack.invoices, ownerAccount: owner, payees,
   testPublicKey: PUBLIC_KEY, cdp, wallets: Object.fromEntries(Object.entries(wallets).map(([role, w]) => [role, { account: w.account, signedIn: w.signedIn, page: w.page, blockedRequests: w.unexpected.length }])),
@@ -91,7 +97,8 @@ const state = () => ({
   dao: daoTreasury ? { account: DAO, council: OWNER, member: SECOND } : null,
   // The simulated chain, as the stack's services read it (`NEAR_RPC_URL`): an app's server makes its own chain reads here.
   chain: { rpc: `${simulated.url}/chain` },
-  market: stack.market ? { url: stack.market.url, agents: ['writer', 'refuser'] } : null,
+  market: stack.market ? { url: stack.market.url, agents: stack.market.handles,
+    workerCredentialsFile: stack.market.workerHandles.length ? workerCredentialsFile : null } : null,
   app: app ? { deployment: app, base: stack.dashboard, credentialFile } : null,
   deposits: simulated.deposits.map(({ agent, correlation_id }) => ({ agent, correlation: correlation_id })),
   transfers: simulated.transfers.map(p => ({ agent: p.agent, correlation: p.correlation, approval: p.approval, status: p.status, recipient: p.body.recipient, amount: p.body.amount })),
