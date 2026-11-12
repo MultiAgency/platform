@@ -493,10 +493,6 @@ DAO release is unavailable. This flow is offline/stack-tested, not observed on m
 semantics remain per pinned provider documentation.
 
 
-DAO-owned Payables (candidate): set up `area: "payables"`, create with `role: "payout"` and
-`signer: "dao"`, then obtain DAO consent for `read` and `payout`. On that agent, `payout` admits
-`owner/prepare` for the `payout` grant, revocation, policy edits, freeze/unfreeze and `approval_vote`.
-The reply carries the proposal for members to file, never an intent to sign. Follow `owner/status`;
-the platform submits the DAO signature. Keep the existing payout request ID and follow
-`payouts/status` for settlement. Require `owner_approval` in the reviewed policy for a vote per payout.
-Do not request `owner` scope or use `/dao-votes` for held payouts. Not deployed or mainnet-observed.
+DAO Payables: set up `payables`, create role `payout` with signer `dao`, then consent to `read,payout`.
+That consent admits its grant, revocation, policy edits, freeze/unfreeze and held-payout votes. Members file the returned proposal; follow `owner/status`, then `payouts/status` with the original request ID.
+Require `owner_approval` for a vote per payout. Never request DAO `owner` scope or use `/dao-votes` for held payouts. Hosted/mainnet behavior is unverified.
