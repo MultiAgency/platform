@@ -166,6 +166,12 @@ production's 0.5.4, contain legacy files; whether a service selects them is a se
 Railway CLI warned that Config as Code files keep working only until 2026-12-01. Removing the source file or uploading
 a new package does not clear a remote Railway Config File setting that is still selected.
 
+CLI 5.71's deprecation warning checks for a local `railway.json` or `railway.toml` in the command's directory and
+its ancestors ([pinned implementation](https://github.com/railwayapp/cli/blob/v5.71.0/src/util/cac_deprecation.rs#L130)).
+Run commands from the cleaned source checkout to avoid that warning; old local release directories can still print it.
+No upload or redeployment is needed merely to remove this local warning. Check remote configuration ownership separately
+with `railway config migrate status`; the warning does not inspect deployment metadata.
+
 The named IaC partial `gateway` manages only `service.gateway` and `volume.gateway-volume` in the selected environment.
 The authoring function rejects another named project and accepts only environments `staging` and `production`;
 verify the linked project is `platform` before planning. It uses existing names rather than embedding Railway IDs.
