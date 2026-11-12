@@ -323,6 +323,14 @@ A request the simulator doesn't model that the real provider may accept (for exa
 Treasury agent, or than `payout` and `invoices` for a payout agent the owner created) is refused in the provider's error shape,
 400 `unsupported_by_simulator`, which the platform reports as a `provider` refusal; any other undeclared request still answers 500
 and lands in `state.json` `providerErrors`.
+An owner rejection of a still-held simulated transfer or withdrawal returns `FAILED`, `rejected_by_owner` and
+`details.never_executed: true` in status and history (platform#83), following the
+[pinned provider owner-intent reference](https://github.com/NEAR-Intents-Agent-API/skills/blob/0b81bba6fca6356a2db81d0ede08e9cb928d08e1/near-intents-agent-api/references/owner-intents.md).
+`test/e2e-simulator.test.ts` checks that proof and refusal of a late rejection after approval released the payout;
+`app-access.spec.mjs` follows it through the gateway and SDK's `payouts/status` as `neverExecuted: true`.
+Contradictory submission, delivery or refund details, an absent flag, or a flag other than boolean `true` still read
+`neverExecuted: false`; a failure code or missing transaction hash alone supplies no proof. These are offline checks
+against the simulator, not observations of a deployed provider.
 Page dialogs (such as the payee's filing `confirm()`) are logged in `state.json` `dialogs` and left open
 for the attached client or person to answer; an attached Playwright client must register its own dialog
 handler, or it dismisses the dialog itself. `--accept-dialog '<exact message>'` (repeatable) instead accepts
