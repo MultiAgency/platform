@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { AgentApiError, createGrantCredential } from "@near-intents-agent-api/sdk";
+import { AgentApi, AgentApiError, createGrantCredential } from "@near-intents-agent-api/sdk";
 import { nep413Hash, verifyEd25519, signatureBytes } from "../src/nep413.js";
 import { OWNER, PAYEE, PUBLIC_KEY, USDC, provider } from "./e2e/provider.mjs";
 import { stackControls } from "./e2e/stack-controls.mjs";
@@ -69,6 +69,54 @@ test("a withdrawal's response can be lost as a transfer's can, after the provide
   await assert.rejects(post(sim, `/v1/agents/${agent}/withdraw`, { asset: USDC, amount: "1000000", chain: "near", recipient: PAYEE, confidential: true },
     { "x-grant-token": token, "idempotency-key": "w-1" }));
   assert.deepEqual(sim.transfers.map(p => [p.type, p.key, p.status]), [["withdraw", "w-1", "PENDING_APPROVAL"]]);
+});
+
+test("an owner-rejected held transfer or withdrawal supplies positive non-execution proof through provider status and history (platform#83)", async t => {
+  const sim = await simulator(t);
+  const { agent, token } = await payoutAgent(sim, payoutPolicy(true));
+  sim.fund(agent, 10_000_000n);
+  const api = new AgentApi({ apiKey: "local-simulator-only", baseUrl: sim.url });
+  for (const method of ["transfer", "withdraw"] as const) {
+    const response = await post(sim, `/v1/agents/${agent}/${method}`, { asset: USDC, amount: "1000000", recipient: PAYEE, confidential: true,
+      ...(method === "withdraw" && { chain: "near" }) }, { "x-grant-token": token, "idempotency-key": `reject-${method}` });
+    assert.equal(response.status, 200);
+    const { correlation_id } = await response.json() as { correlation_id: string };
+    const held = await api.getStatus(correlation_id);
+    assert.ok(held.type === "transfer" || held.type === "withdraw");
+    assert.equal(held.status, "PENDING_APPROVAL");
+    assert.equal(held.details?.never_executed, undefined, "a held payout is still open");
+    await signed(sim, { type: "approval_vote", agent_id: agent, approval_id: held.details?.approval_id, verdict: "reject" });
+    const rejected = await api.getStatus(correlation_id);
+    assert.deepEqual([rejected.status, rejected.failure_code, rejected.details],
+      ["FAILED", "rejected_by_owner", { approval_id: held.details?.approval_id, never_executed: true }], method);
+    const history = await api.getHistory(agent);
+    assert.deepEqual(history.data.find(row => row.correlation_id === correlation_id), rejected, "history retains the same proof");
+    assert.throws(() => sim.settle(correlation_id), /Not approved/, "a rejected payout cannot later settle");
+  }
+  assert.equal(sim.transfers.length, 2, "the original requests only; no replacement");
+  assert.deepEqual(sim.errors, []);
+});
+
+test("a rejection prepared before approval cannot attach non-execution proof after the payout was released (platform#83)", async t => {
+  const sim = await simulator(t);
+  assert.equal((await post(sim, `/v1/agents/${sim.id}/transfer`, { recipient: PAYEE, asset: USDC, amount: "1000000", confidential: true },
+    { "x-grant-token": sim.token, "idempotency-key": "released-before-reject" })).status, 200);
+  const payment = sim.transfers[0]!;
+  const request = { type: "approval_vote", agent_id: sim.id, approval_id: payment.approval, verdict: "reject" };
+  const prepared = await (await post(sim, "/v1/generate-intent", request)).json() as { correlation_id: string };
+  await signed(sim, { ...request, verdict: "approve" });
+  for (const response of [await post(sim, "/v1/submit-intent", prepared), await post(sim, "/v1/generate-intent", request)]) {
+    assert.equal(response.status, 409);
+    const error = await providerError(response);
+    assert.deepEqual([error.code, error.layer], ["approval_closed", "request"]);
+  }
+  const api = new AgentApi({ apiKey: "local-simulator-only", baseUrl: sim.url });
+  assert.equal((await api.getStatus(payment.correlation)).status, "PROCESSING");
+  sim.settle(payment.correlation, "FAILED");
+  const failed = await api.getStatus(payment.correlation);
+  assert.equal(failed.type, "transfer");
+  assert.equal(failed.details?.never_executed, undefined, "failed after approval proves no non-execution");
+  assert.deepEqual(sim.errors, []);
 });
 
 test("a recipient can be unregistered on a token, so a USDC withdrawal to it is refused recipient_not_registered (platform#52)", async t => {
