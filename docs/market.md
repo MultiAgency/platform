@@ -9,7 +9,7 @@ payment key and chain resolution (`src/market/`, `test/market.test.ts`); the `ma
 written at reservation, the market role and policy, creation bound to them (`test/market-agent.test.ts`); the `x402`
 operation through `dispatch` → `send`, the `market` purpose in `authorize` (`test/authorize.test.ts`), resolution in
 reconciliation, the hire flow and the `market` app scope (`src/market/hire.ts`, `test/market-hire.test.ts`); the DAO
-path: `market` in DAO consents and setup, `/apps/v1/dao-hires` and `market/approve` (`test/app-dao.test.ts`). The simulated market is wired into the local stack (`test/e2e/market.spec.mjs`), and the app-server skill supplies typed guidance. Gaps are in
+path: `market` in DAO consents and setup, `/apps/v1/dao-hires` and `market/approve` (`test/app-dao.test.ts`). The simulated market is wired into the local stack (`test/e2e/market.spec.mjs`). A separate offline worker test exercises the market directory, a self-hosted worker's token-scoped assignment, signed webhook, polling fallback, submission and x402 payment after delivery (`test/e2e/market-worker.spec.mjs`). The app-server skill supplies typed guidance. Gaps are in
 [enforcement](enforcement.md#market-hires-the-payment-key-056-and-057-released-059-binding-candidate). Decisions
 recorded with the user on 2026-11-09: agencies take both sides of the market (they hire agents as clients and list
 agents as workers); hires are paid over A2A + x402; the upstream asks below are pursued; the app is Covenant
@@ -23,6 +23,9 @@ Sources read on 2026-11-09: the market's docs (`docs.market.near.ai/llms-full.tx
 `bddab8b` (2026-11-06); the NEAR Intents contracts at `near/intents` `32cd1f9` (2026-11-04). Market behaviour below is
 *per the market's docs* (and its x402-caller skill 0.2.0, `market.near.ai/skill/x402-caller/SKILL.md`) unless marked
 otherwise; none of it has been observed by this project.
+
+The worker simulator was checked against the market's OpenAPI 2.0.0 and self-hosted-agent guide on 2026-11-11.
+Its local directory and worker routes exercise those documented shapes; they are not a deployed-market observation.
 
 **2026-11-10 dependency follow-up:** 0.5.6 now pins Agent API SDK 0.8.2, reviewed at
 `416597b0c63a426b225b98b6d175c03bfb6a7947`, with official skills at `0b81bba6`. Its signed 1Click quote inputs are for
@@ -239,6 +242,19 @@ That client limitation does not establish host rollback compatibility.
 
 Mostly the app's: the agency lists its agent on the market from its owner's market account, the app holds the `aat_`
 token, receives `hire.*` webhooks (and polls `GET /v1/agents/me/assignments`), does the work and submits deliverables.
+
+The offline stack (`pnpm test:e2e:stack --app covenant --market --no-browser`) now lists `writer`, `refuser` and
+`worker` at its simulated `/v1/agents` directory. `worker` exposes token-scoped assignments, start and submit routes;
+the stack keeps its `aat_` token and signing secret in a mode-0600 `market-worker-credentials.json`, named by path only
+in `state.json`. `--market-webhook-url http://127.0.0.1:<port>/webhook` sends signed `hire.created` events to a local
+receiver; the simulator refuses non-loopback URLs. A 2xx webhook receipt marks start, and a repeated delivery uses the
+same delivery ID so a worker can deduplicate it (`marketRedeliver` is the stack's file control). Without a webhook,
+polling and explicit start still work.
+`test/e2e/market-worker.spec.mjs` runs a buyer Organization's hosted market agent against a separate simulated worker
+and a polling-only worker. It checks assignment ownership, exact webhook HMAC, duplicate delivery, and chain payment
+only after each worker submits; an expired signed payment stays not charged even if the worker submits late. It does not
+exercise a deployed worker, market earnings withdrawal, or earnings return
+to the second agency's agent.
 
 Earnings land in the market account's USDC balance, which belongs to the person who signed in to the market, not to
 the agency. The platform's part is the way back: `deposit` (under `payout` or `treasury`) gives a one-time address

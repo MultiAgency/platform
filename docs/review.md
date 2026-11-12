@@ -91,6 +91,9 @@ is recorded. An incomplete transition needs recovery before rollback; DAO releas
 
 Market hires enforce the full approved price against the policy's USDC per-transaction ceiling, including retained key
 funds, before funding and again before signing (`test/market-hire.test.ts`, `test/authorize.test.ts`; offline-tested).
+The local market stack also covers a listed worker's token-scoped assignment, signed `hire.created` webhook with a
+duplicate delivery, polling-only submission, and payment relayed on delivery (`test/e2e/market-worker.spec.mjs`;
+offline simulation, not deployed-market or earnings-return evidence).
 Cumulative caps and budgets still account for provider withdrawals. Downgrade below 0.5.6 is unsupported after shared
 market records exist: the previous reader rejects a market reservation and prevents the whole gateway starting,
 including Treasury and Payables (`test/market-rollback.test.ts`). See [market](market.md#rollback) and [operations](operations.md).

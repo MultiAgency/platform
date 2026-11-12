@@ -215,6 +215,8 @@ test('an app requests a payout once under its requestId, follows it by requestId
     const rejection = await sign(OWNER, refusal.intent.payload);
     value(await agent.call('owner/submit', { correlationId: refusal.correlationId, signedData: { ...refusal.intent, public_key: rejection.publicKey, signature: rejection.signature } }));
     await expect.poll(async () => value(await agent.call('payouts/status', { requestId: 'wo-again' })).state).toBe('failed');
+    expect(value(await agent.call('payouts/status', { requestId: 'wo-again' })))
+      .toMatchObject({ correlationId: again.correlationId, failureCode: 'rejected_by_owner', neverExecuted: true });
     steps.push('a second payout of the same terms after the first settled is held, its vote names the first, and the owner rejects it');
 
     // A withdrawal to chain near (P3b): the owner agrees a withdrawal payee through the app; each request is held for the
@@ -252,6 +254,23 @@ test('an app requests a payout once under its requestId, follows it by requestId
     await expect.poll(async () => value(await agent.call('owner/status', { correlationId: reject.correlationId })).status).toBe('FAILED');
     await expect.poll(async () => value(await agent.call('payouts/status', { requestId: 'wd-2' })).state).toBe('failed');
     expect(secondHeld.failure).toBe('rejected_by_owner');
+    expect(value(await agent.call('payouts/status', { requestId: 'wd-2' })))
+      .toMatchObject({ correlationId: second.correlationId, failureCode: 'rejected_by_owner', neverExecuted: true });
+    expect(value(await agent.call('paymentStatus', { correlationId: second.correlationId })))
+      .toMatchObject({ status: 'FAILED', failureCode: 'rejected_by_owner', evidence: { txHash: null, destinationTxHash: null, refundTxHash: null, refundedAmount: null } });
+    // Fault the provider's details, then read through the real gateway and SDK. A rejection code or absent hashes alone
+    // proves nothing; even a positive flag cannot overrule evidence of submission, delivery or refund.
+    const requestsBeforeProofReads = stack.simulated.transfers.length;
+    for (const details of [{}, { never_executed: 'true' },
+      ...['tx_hash', 'destination_tx_hash', 'intent_hash', 'amount_out', 'refund_tx_hash', 'refunded_amount', 'settled_late']
+        .map(key => ({ never_executed: true, [key]: key === 'settled_late' ? true : 'fixture-effect' }))]) {
+      secondHeld.details = details;
+      expect(value(await agent.call('payouts/status', { requestId: 'wd-2' })))
+        .toMatchObject({ state: 'failed', correlationId: second.correlationId, failureCode: 'rejected_by_owner', neverExecuted: false });
+    }
+    secondHeld.details = { never_executed: true };
+    expect(value(await agent.call('payouts/status', { requestId: 'wd-2' })).neverExecuted).toBe(true);
+    expect(stack.simulated.transfers, 'proof reads send no replacement').toHaveLength(requestsBeforeProofReads);
     steps.push('a second held withdrawal was rejected by the owner and ended unpaid');
 
     // A lost reply: the provider accepted the transfer, and its answer never arrived.

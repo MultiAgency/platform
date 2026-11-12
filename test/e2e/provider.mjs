@@ -172,7 +172,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
     execution_outcome: { outcome: { status: { SuccessValue: '' }, logs: [`EVENT_JSON:${JSON.stringify({ standard: 'nep141', version: '1.0.0', event: 'ft_transfer',
       data: [{ old_owner_id: 'funder.near', new_owner_id: c.address, amount: c.amount }] })}`] } } }] });
   const status = payment => ({ correlation_id: payment.correlation, agent_id: payment.agent, type: payment.type ?? 'transfer', status: payment.status,
-    created_at: payment.at, updated_at: payment.at, failure_code: payment.failure ?? null, details: { approval_id: payment.approval,
+    created_at: payment.at, updated_at: payment.at, failure_code: payment.failure ?? null, details: { approval_id: payment.approval, ...payment.details,
       ...(payment.destinationTxHash && { amount_out: payment.amountOut, destination_tx_hash: payment.destinationTxHash,
         request: { asset: payment.body.asset, amount: payment.body.amount, chain: payment.body.chain,
           recipient: payment.body.recipient, confidential: payment.body.confidential } }) } });
@@ -434,6 +434,7 @@ export async function provider(directory, { treasury = false, account = OWNER, p
         }
         const payment = transfers.find(p => p.approval === body.approval_id);
         if (body.type !== 'approval_vote' || !['approve', 'reject'].includes(body.verdict) || !payment || payment.agent !== body.agent_id) throw new Error('Unexpected owner request');
+        if (payment.status !== 'PENDING_APPROVAL') return refusal(res, 409, 'approval_closed', 'request', 'The simulated payout is no longer held for approval');
         const generated = { correlation_id: randomUUID(), type: 'approval_vote', signer: agents.get(payment.agent).owner, expires_at: expires, intent: nep413(),
           preview: { summary: `${body.verdict === 'approve' ? 'Approve' : 'Reject'} the local test payout`, approval: { ...approval(payment), verdict: body.verdict } } };
         intents.push({ ...generated, payment, agent: agents.get(payment.agent) }); return json(res, generated);
@@ -441,6 +442,10 @@ export async function provider(directory, { treasury = false, account = OWNER, p
       if (req.method === 'POST' && url.pathname === '/v1/submit-intent') {
         const intent = intents.find(i => i.correlation_id === body.correlation_id);
         if (!intent || intent.submitted) throw new Error('Unknown or repeated owner submission');
+        // A vote prepared while held can arrive after another vote released or rejected the payout. It cannot change
+        // that outcome or establish non-execution of a payment that may already have moved.
+        if (intent.payment && intent.payment.status !== 'PENDING_APPROVAL')
+          return refusal(res, 409, 'approval_closed', 'request', 'The simulated payout is no longer held for approval');
         intent.submitted = true;
         if (intent.control) {
           if (intent.control === 'agent_archive') intent.agent.archived = true;
@@ -465,8 +470,10 @@ export async function provider(directory, { treasury = false, account = OWNER, p
           target.grants.push({ ...grant, grant_id: randomUUID(), agent_id: target.id, wallet_id: target.wallet.wallet_id, label: request.label, issued_at: new Date().toISOString(), expires_at: request.expires_at, revoked_at: null, revoked_reason: null,
             owner_message: { ...grant.owner_message, agent_id: target.id, wallet_id: target.wallet.wallet_id, owner: target.owner, label: request.label, credential: request.credential, expires_at_ms: Date.parse(request.expires_at) } });
         } else if (JSON.parse(intent.intent.payload.message).verdict === 'reject') {
-          // Assumption, not observed provider behaviour: a rejected held payout ends FAILED and moves nothing.
-          Object.assign(intent.payment, { status: 'FAILED', failure: 'rejected_by_owner' });
+          // The simulator knows this payout was still held: nothing was submitted. Per provider skills@0b81bba6,
+          // references/owner-intents.md, rejection ends FAILED with details.never_executed. Not a mainnet observation.
+          Object.assign(intent.payment, { status: 'FAILED', failure: 'rejected_by_owner',
+            details: { ...intent.payment.details, never_executed: true } });
         } else intent.payment.status = 'PROCESSING';
         if (dropNextSignature) { dropNextSignature = false; return res.destroy(); }
         return json(res, { correlation_id: intent.correlation_id, status: 'SUCCESS' });
