@@ -159,7 +159,7 @@ and `deploy/railway.gateway.json` as its `railway.json`. The image runs `deploy/
 
 ### Railway Infrastructure as Code
 
-**Staging applied by the owner; production apply pending.** `.railway/railway.ts` replaces this source tree's legacy
+**Staging and production applied by the owner, 2026-11-12 UTC.** `.railway/railway.ts` replaces this source tree's legacy
 `deploy/railway.gateway.json`. The platform package retains the authoring file and `.railway/tsconfig.json` in its
 manifest and carries no `railway.json` or `railway.toml`. Earlier deployed packages, including staging's 0.5.7 and
 production's 0.5.4, contain legacy files; whether a service selects them is a separate remote setting. On 2026-11-05 the
@@ -258,12 +258,25 @@ A post-apply plan retained one difference: `restartPolicyType` read `null`, desp
 `ON_FAILURE`. The subsequent source correction leaves [Railway's default restart policy](https://docs.railway.com/deployments/restart-policy)
 unauthored and retains 5 retries; repeatedly applying an explicit default would not fix representation drift. With
 that correction, a fresh staging plan returned zero changes and no diagnostics, without another apply. Production
-apply remains pending. After `fd2c5435` reached `SUCCESS`, read-only runtime verification matched manifest
+was applied later as recorded below. After `fd2c5435` reached `SUCCESS`, read-only runtime verification matched manifest
 `sha256:b7c36778…`, source `cc90604` (0.5.7) and all 243 packaged runtime file hashes, with no mismatches; Node was
 24.22.0. Platform smoke after that success passed 18 of 18 checks. The [staging record](platform-staging.md) retains the
 full package and deployment identities. No staging reapply was needed for the default-policy correction. Applying
 settings did not upload the future package that removes legacy JSON; these checks do not establish new application
 behavior or mainnet money-path acceptance.
+
+**Owner apply on production, 2026-11-12 UTC.** The owner applied the pinned plan from corrected source `d741f3b`.
+Deployment `c9cba776-bd43-4353-9bcb-a15b5c64e95e` reached `SUCCESS` with one `RUNNING` instance and image
+`sha256:af965b1db0b7093897d1c54e12c08c51d581f59b179c669032f227e6ed76e58c`, the same image returned by the API for
+the earlier `b9ab9792` deployment. Its effective settings showed one `us-west2` replica, `/health`, 45-second drain,
+5 restart retries and Railway's default `ON_FAILURE`. The original production volume instance
+`49b76b29-1170-4c40-863a-30dd54d5cfc4` remained `READY`, mounted at `/data`, 50,000 MB. Platform smoke after success
+passed 18 of 18 checks; the post-apply plan returned zero changes and no diagnostics, with variables unmanaged.
+Read-only runtime verification matched package manifest
+`sha256:647aa96417228de100571b996f7d0d0a4037d7af7d7982059b48874f7a0aa96b`, source
+`f2c7b7f5077c01a52b8dd44eebc551a74eb945f6` (0.5.4, candidate `2d8d30d6`) and all 219 packaged runtime file hashes,
+with no mismatches; Node was 24.22.0. No new source package was uploaded. This records infrastructure and
+read-only host checks, not new application behavior or live money-path acceptance.
 
 Both services must use the same reviewed source and frozen lockfile. Rebuilding `dao`
 alone does not update the public invoice page. Preserve `AGREEMENTS_URL` and matching

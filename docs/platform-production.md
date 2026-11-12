@@ -8,9 +8,24 @@ Payables only, no configured agents). The production environment's earlier proto
 checked: no balances, journals or agent lists were read); proto.multiagency.ai, invoices.multiagency.ai,
 payables.multiagency.ai and treasury.multiagency.ai no longer answer.
 
-**Runs 0.5.4 since 2026-11-08T22:17Z:** candidate `2d8d30d6` (commit `f2c7b7f`, the release candidate whose last gate
+**Infrastructure as Code applied by the owner, 2026-11-12 UTC.** The owner applied the pinned plan from source
+`d741f3b`. Deployment `c9cba776-bd43-4353-9bcb-a15b5c64e95e` reached `SUCCESS`, with one `RUNNING` instance and image
+`sha256:af965b1db0b7093897d1c54e12c08c51d581f59b179c669032f227e6ed76e58c`; the API also reported that image for the
+earlier `b9ab9792` deployment. Effective settings showed one `us-west2` replica, `/health`, 45-second drain, 5 restart
+retries and default `ON_FAILURE`. The original volume instance `49b76b29-1170-4c40-863a-30dd54d5cfc4` remained `READY`
+at `/data`, 50,000 MB. Platform smoke after success passed 18 of 18 checks; the post-apply plan returned zero changes
+and no diagnostics, with variables unmanaged. Read-only runtime verification matched package manifest
+`sha256:647aa96417228de100571b996f7d0d0a4037d7af7d7982059b48874f7a0aa96b`, source
+`f2c7b7f5077c01a52b8dd44eebc551a74eb945f6` (candidate `2d8d30d6`) and all 219 packaged runtime file hashes, with no
+mismatches; Node was 24.22.0. No new application source was uploaded. The application remains 0.5.4; its original
+upload included legacy JSON, while future packages from this source omit those files. These checks establish configuration,
+package identity and public host behavior, not new application or money-path acceptance. See the
+[apply and verification record](operations.md#railway-infrastructure-as-code).
+
+**Earlier 0.5.4 deployment, 2026-11-08T22:17Z:** candidate `2d8d30d6` (commit `f2c7b7f`, the release candidate whose last gate
 booted this package's image offline twice), Railway deployment `b9ab9792` on the `gateway` service (image
-`sha256:fd7992ae…`, base `node:24.22.0-slim`), deployed from a copy of the candidate's `platform` package identical
+recorded then as `sha256:fd7992ae…`; the later API read returned `sha256:af965b1d…`, above; base `node:24.22.0-slim`),
+deployed from a copy of the candidate's `platform` package identical
 to it. It signs for `api.multiagency.ai` and started no hosted agents. At 22:17Z the platform smoke checks passed (18 of
 18) and the confirm page's 6 assets were each fetched and byte-equal to the package's. Before it switched, the same
 checks passed on 0.5.3.
@@ -45,7 +60,7 @@ script `/static/js/lib-react.e499478f4d.js` 200; an unknown DAO's stop page 404 
 | First production release candidate | 0.5.3 introduced the shutdown grace, consent archiving, the monthly access log and provider SDK 0.8.0 (needed for a partner portal key). Candidate `a434f381` (commit `49b8d51`, Node 24.22.2) passed every gate on 2026-11-07; published to npm and tagged `sdk-v0.5.3` | Recorded for that release; a later release needs its own candidate |
 | Staging evidence for that release | 0.5.3 ran on staging (`c3a2eb0b`, then `54fa8a24` with a partner portal key, 2026-11-07; read-only checks passed); one consent and one read through treasury.dev on 2026-11-07 ([platform staging](platform-staging.md)) | Recorded for that build; not evidence of a later release |
 | Its own credentials | shared with staging since 2026-11-08: the sync copied staging's provider key, FastNEAR key and `SESSION_SECRET`, kept for production app credentials too (user, 2026-11-08; the risk is in the known shortcut above) | Not required before production app credentials. To separate later: a production partner portal key, a production FastNEAR key and a new `SESSION_SECRET` on production's `gateway`, then the read-only checks |
-| Railway config | The deployed 0.5.4 package contains `railway.json`; migration status reported no service selecting Config as Code on 2026-11-12 UTC. The IaC candidate's read-only plan passed; apply remains pending | Owner-run, reviewed apply before the first package without legacy JSON; cutover only if a fresh status read reports a selected legacy path ([operations](operations.md#railway-infrastructure-as-code)) |
+| Railway config | The owner applied corrected IaC on 2026-11-12 UTC; deployment, 18/18 smoke and package identity checks passed, with zero changes in the post-apply plan. Migration status reported no selected Config as Code path; the original 0.5.4 upload included legacy JSON | Configuration verified; a future source-package upload remains a separate owner action ([operations](operations.md#railway-infrastructure-as-code)) |
 | Treasury setup on production | `deploy/platform.json` sets up Payables only | A decision: add `treasury` to `appSetup` (DAO setup through apps is mainnet-observed on staging), or keep Payables only at first |
 | Developer credentials | operator-issued ([developer access](developer-access.md)) | The first production credentials: the dashboard's and Treasury's, then requests by approval |
 | Rollback | Earlier deployment identities are recorded above; state-format compatibility still governs recovery | Review the exact previous image and retained state before redeploying. Preserve the original volume and records; configuration cutover is separate from application-state compatibility |
@@ -63,10 +78,10 @@ named `gateway` partial selects `api.multiagency.ai`, the existing `gateway-volu
 The SDK's public contract and app setup are unchanged. Before deploying the first package without `railway.json`, the
 owner must perform the [staging and then production reviewed apply, with cutover only where required](operations.md#railway-infrastructure-as-code).
 Run those tools from the reviewed source checkout with development dependencies; the production image does not
-install the authoring SDK. The owner has applied staging's configuration; production apply remains pending. Applying
+install the authoring SDK. The owner has applied both environments' configuration. Applying
 configuration can redeploy the existing image without uploading new source, so the resulting deployment needs its own
-status/log checks. Current production still holds the earlier package's legacy JSON files; future packages from this
-source omit them.
+status/log checks. Production still runs the earlier release, whose original upload included legacy JSON; future
+packages from this source omit it.
 
 1. In the platform's Railway project, production environment, bring in staging's `gateway` service with **Sync**
    (production as the receiving environment). Review the staged changes before deploying: Sync shows staging's whole

@@ -29,11 +29,13 @@ authoring correction omits that default while retaining 5 retries. Its fresh sta
 no diagnostics, without another apply. See the dated [apply and verification record](operations.md#railway-infrastructure-as-code).
 After `fd2c5435` reached `SUCCESS`, read-only verification matched the retained manifest and source below and all 243
 packaged runtime file hashes, with no mismatches; Node was 24.22.0. Platform smoke after success passed 18 of 18 checks.
-No new source package was uploaded: the running application remains 0.5.7, including its legacy JSON files, while
+No new source package was uploaded: the running application remains 0.5.7. Its original upload included legacy JSON, while
 future packages from this source omit them. The checks establish package identity, configuration and public host
 behavior, not new application or money-path acceptance. An image's files do not establish whether a remote service
 selects Config as Code. Run plan/apply tooling from the source checkout with development dependencies, not from the
 production image.
+The owner subsequently applied production's corrected configuration too; its separate deployment and checks are
+recorded in [platform production](platform-production.md).
 
 **Restoration observed 2026-11-12 UTC:** the owner restored 0.5.7 as Railway deployment
 `c15b4206-aba2-4081-951f-8da53e3f7c5b`, image

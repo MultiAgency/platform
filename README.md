@@ -284,9 +284,10 @@ Each line is a gap; the linked page says how the rest is known. The
 - CI doesn't build or check the `platform` image (no Docker in the job): only a release candidate does, as its last
   gate (`pnpm check:platform-image`; [operations](docs/operations.md)).
 - Railway Infrastructure as Code is prepared in `.railway/railway.ts`, with the platform package retaining its exact
-  authoring inputs. The owner applied the staging plan on 2026-11-12 UTC; its resulting deployment reached `SUCCESS`
-  and the corrected authoring produced a zero-change plan. Production apply remains pending. Cutover is needed only
-  if a service still selects Config as Code. Existing deployed images still contain legacy JSON, whose announced
+  authoring inputs. The owner applied the staging and production plans on 2026-11-12 UTC; both resulting deployments
+  reached `SUCCESS` and passed 18 of 18 platform smoke checks. The corrected authoring produced zero-change plans in
+  both environments. Cutover is needed only if a service still selects Config as Code. Existing deployed images
+  still contain legacy JSON, whose announced
   cutoff is 2026-12-01; applying settings does not upload the new package that omits those files. A package's files do
   not establish remote configuration ownership. See
   [operations](docs/operations.md#railway-infrastructure-as-code).
