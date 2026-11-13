@@ -229,6 +229,10 @@ are covered in the Treasury app's `test/browser/strategy.cjs`; they are not depl
 
 ## Recovery limitation
 
+G14: response loss after acceptance can leave a withdrawal unknown without a correlation ID.
+Preserve its committed budget and never replay it. Automatic lookup recovery remains unverified;
+see the [provider investigation and Paperwork handoff](g14-provider-recovery.md).
+
 **Provider SDK 0.8.2 (introduced in SDK 0.5.6, 2026-11-10).** The dependency and lockfile pin 0.8.2 exactly.
 Official SDK source `416597b0c63a426b225b98b6d175c03bfb6a7947` adds limit-order methods and signed 1Click
 quote inputs for native EVM/Solana sign-intent. The tagged 0.5.6 and 0.5.7 platform releases expose neither
