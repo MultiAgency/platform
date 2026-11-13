@@ -16,7 +16,8 @@ import { APP_ROOT, appRoutes, confirms, type HostedSetup } from "../src/gateway/
 import { confirmRoutes } from "../src/gateway/app-confirm.js";
 import { daoStopRoutes } from "../src/gateway/dao-stop.js";
 import type { AgentEntry } from "../src/gateway/config.js";
-import type { DaoVotes } from "../src/gateway/app-dao.js";
+import { DaoRequests, type DaoVotes } from "../src/gateway/app-dao.js";
+import { DaoRequests as DaoRequests057 } from "./fixtures/app-dao-057.js";
 import type { DaoOwnerReads } from "../src/gateway/machine-authority.js";
 import { sendFailure } from "../src/http.js";
 import { rawKey } from "../src/nep413.js";
@@ -53,7 +54,11 @@ async function harness(t: import("node:test").TestContext) {
     derived: null as typeof signer | null,
     /** Runs while the agent's server is asked who owns it, as a chain read in flight. */
     onIdentity: null as null | (() => void | Promise<void>),
+    /** Holds a DAO filing at its chain read to test same-ID races across requests. */
     onLatestBlock: null as null | (() => void | Promise<void>),
+    latestBlockCalls: 0,
+    onHireArrival: null as null | ((count: number) => void),
+    hireArrivals: 0,
     /** Whether the stop page may be opened once more this hour. */
     mayOpen: (_key: string) => true };
   const forwarded: { path: string; headers: Record<string, unknown>; body: any }[] = [];
@@ -79,10 +84,11 @@ async function harness(t: import("node:test").TestContext) {
     owner: async () => state.derived ?? signer,
   };
   const daoVotes: DaoVotes = {
-    latestBlock: async () => { await state.onLatestBlock?.(); return 1_000; }, nextProposalId: async () => 57,
+    latestBlock: async () => { state.latestBlockCalls++; await state.onLatestBlock?.(); return 1_000; }, nextProposalId: async () => 57,
     findSignature: async (_dao, { hash }) => { if (state.findDown) throw new Error("indexer down"); return state.passed.get(hash) ?? state.signature; },
   };
   const server = createServer(async (req, res) => { try {
+    if (req.method === "POST" && req.url === "/apps/v1/dao-hires") state.onHireArrival?.(++state.hireArrivals);
     if (await confirmRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, confirms, APP_ROOT, agents, dir, () => state.stopping)) return;
     if (await daoStopRoutes(req, res, new URL(req.url!, "http://x").pathname, HOST, APP_ROOT, agents, () => state.stopping, { daoOwner, daoVotes, mayOpen: key => state.mayOpen(key),
       stopAutopilot: async (stopped, dao) => { stops.push({ agent: stopped.name, dao }); await new Promise(resolve => setTimeout(resolve, state.autopilotDelay));
@@ -1045,12 +1051,24 @@ test("finished DAO requests are removed after retention, and a deployment files 
   write("1".repeat(64), { createdAt: old, votingUntil: old + 1, expiresAt: old + 2 });
   write("2".repeat(64), { createdAt: old, votingUntil: old + 1, expiresAt: Date.now() + 86_400_000, signature: "c2lnbmVk" });
   write("3".repeat(64), { createdAt: old, votingUntil: old + 1, expiresAt: Date.now() - 86_400_000, signature: "c2lnbmVk" });
+  const oldHireId = "4".repeat(64);
+  const { scopes: _scopes, consent: _consent, ...common } = template;
+  const oldBrief = "Finished hire";
+  writeFileSync(join(".app-access", "dao-requests", `${oldHireId}.json`), JSON.stringify({ ...common, kind: "hire", id: oldHireId,
+    requestId: "finished-hire", brief: oldBrief, approved: { handle: "writer", brief: createHash("sha256").update(oldBrief).digest("hex"),
+      network: "near:mainnet", asset: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", payTo: "c".repeat(64),
+      amount: "500000", maxTimeoutSeconds: 1_200 }, validUntil: new Date(old + 2).toISOString(), under: "0".repeat(64),
+    relayed: null, createdAt: old, votingUntil: old + 1, expiresAt: old + 2 }));
+  const oldBond = join(".app-access", "dao-requests", `${oldHireId}.proposal-bond`);
+  writeFileSync(oldBond, JSON.stringify({ version: 1, id: oldHireId, bond: "1" }));
   for (let i = 0; i < MAX_DAO_REQUESTS_PER_DAY; i++)
     write(`f${i.toString(16).padStart(63, "0")}`, { createdAt: Date.now() - 1_000, votingUntil: Date.now() - 1, signature: null });
   const refused = await file();
   assert.equal(refused.status, 400, "a day's filings are bounded, whatever their windows");
   assert.match(refused.body.error, /in the last day/);
   assert.ok(!existsSync(join(".app-access", "dao-requests", `${"1".repeat(64)}.json`)), "a lapsed request past retention is removed");
+  assert.equal(existsSync(join(".app-access", "dao-requests", `${oldHireId}.json`)), false, "the finished hire is pruned");
+  assert.equal(existsSync(oldBond), false, "pruning a hire removes its proposal-bond sidecar with the request");
   assert.ok(existsSync(join(".app-access", "dao-requests", `${"2".repeat(64)}.json`)), "one whose signature can still complete stays");
   assert.ok(existsSync(join(".app-access", "dao-requests", `${"3".repeat(64)}.json`)), "retention counts from what a recorded signature completed until");
 });
@@ -1394,7 +1412,7 @@ test("a completed DAO consent or setup answers the same after its consent is rev
 // A DAO-owned market agent (docs/market.md; user decision, 2026-11-09): each hire is paid only after the DAO votes on its
 // exact terms, filed from the platform's own text and relayed once, under a DAO consent carrying `market`.
 test("a DAO approves a market hire from the platform's own text, and the platform relays the signature once", async t => {
-  const { port, state, forwarded, signer, staging, production, file, vote } = await harness(t);
+  const { port, state, forwarded, signer, staging, production, file, vote, daoVotes } = await harness(t);
   const { createHash } = await import("node:crypto");
   const brief = "An article\nWrite 300 words on NEAR Intents.";
   const approved = { handle: "writer", brief: createHash("sha256").update(brief).digest("hex"), network: "near:mainnet" as const,
@@ -1418,12 +1436,33 @@ test("a DAO approves a market hire from the platform's own text, and the platfor
   const filed = await ask();
   assert.equal(filed.status, 201, JSON.stringify(filed.body));
   const { request: pending } = filed.body;
+  const currentReader = new DaoRequests(".app-access", daoVotes);
+  const oldReader = new DaoRequests057(".app-access", daoVotes);
+  assert.deepEqual(oldReader.read(pending.hash), currentReader.read(pending.hash), "the actual 0.5.7 strict reader accepts the new hire record");
+  assert.equal(oldReader.hires("staging", "org_1", "treasury", "h-1")[0]?.id, pending.hash,
+    "the old reader lists requests while ignoring the non-JSON proposal-bond sidecar");
+  assert.equal(currentReader.hireProposalBond(pending.hash), "100000000000000000000000");
   assert.match(pending.description, /Approve market hire h-1/);
   assert.match(pending.description, /Hire writer\.market\.near\.ai for 0\.5 USDC, paid over x402/);
   assert.equal(filed.body.transactions.proposal.receiverId, DAO);
-  // Filed again while its vote is open: the same request, and no second proposal for the DAO to vote on (#70).
+  // A normal same-ID retry returns the original hash but no signable proposal. Only an app that has inspected
+  // the DAO for an earlier submission may explicitly ask for the original transaction.
   const pendingAgain = await ask();
-  assert.deepEqual([pendingAgain.status, pendingAgain.body.request.hash, pendingAgain.body.transactions], [200, pending.hash, { proposal: null, proposalAndVote: null }]);
+  assert.deepEqual([pendingAgain.status, pendingAgain.body.request.hash, pendingAgain.body.repeated], [200, pending.hash, true]);
+  assert.deepEqual(pendingAgain.body.transactions, { proposal: null, proposalAndVote: null });
+  assert.equal((await ask({ recoverProposal: "yes" })).status, 400, "recovery requires the exact dao-checked marker");
+  const recovered = await ask({ recoverProposal: "dao-checked" });
+  assert.deepEqual([recovered.status, recovered.body.request.hash, recovered.body.repeated], [200, pending.hash, true]);
+  assert.deepEqual(recovered.body.transactions, { proposal: filed.body.transactions.proposal, proposalAndVote: null });
+  const sidecar = join(".app-access", "dao-requests", `${pending.hash}.proposal-bond`);
+  const retainedBond = readFileSync(sidecar, "utf8");
+  writeFileSync(sidecar, JSON.stringify({ version: 1, id: "0".repeat(64), bond: "1" }));
+  assert.equal((await ask({ recoverProposal: "dao-checked" })).status, 503, "a sidecar for another request cannot generate a proposal transaction");
+  rmSync(sidecar);
+  assert.equal(currentReader.hireProposalBond(pending.hash), null, "older 0.5.7 requests have no sidecar");
+  assert.deepEqual((await ask({ recoverProposal: "dao-checked" })).body.transactions, { proposal: null, proposalAndVote: null },
+    "a legacy request with no original bond cannot reconstruct a proposal transaction");
+  writeFileSync(sidecar, retainedBond);
 
   state.replies["/rpc/market/approve"] = { status: 200, json: { requestId: "h-1", state: "paid", code: null, taskId: "t-1", taskState: "TASK_STATE_COMPLETED" } };
   const stateOf = () => call(port, `/apps/v1/dao-hires/${pending.hash}`, "GET", staging);
@@ -1449,6 +1488,225 @@ test("a DAO approves a market hire from the platform's own text, and the platfor
   const other = await ask({ approved: { ...approved, amount: "600000" } });
   assert.deepEqual([other.status, other.body.code], [409, "request_conflict"]);
   assert.equal((await call(port, `/apps/v1/dao-hires/${pending.hash}`, "GET", production)).status, 404);
+});
+
+test("concurrent same-ID DAO hire filings create one request and return no proposal on the default retry", async t => {
+  const { port, state, staging, file, vote } = await harness(t);
+  const market = (await file({ scopes: ["read", "market"] })).body.request;
+  vote(market.hash);
+  assert.equal((await call(port, `/apps/v1/dao-consents/${market.hash}`, "GET", staging)).body.state, "signed");
+  state.signature = null;
+  const brief = "Write a market summary.";
+  const approved = { handle: "writer", brief: createHash("sha256").update(brief).digest("hex"), network: "near:mainnet" as const,
+    asset: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", payTo: "c".repeat(64), amount: "500000", maxTimeoutSeconds: 1_200 };
+  const ask = (terms = approved) => call(port, "/apps/v1/dao-hires", "POST", staging,
+    { organization: "org_1", agent: "treasury", requestId: "concurrent-1", brief, approved: terms, validUntil: later(3) });
+  let entered!: () => void, release!: () => void;
+  const atChain = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let allArrived!: () => void;
+  const arrivals = new Promise<void>(resolve => { allArrived = resolve; });
+  state.onHireArrival = count => { if (count === 3) allArrived(); };
+  const blocksBefore = state.latestBlockCalls;
+  state.onLatestBlock = () => { state.onLatestBlock = null; entered(); return held; };
+  const firstRequest = ask();
+  await atChain;
+  const sameRequest = ask();
+  const changedRequest = ask({ ...approved, amount: "600000" });
+  try {
+    await arrivals;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(state.latestBlockCalls, blocksBefore + 1, "other same-ID filings cannot reach the chain read while the first is held");
+  } finally { release(); }
+  const [first, same, changed] = await Promise.all([firstRequest, sameRequest, changedRequest]);
+  assert.deepEqual([first.status, same.status, changed.status], [201, 200, 409]);
+  assert.equal(same.body.request.hash, first.body.request.hash);
+  assert.deepEqual(same.body.transactions, { proposal: null, proposalAndVote: null });
+  assert.equal(changed.body.code, "request_conflict");
+  assert.equal(accessLogText().split("\n").filter(line => line.includes('"event":"dao-hire-filed"')).length, 1);
+});
+
+test("an ended DAO market consent cannot recover its earlier hire proposal under a newer consent", async t => {
+  const { port, state, staging, file, vote } = await harness(t);
+  const consentForMarket = async () => {
+    const pending = (await file({ scopes: ["read", "market"] })).body.request;
+    vote(pending.hash);
+    const stored = await call(port, `/apps/v1/dao-consents/${pending.hash}`, "GET", staging);
+    assert.equal(stored.body.state, "signed");
+    state.signature = null;
+    return stored.body.consent.id as string;
+  };
+  const firstConsent = await consentForMarket();
+  const brief = "Write a market summary.";
+  const approved = { handle: "writer", brief: createHash("sha256").update(brief).digest("hex"), network: "near:mainnet" as const,
+    asset: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", payTo: "c".repeat(64), amount: "500000", maxTimeoutSeconds: 1_200 };
+  const ask = (over: Record<string, unknown> = {}) => call(port, "/apps/v1/dao-hires", "POST", staging,
+    { organization: "org_1", agent: "treasury", requestId: "consent-changed-1", brief, approved, validUntil: later(3), ...over });
+  const filed = await ask();
+  assert.equal(filed.status, 201);
+  assert.equal(JSON.parse(readFileSync(join(".app-access", "dao-requests", `${filed.body.request.hash}.json`), "utf8")).under, firstConsent);
+  new AppConsents(".app-access").revoke(firstConsent, null);
+  assert.equal((await ask({ recoverProposal: "dao-checked" })).status, 403, "no live market consent can recover an old proposal");
+  const nextConsent = await consentForMarket();
+  assert.notEqual(nextConsent, firstConsent);
+  const defaultRetry = await ask();
+  assert.deepEqual([defaultRetry.status, defaultRetry.body.request.hash, defaultRetry.body.transactions],
+    [200, filed.body.request.hash, { proposal: null, proposalAndVote: null }]);
+  const opted = await ask({ recoverProposal: "dao-checked" });
+  assert.deepEqual([opted.status, opted.body.code], [409, "consent_ended"],
+    "an app cannot recover an old proposal merely because it gained a new consent");
+  assert.equal(opted.body.transactions, undefined);
+  assert.equal(accessLogText().split("\n").filter(line => line.includes('"event":"dao-hire-filed"')).length, 1);
+});
+
+test("a DAO hire whose app credential ends during the chain read files no proposal", async t => {
+  const { port, state, staging, credentials, file, vote } = await harness(t);
+  const market = (await file({ scopes: ["read", "market"] })).body.request;
+  vote(market.hash);
+  assert.equal((await call(port, `/apps/v1/dao-consents/${market.hash}`, "GET", staging)).body.state, "signed");
+  state.signature = null;
+  const brief = "Write a market summary.";
+  const approved = { handle: "writer", brief: createHash("sha256").update(brief).digest("hex"), network: "near:mainnet" as const,
+    asset: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", payTo: "c".repeat(64), amount: "500000", maxTimeoutSeconds: 1_200 };
+  state.onLatestBlock = () => {
+    state.onLatestBlock = null;
+    for (const credential of credentials.list()) if (credential.deployment === "staging") credentials.revoke(credential.id);
+  };
+  const filed = await call(port, "/apps/v1/dao-hires", "POST", staging,
+    { organization: "org_1", agent: "treasury", requestId: "revoked-1", brief, approved, validUntil: later(3) });
+  assert.deepEqual([filed.status, filed.body.code], [403, "access_ended"]);
+  assert.equal(accessLogText().split("\n").filter(line => line.includes('"event":"dao-hire-filed"')).length, 0);
+});
+
+test("a repeated DAO hire filing returns no proposal if app access ends during its signature read", async t => {
+  const { port, state, staging, credentials, file, vote, daoVotes } = await harness(t);
+  const market = (await file({ scopes: ["read", "market"] })).body.request;
+  vote(market.hash);
+  assert.equal((await call(port, `/apps/v1/dao-consents/${market.hash}`, "GET", staging)).body.state, "signed");
+  state.signature = null;
+  const brief = "Write a market summary.";
+  const approved = { handle: "writer", brief: createHash("sha256").update(brief).digest("hex"), network: "near:mainnet" as const,
+    asset: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", payTo: "c".repeat(64), amount: "500000", maxTimeoutSeconds: 1_200 };
+  const ask = (over: Record<string, unknown> = {}) => call(port, "/apps/v1/dao-hires", "POST", staging,
+    { organization: "org_1", agent: "treasury", requestId: "replay-revoked", brief, approved, validUntil: later(3), ...over });
+  const first = await ask();
+  assert.equal(first.status, 201);
+  assert.ok(first.body.transactions.proposal, "the first filing gives the DAO a proposal to submit");
+  const original = daoVotes.findSignature;
+  let revokedDuringReplay = false;
+  daoVotes.findSignature = async (...args) => {
+    if (args[1].hash === first.body.request.hash) {
+      revokedDuringReplay = true;
+      for (const credential of credentials.list()) if (credential.deployment === "staging") credentials.revoke(credential.id);
+    }
+    return original(...args);
+  };
+  const repeated = await ask({ recoverProposal: "dao-checked" });
+  assert.equal(revokedDuringReplay, true, "the revocation occurred inside the repeated filing's chain read");
+  assert.deepEqual([repeated.status, repeated.body.code], [403, "access_ended"],
+    "a recovered proposal must not be returned after the app credential ends");
+  assert.equal(repeated.body.transactions, undefined);
+  assert.equal(accessLogText().split("\n").filter(line => line.includes('"event":"dao-hire-filed"')).length, 1,
+    "no second filing was made");
+});
+
+test("an opted DAO hire recovery returns no proposal when its deadline ends during the signature read", async t => {
+  const { port, state, staging, file, vote, daoVotes } = await harness(t);
+  const market = (await file({ scopes: ["read", "market"] })).body.request;
+  vote(market.hash);
+  assert.equal((await call(port, `/apps/v1/dao-consents/${market.hash}`, "GET", staging)).body.state, "signed");
+  state.signature = null;
+  const brief = "Write a market summary.";
+  const approved = { handle: "writer", brief: createHash("sha256").update(brief).digest("hex"), network: "near:mainnet" as const,
+    asset: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", payTo: "c".repeat(64), amount: "500000", maxTimeoutSeconds: 1_200 };
+  const ask = (requestId: string, over: Record<string, unknown> = {}) => call(port, "/apps/v1/dao-hires", "POST", staging,
+    { organization: "org_1", agent: "treasury", requestId, brief, approved, validUntil: later(3), ...over });
+  for (const deadline of ["votingUntil", "expiresAt"] as const) {
+    const requestId = `deadline-${deadline}`;
+    const filed = await ask(requestId);
+    assert.equal(filed.status, 201);
+    const hash = filed.body.request.hash as string;
+    const find = daoVotes.findSignature;
+    let changed = false;
+    daoVotes.findSignature = async (...args) => {
+      if (args[1].hash === hash) {
+        changed = true;
+        editRequest(hash, record => ({ ...record, [deadline]: Date.now() - 1 }));
+      }
+      return find(...args);
+    };
+    try {
+      const repeated = await ask(requestId, { recoverProposal: "dao-checked" });
+      assert.equal(changed, true, `${deadline} ended during the asynchronous signature read`);
+      assert.equal(repeated.status, 200, JSON.stringify(repeated.body));
+      assert.deepEqual(repeated.body.transactions, { proposal: null, proposalAndVote: null },
+        `${deadline} cannot leave a signable proposal after it ends`);
+    } finally { daoVotes.findSignature = find; }
+  }
+});
+
+test("a DAO hire funding answer keeps the signed approval retryable without marking it relayed", async t => {
+  const { port, state, forwarded, staging, file, vote } = await harness(t);
+  const { createHash } = await import("node:crypto");
+  const market = (await file({ scopes: ["read", "market"] })).body.request;
+  vote(market.hash);
+  assert.equal((await call(port, `/apps/v1/dao-consents/${market.hash}`, "GET", staging)).body.state, "signed");
+  state.signature = null;
+  const brief = "Write one paragraph.";
+  const approved = { handle: "writer", brief: createHash("sha256").update(brief).digest("hex"), network: "near:mainnet" as const,
+    asset: "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", payTo: "c".repeat(64), amount: "500000", maxTimeoutSeconds: 1_200 };
+  const ask = (over: Record<string, unknown> = {}) => call(port, "/apps/v1/dao-hires", "POST", staging,
+    { organization: "org_1", agent: "treasury", requestId: "funding-1", brief, approved, validUntil: later(3), ...over });
+  const first = (await ask()).body.request;
+  const read = (hash: string) => call(port, `/apps/v1/dao-hires/${hash}`, "GET", staging);
+  vote(first.hash);
+  state.replies["/rpc/market/approve"] = { status: 200, json: { requestId: "funding-1", state: "funding", code: null, taskId: null, taskState: null } };
+  const funding = await read(first.hash);
+  assert.deepEqual([funding.status, funding.body.state, funding.body.hireState], [200, "pending", "funding"], JSON.stringify(funding.body));
+  const { appDaoHireState } = await import("../src/contract/app-access.js");
+  assert.equal(appDaoHireState.parse(funding.body).hireState, "funding");
+  assert.equal(forwarded.filter(call => call.path === "/rpc/market/approve").length, 1);
+  state.replies["/rpc/market/approve"] = { status: 200, json: { requestId: "funding-1", state: "funding_review", code: "topup_unverified", taskId: null, taskState: null } };
+  const review = await read(first.hash);
+  assert.deepEqual([review.status, review.body.state, review.body.hireState], [200, "pending", "funding_review"], JSON.stringify(review.body));
+  assert.equal(appDaoHireState.parse(review.body).hireState, "funding_review");
+  assert.equal(forwarded.filter(call => call.path === "/rpc/market/approve").length, 2);
+
+  for (const json of [
+    { requestId: "another-hire", state: "paid", code: null, taskId: "t-wrong", taskState: null },
+    { requestId: "funding-1", state: "not_found", code: null, taskId: null, taskState: null },
+  ]) {
+    state.replies["/rpc/market/approve"] = { status: 200, json };
+    const unverified = await read(first.hash);
+    assert.equal(unverified.status, 502, "an agent answer without this hire's recorded outcome cannot consume its vote");
+    assert.equal(unverified.body.code, "agent_answer_unverified");
+  }
+  assert.equal(forwarded.filter(call => call.path === "/rpc/market/approve").length, 4);
+
+  editRequest(first.hash, record => ({ ...record, expiresAt: Date.now() - 1 }));
+  const expired = await read(first.hash);
+  assert.equal(expired.status, 410, "an expired signature cannot resume funding");
+  assert.equal(expired.body.code, "signed_expired");
+  assert.match(expired.body.error, /prior funding may remain/i);
+  assert.match(expired.body.error, /market\/status/);
+  assert.match(expired.body.error, /fresh.*same terms.*same requestId/i);
+  assert.doesNotMatch(expired.body.error, /Nothing was done/);
+  assert.equal(forwarded.filter(call => call.path === "/rpc/market/approve").length, 4);
+
+  const changed = await ask({ approved: { ...approved, amount: "600000" } });
+  assert.deepEqual([changed.status, changed.body.code], [409, "request_conflict"], "expiry cannot change this hire's terms");
+  const renewed = await ask();
+  assert.equal(renewed.status, 201, "expired signed funding can be approved by a new vote");
+  const second = renewed.body.request;
+  assert.notEqual(second.hash, first.hash, "the new vote has its own proposal and signature identity");
+  assert.equal((await read(first.hash)).body.code, "signed_expired", "the earlier signed request remains evidence");
+  vote(second.hash);
+  state.replies["/rpc/market/approve"] = { status: 200, json: { requestId: "funding-1", state: "paid", code: null, taskId: "t-2", taskState: "TASK_STATE_WORKING" } };
+  const relayed = await read(second.hash);
+  assert.deepEqual([relayed.status, relayed.body.state, relayed.body.hireState], [200, "relayed", "paid"], JSON.stringify(relayed.body));
+  assert.equal(forwarded.filter(call => call.path === "/rpc/market/approve").length, 5);
+  assert.equal((await read(second.hash)).body.state, "relayed");
+  assert.equal(forwarded.filter(call => call.path === "/rpc/market/approve").length, 5, "a recorded payment is not relayed twice");
 });
 
 test("a DAO sets up a market agent by vote on a host that sets them up, and creates it as a market agent", async t => {

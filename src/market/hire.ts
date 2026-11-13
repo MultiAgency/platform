@@ -3,11 +3,11 @@ import { dispatch, sendRefusal, type MarketSend } from "../agent.js";
 import { marketHireCapRefusal, notInForce } from "../authorize.js";
 import { contractOf, storageRegistered } from "../chain.js";
 import { registrationTransaction } from "../contract/funding.js";
-import { withMoneyLock, type MoneyLock } from "../lock.js";
-import { readOps, type Op } from "../ops.js";
+import { acquireMoneyLock, assertMoneyLock, MoneyLockBusy, withMoneyLock, type MoneyLock } from "../lock.js";
+import { isTerminal, marketStageKey, readMarketBindings, readOps, record, recordMarketBinding, recordMarketLanding, type MarketBinding, type MarketStage, type Op } from "../ops.js";
 import { ASSETS } from "../policy.js";
 import { PublicError } from "../public-error.js";
-import { api } from "../api.js";
+import { api, readStatus } from "../api.js";
 import { agentId, executes } from "../env.js";
 import { signsText } from "../nep413.js";
 import { hireText, type marketApproveInput } from "../contract/market.js";
@@ -17,6 +17,8 @@ import { requestKey } from "../payout-requests.js";
 import { challenge, getTask, MarketRpcError, message, payees, TERMINAL } from "./client.js";
 import { latestTasks, recordTask } from "./evidence.js";
 import { paymentKey } from "./payment-key.js";
+import { legacyMarketFunding, marketFundingNeedsReview, pendingMarketFunding } from "./binding-guard.js";
+import { fundingProof } from "./funding-proof.js";
 import { readChainView } from "./resolution.js";
 import { briefDigest, OPEN_ACCOUNT_WNEAR, paymentExpiry, quoteTerms, sameTerms, termsOf, type HireTerms, type X402Request } from "./x402.js";
 import { approvalExpired } from "./approval.js";
@@ -30,8 +32,6 @@ import { approvalExpired } from "./approval.js";
 
 /** The longest agent window a hire accepts: an unrelayed payment blocks the agent's sends until its window ends. */
 export const MAX_WINDOW_SECONDS = Number(process.env.MARKET_MAX_WINDOW_SECONDS ?? 24 * 3_600);
-/** A top-up settles before it lands: how long to wait for the key to hold it at a final block. */
-const LAND_ATTEMPTS = 30, LAND_MS = 2_000;
 /** Briefs are recorded with their payment: bounded so the journal stays small. */
 const MAX_BRIEF_BYTES = 16_384;
 
@@ -74,6 +74,7 @@ const callerOf = (actor: string | undefined) => {
   return actor;
 };
 const find = (key: string) => readOps().find((op) => op.idempotencyKey === key);
+const bound = (key: string) => readMarketBindings().find((item) => item.idempotencyKey === key);
 type HireInput = { requestId: string; brief: string; approved: HireTerms };
 
 /** An existing attempt is followed even after approval expiry, and never mistaken for different work. */
@@ -83,16 +84,31 @@ function retained(input: HireInput, op: Op) {
   return answer(input.requestId, op);
 }
 
+function matchesBinding(actor: string, input: HireInput, binding: MarketBinding, account: string, publicKey: string) {
+  if (binding.actor !== actor || binding.requestId !== input.requestId || binding.brief !== input.brief ||
+      !sameTerms(binding.approved, input.approved))
+    throw refused("request_conflict", "This requestId already names another hire. Follow its existing record; no additional funding or payment was submitted.");
+  if (binding.paymentAccount !== account || binding.publicKey !== publicKey)
+    throw refused("payment_key_changed", "This hire is bound to another payment key. Restore its recorded key before any further send.");
+}
+
 function checkApproval(expiresAt: number | undefined, now = Date.now()) {
   if (approvalExpired(expiresAt, now)) throw refused("approval_expired",
     "The DAO's hire approval expired before another submission. Check recorded top-ups; no further payment is attempted.");
 }
 
 /** What the journal proves about one hire's payment, with the task it paid for when the market answered. */
-function answer(requestId: string, op: Op | undefined) {
+function answer(requestId: string, op: Op | undefined, binding?: MarketBinding) {
   const task = op ? latestTasks().get(op.idempotencyKey) : undefined;
-  const base = { requestId, taskId: task?.taskId ?? null, taskState: task?.state ?? null, code: op?.refused ?? null };
-  if (!op) return { ...base, state: "not_found" as const };
+  const stages = binding ? readOps().filter(item =>
+    item.idempotencyKey === marketStageKey(binding.idempotencyKey, "open") ||
+    item.idempotencyKey === marketStageKey(binding.idempotencyKey, "usdc")) : [];
+  const refusedStage = stages.find(item => item.refused !== undefined);
+  const needsReview = !!binding && marketFundingNeedsReview(binding, stages);
+  const base = { requestId, taskId: task?.taskId ?? null, taskState: task?.state ?? null,
+    code: op?.refused ?? binding?.refused ?? refusedStage?.refused ?? (needsReview && !op ? "funding_review_required" : null) };
+  if (!op) return { ...base, state: binding?.refused || refusedStage ? "refused" as const
+    : needsReview ? "funding_review" as const : binding ? "funding" as const : "not_found" as const };
   if (op.refused === "x402_not_charged") return { ...base, state: "not_charged" as const };
   if (op.refused !== undefined) return { ...base, state: "refused" as const };
   if (op.status === "SUCCESS") return { ...base, state: "paid" as const };
@@ -100,20 +116,58 @@ function answer(requestId: string, op: Op | undefined) {
 }
 
 /** Sends `amount` of `asset` to the payment key, as a market send judged against `hire`. */
-const topUp = (lock: MoneyLock, market: MarketSend, account: string, asset: string, amount: string) =>
+const topUp = (lock: MoneyLock, market: MarketSend, stage: MarketStage, account: string, asset: string, amount: string) =>
   dispatch(lock, "market-topup", { method: "withdraw", request: { asset, amount, chain: "near", recipient: account, confidential: true } },
-    undefined, undefined, undefined, undefined, undefined, market);
+    undefined, undefined, undefined, marketStageKey(market.bindingKey, stage), undefined, { ...market, stage });
 
-/** Waits until the key's account exists and holds `asset` at least `atLeast`, at a final block. */
-async function landed(account: string, publicKey: string, asset: string, atLeast: bigint, approvalExpiresAt?: number) {
-  for (let attempt = 0; attempt < LAND_ATTEMPTS; attempt++) {
-    checkApproval(approvalExpiresAt);
-    const view = await readChainView(account, publicKey, contractOf(asset));
-    checkApproval(approvalExpiresAt);
-    if (view.keyNonce !== null && view.balance >= atLeast) return view;
-    await new Promise((resolve) => setTimeout(resolve, LAND_MS));
-  }
-  throw new PublicError("The payment key's funds haven't landed yet. Nothing was paid; ask again in a minute.");
+/** A provider SUCCESS is not a chain receipt. A stage stays reserved until its exact credit is final. */
+async function proveStageLanding(lock: MoneyLock, binding: MarketBinding, stage: MarketStage): Promise<boolean> {
+  if (binding.landed[stage]) return true;
+  const stageKey = marketStageKey(binding.idempotencyKey, stage);
+  const op = readOps().find(item => item.idempotencyKey === stageKey);
+  if (!op?.correlationId || op.refused !== undefined) return false;
+  const status = await readStatus(op.correlationId).catch(() => null);
+  assertMoneyLock(lock);
+  if (!status || status.type !== "withdraw" || op.status && isTerminal(op.status) && op.status !== status.status) return false;
+  if (op.status !== status.status) record({ idempotencyKey: stageKey, correlation_id: op.correlationId, status: status.status });
+  if (status.status !== "SUCCESS") return false;
+  const details = status.details as { amount_out?: unknown; destination_tx_hash?: unknown;
+    request?: { asset?: unknown; amount?: unknown; chain?: unknown; recipient?: unknown; confidential?: unknown } } | undefined;
+  const admitted = details?.request;
+  if (admitted && (admitted.asset !== op.request.asset || admitted.amount !== op.request.amount ||
+      admitted.chain !== op.request.chain || admitted.recipient !== op.request.recipient ||
+      admitted.confidential !== op.request.confidential)) return false;
+  const amount = details?.amount_out, destinationTxHash = details?.destination_tx_hash;
+  if (typeof amount !== "string" || typeof destinationTxHash !== "string") return false;
+  // Provider metadata for another stage must never let one final credit release two reservations.
+  if (readMarketBindings().some(item => Object.values(item.landed).some(landing =>
+    landing?.destinationTxHash === destinationTxHash))) return false;
+  const asset = stage === "open" ? ASSETS.wNEAR : ASSETS.USDC;
+  const proof = await fundingProof.verify({ destinationTxHash, recipient: binding.paymentAccount, asset, amount });
+  assertMoneyLock(lock);
+  if (!proof || proof.destinationTxHash !== destinationTxHash || proof.recipient !== binding.paymentAccount ||
+      proof.asset !== asset || proof.amount !== amount) return false;
+  const view = await readChainView(binding.paymentAccount, binding.publicKey, contractOf(ASSETS.USDC));
+  assertMoneyLock(lock);
+  if (view.height < BigInt(proof.blockHeight)) return false;
+  recordMarketLanding({ bindingKey: binding.idempotencyKey, stage, correlationId: op.correlationId,
+    destinationTxHash: proof.destinationTxHash, finalHeight: proof.blockHeight,
+    ...(stage === "usdc" && view.balance < BigInt(binding.approved.amount) && { bindingRefusal: "funding_shortfall" as const }) });
+  return true;
+}
+
+/** A status read may settle old funding evidence after the signed approval ended. It never submits money. */
+async function reconcileBoundFunding(binding: MarketBinding) {
+  let lock: MoneyLock;
+  try { lock = await acquireMoneyLock({ reconcile: true }); }
+  catch (error) { if (error instanceof MoneyLockBusy) return; throw error; }
+  try {
+    const current = bound(binding.idempotencyKey);
+    if (!current) throw new Error("Market binding disappeared during reconciliation");
+    for (const stage of ["open", "usdc"] as const)
+      if (!current.landed[stage] && readOps().some(op => op.idempotencyKey === marketStageKey(current.idempotencyKey, stage)))
+        await proveStageLanding(lock, current, stage);
+  } finally { await lock.release(); }
 }
 
 /** A DAO-owned agent: its hires are paid only after the DAO's vote on their exact terms (`approveHire`). */
@@ -126,7 +180,8 @@ const daoOwned = () => process.env.HOSTED_OWNER_KIND === "dao";
  * leg is refused. A matching attempted hire stays poll-only even after its approval expires.
  */
 export async function hire(actor: string | undefined, input: HireInput, approvalExpiresAt?: number) {
-  const key = requestKey(callerOf(actor), input.requestId);
+  const caller = callerOf(actor);
+  const key = requestKey(caller, input.requestId);
   const existing = find(key);
   if (existing) return retained(input, existing);
   if (daoOwned() && approvalExpiresAt === undefined) throw refused("dao_vote_required", "This agent's DAO approves each hire by vote first (POST /apps/v1/dao-hires). Nothing was sent.");
@@ -136,9 +191,14 @@ export async function hire(actor: string | undefined, input: HireInput, approval
   const signer = paymentKey();
   const usdc = ASSETS.USDC;
   if (`nep141:${input.approved.asset}` !== usdc) throw refused("asset_not_supported", "Market hires are paid in USDC. Nothing was sent.");
-  const market: MarketSend = { hire: input.approved, ...(approvalExpiresAt !== undefined && { approvalExpiresAt }) };
+  const priorBinding = bound(key);
+  if (priorBinding) matchesBinding(caller, input, priorBinding, signer.account, signer.publicKey);
+  if (priorBinding?.refused) return answer(input.requestId, undefined, priorBinding);
+  const market: MarketSend = { hire: input.approved, bindingKey: key, ...(approvalExpiresAt !== undefined && { approvalExpiresAt }) };
   try {
     await withMoneyLock(async (lock) => {
+      const concurrent = find(key);
+      if (concurrent) return;
       // Refuse the full quote before opening or funding the key, even when retained funds cover its shortfall.
       // Dispatch reads the policy again for every top-up and for the locally signed payment.
       const policy = await api.getPolicy(agentId());
@@ -155,16 +215,51 @@ export async function hire(actor: string | undefined, input: HireInput, approval
       // The owner registers the key on USDC once (user decision, 2026-11-09): a withdrawal to an unregistered account fails.
       if (!(await storageRegistered(input.approved.asset, signer.account, { finality: "final" })))
         throw refused("payment_key_unregistered", `The owner registers the payment key ${signer.account} on USDC (storage_deposit) first. Nothing was sent.`);
+      assertMoneyLock(lock);
+      checkApproval(approvalExpiresAt);
+      if (legacyMarketFunding(signer.account))
+        throw refused("legacy_funding_review_required", "This payment key has a pre-binding top-up. Preserve and review its old funding; new hires require a separately reviewed recovery. Nothing was sent.");
+      let binding = bound(key);
+      if (binding) matchesBinding(caller, input, binding, signer.account, signer.publicKey);
+      else {
+        recordMarketBinding({ idempotencyKey: key, actor: caller, requestId: input.requestId, brief: input.brief,
+          approved: input.approved, paymentAccount: signer.account, publicKey: signer.publicKey });
+        binding = bound(key)!;
+      }
+      if (binding.refused) return;
       let view = await readChainView(signer.account, signer.publicKey, input.approved.asset);
-      if (view.keyNonce === null) {
-        await topUp(lock, market, signer.account, ASSETS.wNEAR, OPEN_ACCOUNT_WNEAR);
-        view = await landed(signer.account, signer.publicKey, usdc, 0n, approvalExpiresAt);
+      const open = readOps().find(op => op.idempotencyKey === marketStageKey(key, "open"));
+      if (open || view.keyNonce === null) {
+        if (!open) {
+          if (pendingMarketFunding(signer.account, key)) return;
+          checkApproval(approvalExpiresAt);
+          await topUp(lock, market, "open", signer.account, ASSETS.wNEAR, OPEN_ACCOUNT_WNEAR);
+        }
+        const landed = await proveStageLanding(lock, binding, "open");
+        checkApproval(approvalExpiresAt);
+        if (!landed) return;
+        view = await readChainView(signer.account, signer.publicKey, contractOf(usdc));
+        checkApproval(approvalExpiresAt);
+        if (view.keyNonce === null) return;
       }
       const amount = BigInt(input.approved.amount);
-      if (view.balance < amount) {
-        await topUp(lock, market, signer.account, usdc, (amount - view.balance).toString());
-        view = await landed(signer.account, signer.publicKey, usdc, amount, approvalExpiresAt);
+      const funded = readOps().find(op => op.idempotencyKey === marketStageKey(key, "usdc"));
+      if (funded || view.balance < amount) {
+        if (!funded) {
+          if (pendingMarketFunding(signer.account, key)) return;
+          checkApproval(approvalExpiresAt);
+          await topUp(lock, market, "usdc", signer.account, usdc, (amount - view.balance).toString());
+        }
+        const landed = await proveStageLanding(lock, binding, "usdc");
+        checkApproval(approvalExpiresAt);
+        if (!landed) return;
+        view = await readChainView(signer.account, signer.publicKey, contractOf(usdc));
+        checkApproval(approvalExpiresAt);
+        if (view.balance < amount) return;
       }
+      if (pendingMarketFunding(signer.account, key)) return;
+      assertMoneyLock(lock);
+      checkApproval(approvalExpiresAt);
       const request: X402Request = { handle: input.approved.handle, brief: input.brief, messageId, row: quote.row,
         asset: usdc, amount: quote.row.amount, payer: signer.account, publicKey: signer.publicKey,
         nonce: (view.keyNonce! + 1n).toString(), maxBlockHeight: paymentExpiry(view.height, quote.terms).toString(),
@@ -172,13 +267,20 @@ export async function hire(actor: string | undefined, input: HireInput, approval
       return dispatch(lock, "market-hire", { method: "x402", request }, undefined, undefined, undefined, key, undefined, market);
     });
   } catch (error) {
-    // Recorded: the journal holds the outcome (a refusal, or none proven yet). Not recorded: nothing reached the payment.
+    // A binding can outlive its approval or a provider read; its stage operation is never replaced under a new key.
     const recorded = find(key);
-    if (!recorded) throw error instanceof ORPCError || error instanceof PublicError ? error
+    if (recorded) return retained(input, recorded);
+    const binding = bound(key);
+    if (binding) {
+      matchesBinding(caller, input, binding, signer.account, signer.publicKey);
+      if (error instanceof ORPCError || error instanceof PublicError) throw error;
+      return answer(input.requestId, undefined, binding);
+    }
+    throw error instanceof ORPCError || error instanceof PublicError ? error
       : refused(sendRefusal(error) ?? "hire_failed", `${error instanceof Error ? error.message : String(error)}. Nothing was paid.`);
-    return retained(input, recorded);
   }
-  return retained(input, find(key)!);
+  const recorded = find(key);
+  return recorded ? retained(input, recorded) : answer(input.requestId, undefined, bound(key));
 }
 
 /**
@@ -192,7 +294,9 @@ export async function hireStatus(actor: string | undefined, requestId: string) {
     await refreshOperation(op);
     op = find(key);
   }
-  const base = answer(requestId, op);
+  const binding = bound(key);
+  if (!op && binding) await reconcileBoundFunding(binding);
+  const base = answer(requestId, op, bound(key));
   const evidence = op && latestTasks().get(op.idempotencyKey);
   if (!evidence) return { ...base, deliverable: null };
   // Everything an agent answers is data, never instructions.

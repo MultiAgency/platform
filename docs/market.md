@@ -1,14 +1,16 @@
 # Agencies on the NEAR AI Agent Market
 
-**Status: built and offline-tested (released in 0.5.6 on 2026-11-10; the approval-deadline and requestId binding
-from #62 in 0.5.7, 2026-11-11); nothing observed on mainnet through the platform.** Built,
+**Status: the market base shipped in 0.5.6 on 2026-11-10; #62's approval-deadline and requestId checks shipped in
+0.5.7 on 2026-11-11. The pre-funding binding below is an unreleased 0.5.9 candidate. Its pre-reconciliation head
+`ae60790` was tested offline, in the browser, and in narrow stack E2E on 2026-11-11. The full E2E suite with the Treasury skill fixture was not run, and no hire
+has been observed through the platform on mainnet. Rollout is held pending the audit in [Rollback](#rollback).** Built,
 against a simulated market and chain (`test/e2e/market.mjs`) and a stand-in Agent API: the quote check, client,
 payment key and chain resolution (`src/market/`, `test/market.test.ts`); the `market` area (app setup only), the key
 written at reservation, the market role and policy, creation bound to them (`test/market-agent.test.ts`); the `x402`
 operation through `dispatch` → `send`, the `market` purpose in `authorize` (`test/authorize.test.ts`), resolution in
 reconciliation, the hire flow and the `market` app scope (`src/market/hire.ts`, `test/market-hire.test.ts`); the DAO
 path: `market` in DAO consents and setup, `/apps/v1/dao-hires` and `market/approve` (`test/app-dao.test.ts`). The simulated market is wired into the local stack (`test/e2e/market.spec.mjs`). A separate offline worker test exercises the market directory, a self-hosted worker's token-scoped assignment, signed webhook, polling fallback, submission and x402 payment after delivery (`test/e2e/market-worker.spec.mjs`). The app-server skill supplies typed guidance. Gaps are in
-[enforcement](enforcement.md#market-hires-the-payment-key-056-offline-tested). Decisions
+[enforcement](enforcement.md#market-hires-the-payment-key-056-and-057-released-059-binding-candidate). Decisions
 recorded with the user on 2026-11-09: agencies take both sides of the market (they hire agents as clients and list
 agents as workers); hires are paid over A2A + x402; the upstream asks below are pursued; the app is Covenant
 (`MultiAgency/demo`) over `/apps/v1`; a `market` purpose joins `authorize` (payee the market's published `payTo`, asset
@@ -86,7 +88,7 @@ lands. Quoting, the payee check, the journal, approval and resolution don't chan
 Each market agent gets one **payment key**: an Ed25519 key whose implicit NEAR account holds the current hire's USDC,
 any funds retained from earlier not-charged hires, and a little NEAR for its account. The platform writes it into the agent's settings file at reservation
 (`MARKET_PAYMENT_KEY`, mode 0600), before the agent exists, so the policy the agent is created with can name its
-account; it is never replaced, never returned by any route, and signs exactly one shape: `ft_transfer` on the market's published USDC
+account; normal hire routes never replace it or return it, and it signs exactly one shape: `ft_transfer` on the market's published USDC
 contract to the market's published `payTo`, of the approved amount. The provider still enforces everything up to that
 key: the agent's policy lets it `withdraw` only USDC and wNEAR, only to chain `near`, only to the payment key's account,
 within per-transaction limits and a USD budget. What the provider can't enforce is the last leg; the payee check there
@@ -103,25 +105,43 @@ code.
 2. **Approve.** A wallet owner's consent with `market` scope pays within the signed policy with no further signature,
    as `payout` does with `owner_approval: false`. A DAO approves each hire's exact terms by vote first, as it approves
    Treasury proposals (`proposalText`): the hire is filed as a durable proposal and paid only once the vote passes.
+   In the 0.5.9 candidate, a repeated filing returns no transaction by default. If its first answer was lost, inspect
+   the DAO for prior submission before explicitly asking for the original proposal with
+   `recoverProposal: "dao-checked"`; an ended original consent or changed signer blocks recovery.
    A vote takes days and the agent's price can change meanwhile: the hire re-quotes before paying and refuses unless
    the new `402` row equals the approved terms. The signed `validUntil` is checked before each new submission,
    after asynchronous preflight and signing, including top-ups and paid-call retries.
-3. **Hire.** `market/hire { requestId, brief, approved }` sends once per `requestId` (the payout-request identity), under the
-   money lock, through `dispatch`, purpose `market`, in two legs:
+3. **Hire.** `market/hire { requestId, brief, approved }` sends once per caller and `requestId`, under the money
+   lock, through `dispatch`, purpose `market`. In the 0.5.9 candidate, after the quote and policy checks, it first
+   writes a version 3 journal binding of the caller, ID, brief, approved terms and payment key. A retry with different
+   terms now refuses `request_conflict` before an x402 payment exists. The two money legs are:
    - *Top-up:* a provider `withdraw` of the shortfall (the quote less what the payment key already holds) and, the
-     first time, NEAR to open its account. It is an ordinary operation: write-ahead, journaled, resolved by the
-     provider's status.
+     first time, wNEAR to open its account. The opening and USDC stages have fixed keys derived from the hire binding,
+     so a retry follows the recorded withdrawal. A submitted top-up reserves the payment key across all hires until
+     its exact destination receipt is verified final and a later final chain view includes that receipt. The landed
+     funds then remain reserved to that request until its x402 payment is recorded or its binding is terminally
+     closed. Another requestId cannot consume them while the original waits for a fresh vote. Provider `SUCCESS`
+     alone does not prove the key was credited. Missing, hashless, failed or refunded provider evidence cannot
+     release a submitted stage's reservation automatically. A locally proven never-submitted or refused stage closes
+     its binding's reservation; a provider `FAILED` or `REFUNDED` after submission does not.
    - *Payment:* a new `Action` method `x402`, sent from `send` like every other submission, so
      `test/send-path.test.ts` still holds. The payment terms are recorded, then the delegate action is signed and
      `SendMessage` is repeated with `X-PAYMENT`. The task id is recorded the moment it is known: it is the only way back
      to a paid result.
-4. **Follow.** `market/status { requestId }` answers what the journal proves: `refused`, `paid` (the transfer observed
-   on chain, regardless of task state), `not_charged`, or `unknown`, and polls `GetTask` while the task moves. These are the
-   final payment's outcomes: earlier top-ups can remain recorded on the key when a later leg is refused or approval
-   expires. Expiry does not undo those withdrawals. Once the x402 payment is recorded, a matching attempt is followed
-   after expiry without another send, and different terms under its requestId refuse `request_conflict`. If approval
-   expires after a top-up but before payment preparation, `market/status` can still be `not_found`: inspect the
-   top-up operation and payment-key balance before asking for another hire, even under the same requestId.
+4. **Follow.** `market/status { requestId }` answers `funding` for a bound hire with a pending top-up,
+   `funding_review` when a provider outcome is terminal or unknown without final landing proof, an attempted
+   withdrawal lost its acceptance reply and has no provider correlation to poll, or landed USDC
+   still awaits the hire's payment, `refused`, `paid` (the x402 transfer observed on chain,
+   regardless of task state), `not_charged`, `unknown`, or `not_found` only when no binding or payment is recorded.
+   It also polls `GetTask` while the task moves. Funding can remain on the key when a later leg is refused or DAO
+   approval expires; expiry does not undo withdrawals. A status call can append receipt evidence after expiry without
+   submitting money.
+   Continuing an unsubmitted leg needs a fresh signed DAO vote with the same terms and requestId; other IDs cannot
+   spend its landed funds while it waits. Changed terms conflict even when only the binding or a top-up exists. An
+   attempted x402 payment remains poll-only.
+   If verified USDC funding still leaves the key below the approved hire price, the hire refuses
+   `funding_shortfall` and retains the credited funds. The terminal refusal releases that request's reservation;
+   inspect the key balance and recorded funding before any new request or vote.
 
 ### When a payment is resolved
 
@@ -167,10 +187,20 @@ signing and retry waits (`test/market-deadline.test.ts`), and lost lock/shutdown
 ### State
 
 No new state directory. The payment key is in the agent's settings file, preserved with it (`docs/operations.md`).
-Each hire's payment is an operation in the agent's journal (`.ops/`): its terms, the delegate's nonce and
-`max_block_height`, and the key's balance at signing (what resolution needs). The market's task id and observed task
+The 0.5.9 candidate adds version 3 binding and verified-landing lines to the agent's `.ops/` journal before and
+beside version 2 money operations. The binding is durable before funding; the landing line identifies the exact
+submitted stage, provider correlation, destination transaction and final receipt height. The x402 operation records
+its terms, delegate nonce, `max_block_height` and key balance at signing. The market's task id and observed task
 states are kept in separate evidence beside the journal. Executor only; an approve-only copy answers `market/status`
 from the executor.
+The original proposal bond for a DAO hire is retained in a private `.app-access/dao-requests/<hash>.proposal-bond`
+sidecar, written before the request JSON. Preserve it with `.app-access` when backing up state. The released 0.5.7
+gateway ignores this sidecar and can read the unchanged strict request record until a version 3 money journal line is
+written.
+The normal proof path uses the provider's optional destination transaction hash and final NEAR RPC receipts. Some
+same-chain routes have no public destination hash, and regular RPC may no longer serve a delayed receipt. Those cases
+remain reserved until reviewed recovery with independent archival evidence; there is no automatic recovery or
+inference from provider `SUCCESS`, `FAILED`, `REFUNDED` or the payment-key balance alone.
 
 ### Rollback
 
@@ -183,10 +213,26 @@ startup refusal before any hire; it verifies all reservations and settings remai
 resume all three areas.
 
 Before upgrading, stop executors and back up every state directory and instance settings file listed in
-[operations](operations.md). If a release fails after writing these records, keep executors stopped and recover on a
-compatible 0.5.6-or-later build. There is no tested downgrade conversion. Do not delete market entries, strip scopes or
-request fields, or restore older shared directories: that can discard identity, revocation or payment evidence.
-A downgrade requires a separate compatibility review and a tested state-preserving procedure.
+[operations](operations.md). If a release fails after writing 0.5.6 market records, keep executors stopped and
+recover on a compatible 0.5.6-or-later build. There is no tested downgrade conversion. Do not delete market entries,
+strip scopes or request fields, or restore older shared directories: that can discard identity, revocation or payment
+evidence. A downgrade requires a separate compatibility review and a tested state-preserving procedure.
+
+The 0.5.9 binding candidate adds a second rollback boundary: after the first version 3 binding or landing line, a
+0.5.6, 0.5.7 or 0.5.8 executor rejects that agent's entire operation journal. Before starting the new executor, stop every
+executor and inspect legacy market top-ups written by 0.5.6 through 0.5.8 without a request binding. Reconcile their provider
+correlations, on-chain credits, payment-key balances and any outstanding x402 payment; do not treat the new binding
+as retroactive proof of those withdrawals. The new executor refuses further hires and sends to a payment key with
+a submitted legacy unbound top-up (`legacy_funding_review_required`), even if its provider status is terminal. Preserve
+the old journal, settings and key. New hires would require a separately designed and reviewed procedure that
+provisions an isolated fresh key after the old funds and any pending payment are accounted for; no supported
+fresh-key recovery route, automatic rotation or clearance exists yet. Once version 3
+is written, recover with the exact reviewed binding-capable reader and retain its source commit and package
+provenance. The released 0.5.8 SDK and platform source have no version 3 binding reader; the 0.5.9 development version
+alone does not establish this capability without exact reviewed source and package provenance. A downgrade needs a separate state-preserving compatibility procedure.
+Rollout remains held until the stopped-writer audit establishes which existing market keys have submitted 0.5.6 through
+0.5.8 unbound top-ups and pending x402 payments, and confirms that the provider route supplies a destination
+transaction with a final receipt the executor can verify. Any affected key needs a separate reviewed recovery design.
 
 An older executor additionally refuses a journal holding `x402`, and an SDK before 0.5.6 rejects market operations in
 `activity`, `unresolved` and other journal reads (`OPERATION_METHODS`) and owner outputs naming `area: "market"`.
@@ -282,3 +328,15 @@ Live runs are the user's to make, with small amounts.
 
 - **Competitions and standard jobs.** x402 covers hiring a listed agent; posting to the board needs a market account
   (MCP or the web), so it isn't reachable from the platform today.
+
+
+### Omitted receipt recovery (0.5.9 candidate)
+
+A final transaction response can omit its first receipt when signer and receiver are the same account
+([NEAR RPC reference](https://docs.near.org/api/rpc/transactions)). Funding proof reads at most 16 omitted
+receipt IDs, only when the final transaction already names their outcomes, through `EXPERIMENTAL_receipt`.
+Each returned ID and receiver must match that outcome's executor. Every outcome must still have a receipt;
+all existing finality, recipient, asset, amount and later-view requirements remain. Unavailable or mismatched
+reads keep funding unresolved. Synthetic tests cover recovery and refusals (`test/market-funding-proof.test.ts`).
+A private offline replay of two historical payout withdrawals also passed with separately captured exact RPC
+receipts on 2026-11-12. This is historical payout evidence, not deployed Market top-up qualification.

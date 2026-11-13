@@ -3,7 +3,7 @@ import type { z } from "zod";
 import type { Area } from "./areas.js";
 import type { hireTerms } from "./inputs.js";
 import { retryAfterSeconds } from "./retry-after.js";
-import { appAgent, appCapabilities, appConsentList, appConsentNonce, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoHireFiled, appDaoHireState, appDaoOrderFiled, appDaoOrderState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appReservations, appRevoked, appSetupStored, type AppDaoAction, type AppOwnerAction, type AppProcedure } from "./app-access.js";
+import { APP_GATEWAY_CODES, appAgent, appCapabilities, appConsentList, appConsentNonce, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoHireFiled, appDaoHireState, appDaoOrderFiled, appDaoOrderState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appReservations, appRevoked, appSetupStored, type AppDaoAction, type AppGatewayCode, type AppOwnerAction, type AppProcedure } from "./app-access.js";
 import type { appConsentSubmission } from "./app-consent.js";
 import { ownerClient, type OwnerCallOptions, type OwnerFailure, type OwnerOutput, type OwnerProcedure, type OwnerResult } from "./owner-client.js";
 import type { ownerStreams } from "./owner-outputs.js";
@@ -23,10 +23,13 @@ export type AppConsentSubmission = z.input<typeof appConsentSubmission>;
  *   reading again; the others need a new request.
  * - `rate_limited` (429): the deployment's request limit; nothing was done. Send the same request again after
  *   `retryAfterSeconds` (from `Retry-After`) when given. A 429 without the gateway's JSON (a proxy page) stays `refused`.
- * - `unavailable`: no answer, 5xx (503: an ownership or key check went unanswered, nothing stored or forwarded), an
- *   unreadable one, or an aborted call. Sending the same request again is safe on every app route, writes included:
- *   setup, consent submission and revocation are idempotent for the same signed body; a DAO filing whose answer was lost
- *   files a new request, and the lost one is harmless, since only its answer carried the transactions a member signs.
+ * - `unavailable`: no answer, 5xx, an unreadable answer, or an aborted call. A lost answer may follow a durable write.
+ *   Retry the same identity and terms, then inspect the returned state. A repeated DAO hire filing returns no
+ *   transaction by default. After checking the DAO for prior submission, explicitly ask with
+ *   `recoverProposal: "dao-checked"` to recover its original proposal; never offer it blindly to a member.
+ *   Other DAO filing routes may create a fresh request on retry.
+ *   A recognized gateway `code` may accompany 5xx, such as `agent_answer_unverified` after a DAO hire relay. It does
+ *   not establish whether the agent accepted the request; follow the same hire identity.
  */
 export type AppRouteResult<T> =
   | { ok: true; value: T }
@@ -34,7 +37,9 @@ export type AppRouteResult<T> =
   | { ok: false; kind: "forbidden"; status: 403; error: string; code?: string }
   | { ok: false; kind: "refused"; status: number; error: string; code?: string }
   | { ok: false; kind: "rate_limited"; status: 429; error: string; retryAfterSeconds?: number }
-  | { ok: false; kind: "unavailable"; httpStatus?: number };
+  | { ok: false; kind: "unavailable"; httpStatus?: number; code?: AppGatewayCode };
+
+const gatewayCodes: ReadonlySet<string> = new Set(APP_GATEWAY_CODES);
 
 /** What `owner/prepare` answers, whichever signer asked. */
 export type AppPrepared = OwnerOutput<"owner/prepare">;
@@ -94,7 +99,10 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
       return { ok: false, kind: "rate_limited", status: 429, error, ...(after !== undefined && { retryAfterSeconds: after }) };
     }
     if (response.status >= 400 && response.status < 500) return { ok: false, kind: "refused", status: response.status, error, ...code };
-    return { ok: false, kind: "unavailable", httpStatus: response.status };
+    const rawCode = (body as { code?: unknown } | undefined)?.code;
+    const gatewayCode = typeof (body as { error?: unknown } | undefined)?.error === "string"
+      && typeof rawCode === "string" && gatewayCodes.has(rawCode) ? { code: rawCode as AppGatewayCode } : {};
+    return { ok: false, kind: "unavailable", httpStatus: response.status, ...gatewayCode };
   }
   const post = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
@@ -167,11 +175,16 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
     /**
      * A DAO's approval of one market hire under its DAO consent carrying `market` (docs/market.md): `file` takes the terms
      * a `market/quote` answered, the brief and how long the approval may last, and answers the proposal a member files;
-     * `state` reads it until the DAO's signature is found and relayed, when the agent pays the hire once. Follow it with
-     * `market/status` under the same `requestId`. Gateways before 0.5.6 answer `refused` 404.
+     * `state` reads it until the DAO's signature is found and relayed, when the agent begins or resumes the bound hire.
+     * The result may be pending funding; follow it with `market/status` under the same `requestId`. A 502 carrying
+     * `agent_answer_unverified` leaves the signature available for another read. A repeated `file` returns null
+     * transactions by default. After checking the DAO for its prior submission, pass
+     * `recoverProposal: "dao-checked"` to recover the original proposal transaction; never replay `proposalAndVote`.
+     * Gateways before 0.5.6 answer `refused` 404.
      */
     daoHires: {
-      file: (input: { organization: string; agent: string; requestId: string; brief: string; approved: z.input<typeof hireTerms>; validUntil: string }, options?: AppRouteOptions) =>
+      file: (input: { organization: string; agent: string; requestId: string; brief: string; approved: z.input<typeof hireTerms>; validUntil: string;
+        recoverProposal?: "dao-checked" }, options?: AppRouteOptions) =>
         route("/dao-hires", appDaoHireFiled, post(input), options),
       state: (id: string, options?: AppRouteOptions) => route(`/dao-hires/${encodeURIComponent(id)}`, appDaoHireState, {}, options),
     },

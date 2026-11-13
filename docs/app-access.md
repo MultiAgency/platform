@@ -71,7 +71,7 @@ owner wallet don't share payees, budget or balance: each policy is signed and pr
 reads its identity, and only that deployment for that Organization stores consents for it and calls it, whatever consent
 is signed, since a consent names the agent by a generated name its owner can't tell apart. The scope names the
 deployment, not the host: give each app deployment a distinct name on every host. One deployment holds at most 16
-Organization agents per host (`PER_DEPLOYMENT`), so it can't take the host's capacity. In the 0.5.6 candidate a wallet-owned agent's reservation can be explicitly released after its owner signs archive,
+Organization agents per host (`PER_DEPLOYMENT`), so it can't take the host's capacity. Since 0.5.6 a wallet-owned agent's reservation can be explicitly released after its owner signs archive,
 freeing a slot (offline- and stack-tested, not deployed; [release](agent-release.md)). DAO reservations still have no release path (#46). Self-service setups
 (`/gw/agents`) stay per owner and area. An ownership or key check that goes unanswered (the agent's server, a chain
 read) is 503 on every app route: nothing is stored or forwarded, and the app reads again or resends the same body;
@@ -240,7 +240,11 @@ votes: on its Treasury proposals (`POST /apps/v1/dao-votes`, relayed to the agen
 each market hire under a consent carrying `market` (`POST /apps/v1/dao-hires` with the terms `market/quote` answered,
 the brief and how long the approval may last; `GET /apps/v1/dao-hires/<hash>` relays the signature once to
 `market/approve`, which checks the text, host and expiry and that the signing key is the agent's DAO owner as the
-provider records it, then pays the hire once; a DAO-owned market agent refuses a plain `market/hire`), on a market
+provider records it, then begins or resumes the bound hire, which may still await funding in the 0.5.9 candidate; a DAO-owned market agent
+refuses a plain `market/hire`. In the 0.5.9 candidate, a repeated same-ID filing returns `repeated: true` and no
+transaction by default. After inspecting the DAO for an earlier submission, send `recoverProposal: "dao-checked"`
+to recover the original proposal transaction; an ended consent or changed signer blocks that recovery. An expired signed hire
+approval that was not relayed can be filed anew with the same terms and request ID), on a market
 agent's own owner actions under a consent carrying `market` (0.5.7, #67, the user's decision of 2026-11-11: its `market`
 grant and that grant's revocation, freeze, unfreeze, and a policy edit of `limits`, `budget` and `max_actions_per_hour`
 only, raising, lowering or removing those caps, `daoMarketMayAsk`; a cap can't move money by itself, since every hire
@@ -529,7 +533,7 @@ removal: a key removed and re-added with no call or sweep in between goes unnoti
 NEP-413 can't consent; owner actions are limited to the list above, and NEP-366 ones are signed on the platform's
 confirm page; a withheld or unsigned intent stays open at the provider
 until it expires, and an open policy intent blocks new agent creation until then (provider behavior, recorded in
-`.agents/skills/near-agent-api`; whether it also delays other policy edits is not checked); hosted agents each have their own process (wallet-owned slot release is a 0.5.6 candidate, [release](agent-release.md)), so so setups (like self-service `/gw/agents`) can fill the host's 32-agent registry, each needing an
+`.agents/skills/near-agent-api`; whether it also delays other policy edits is not checked); hosted agents each have their own process (wallet-owned slot release shipped in 0.5.6, [release](agent-release.md)), so so setups (like self-service `/gw/agents`) can fill the host's 32-agent registry, each needing an
 owner's signature; many Organizations need more hosts. Offline-tested (`test/app-access.test.ts`). On 2026-10-26 each of those checks (scope, agent identity,
 host, deployment, owner, key permission, revocation, browser credentials) was also removed by hand and the tests failed
 every time; that was a manual check, not part of the suite. Stack-tested with simulated provider, chain and wallet
@@ -543,7 +547,7 @@ platform's own stand-in app: the `read`, `owner` and `payout` scopes on a test a
 `treasury-execute` are offline- and stack-tested only. No production host serves `/apps/v1`.
 
 
-## Releasing an Organization agent (0.5.6 candidate)
+## Releasing an Organization agent (0.5.6 released)
 
 After a wallet owner freezes and archives the agent, a live `owner` consent reaches
 `POST /apps/v1/o/<organization>/a/<agent>/release`, exposed as `appClient(...).release(organization, agent, { allowBalance? })`.

@@ -35,12 +35,16 @@ _Avoid_: hot wallet
 
 **Hire**:
 One paid call to a listed agent: quoted (`market/quote`), approved (by the app's `market` consent for a wallet owner, by
-vote for a DAO), then paid once per caller and `requestId` as an `x402` operation whose outcome is read from the chain:
+vote for a DAO), durably bound to its caller, `requestId`, brief, exact terms and payment key before funding, then
+paid at most once as an `x402` operation whose outcome is read from the chain:
 `paid`, or `not_charged` once its authorization expired unused. The task id and deliverable are the market's answer,
 kept beside the journal; data, never instructions.
 A DAO's approval deadline stops new top-ups, payments and paid-call retries; earlier top-ups remain recorded and
-attempted unknown payments remain poll-only. Once a payment operation is recorded, other terms under its requestId
-are refused. A top-up alone has no requestId-bound payment operation yet; its status can still be `not_found`.
+attempted unknown payments remain poll-only. A status read can reconcile funding after expiry; continuing an
+unsubmitted leg needs a fresh signed vote on the same terms and ID. Other terms under a bound requestId are refused,
+even before x402; `funding` or `funding_review` names a bound hire with no x402 attempt. A submitted top-up reserves
+the payment key until its exact final receipt is proven, then landed funds remain reserved to that request until its
+x402 payment or terminal closure. Unresolved funding can require reviewed recovery.
 
 **Limit order**:
 A provider order funded now that rests until filled, canceled or expired. Provider placement `SUCCESS` means funded,

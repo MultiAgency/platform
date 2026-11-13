@@ -61,7 +61,7 @@ limit-order feature has local order routes, owner signatures, a dedicated app co
 live order was placed by this platform. The separate Treasury app
 [PR #11](https://github.com/MultiAgency/treasury-prototype/pull/11) records the exact frozen 0.5.8 SDK package
 and local consumer tests for credentialed capability discovery, cancellation continuation and retained decisions.
-Each later SDK source commit changes that package's provenance and needs a matching app retest. App hosted acceptance,
+A package built from later SDK source has different provenance and needs a matching app retest. App hosted acceptance,
 deployed provider support and live order outcomes remain open.
 The [cross-repository HTTP gate](../test/cross-repo/treasury-orders/README.md) exercises both real servers against a
 simulated provider and chain; its result names the exact source and package it checked. It is separate from browser
@@ -84,7 +84,7 @@ Native signing remains out of scope. See [limit orders](limit-orders.md) and
   on request.
 
 
-The 0.5.6 [hosted-agent release candidate](agent-release.md) has offline/stack checks of archive/restore relaying,
+The 0.5.6 [hosted-agent release](agent-release.md) has offline/stack checks of archive/restore relaying,
 executor refusal, capacity recovery, consent termination, retained identity, child shutdown, registry crash points and
 an older registry reader. External archive/restore behaviour is per pinned provider docs; no platform mainnet release
 is recorded. An incomplete transition needs recovery before rollback; DAO release remains unavailable.
@@ -105,3 +105,18 @@ coverage: `test/app-dao.test.ts`. Paperwork adoption and local simulated accepta
 `docs/job-demo.md` and the private local acceptance report. Clean database handoff to another process
 is covered; SIGKILL, provider-response-loss and hosted wallet/quorum/mainnet behavior remain unverified.
 Not deployed or mainnet-observed. See [app access](app-access.md).
+
+The unreleased 0.5.9 market funding-binding candidate records the caller, request ID, approved terms and payment key
+before a top-up. Deterministic funding stages and final destination-receipt checks keep an unproved or still-owned
+credit reserved to its hire (`test/market-binding-journal.test.ts`, `test/market-funding-proof.test.ts`; the earlier
+`ae60790` market candidate passed the full offline suite, browser checks and narrow stack E2E on 2026-11-11). The public journal-history export reports version 3 binding and landing
+metadata as `market_metadata_not_exported` gaps, without exposing its private payload or treating it as payment
+evidence (`test/journal-history.test.ts`, offline-tested). The combined Treasury-order reader also omits order
+placement/cancellation preparations as `method_not_exported` and isolated final-payout markers as
+`cancel_final_not_exported`; the unchanged public schema receives no private order terms or fabricated settlement.
+The frozen 0.5.6/0.5.7 and signed 0.5.8 readers reject the first version 3 journal line
+(`test/market-binding-rollback.test.ts`). Pin the exact reviewed source and package provenance. Submitted 0.5.6 through
+0.5.8 top-ups cannot be retroactively bound and block new hires on
+their old key. No supported fresh-key recovery or automatic clearance exists yet; hashless or unavailable receipt
+evidence also needs reviewed recovery. This candidate is not ready for a market-agent rollout. See
+[market](market.md#rollback) and [operations](operations.md).

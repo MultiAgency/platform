@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { ORPCError } from "@orpc/server";
 import { dispatch } from "./agent.js";
 import { readStatus } from "./api.js";
@@ -9,6 +8,9 @@ import { readOps, settle, type Op } from "./ops.js";
 import { type ReviewedPolicy } from "./mandate.js";
 import { payoutAnswer, readsProvider } from "./payout-answer.js";
 import { PublicError } from "./public-error.js";
+import { requestKey } from "./request-key.js";
+
+export { requestKey } from "./request-key.js";
 
 /**
  * Payouts a caller asks for under its own `requestId` (CONTEXT.md, "Payout request"). The operation's identity is
@@ -16,10 +18,6 @@ import { PublicError } from "./public-error.js";
  * sent at most once. Every send still goes through `dispatch`: the money lock, no unresolved operation, the write-ahead
  * record, `authorize`, then the one send site.
  */
-
-/** Distinct callers (each app deployment and Organization, each owner) never share a request's identity. */
-export const requestKey = (actor: string, requestId: string) =>
-  `request:${createHash("sha256").update(`${actor}\n${requestId}`).digest("hex").slice(0, 32)}`;
 
 /** What is recorded and sent: a confidential transfer, or a withdrawal to chain `near` from the confidential balance. */
 type Terms = { method: "transfer"; request: { recipient: string; asset: string; amount: string; confidential: true } }
