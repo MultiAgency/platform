@@ -12,6 +12,7 @@ import { requestKey } from "./request-key.js";
 import { briefDigest, OPEN_ACCOUNT_WNEAR, PaymentRow, sameTerms, termsOf, type X402Request } from "./market/x402.js";
 import { ASSETS } from "./policy.js";
 import type { HireTerms } from "./market/x402.js";
+import { allocationIdentity, parseAllocation, signedAllocationSchema, type SignedAllocation } from "./market/allocation-types.js";
 
 export { isTerminal };
 
@@ -86,6 +87,9 @@ export type MarketBinding = {
   landed: Partial<Record<MarketStage, MarketLanding>>;
   /** A controlled funding observation can never authorize an x402 payment. */
   fundingOnly?: true;
+  /** Owner-signed authority; the source stays fundingOnly and the target names the same evidence. */
+  allocation?: SignedAllocation;
+  fundingSource?: SignedAllocation;
   /** Terminal refusal written with the final USDC landing when delivered funds cannot cover the hire. */
   refused?: "funding_shortfall";
 };
@@ -110,12 +114,14 @@ function matchesBoundPayment(binding: MarketBinding, line: { kind: string; metho
 function matchesBoundStage(binding: MarketBinding, stage: MarketStage, line: { kind: string; method?: Method;
   journalVersion?: 2; request: Record<string, unknown> }): boolean {
   const asset = stage === "open" ? ASSETS.wNEAR : ASSETS.USDC;
+  const allocation = binding.fundingSource && parseAllocation(binding.fundingSource);
   return !binding.refused && line.journalVersion === 2 && line.kind === "market-topup" && line.method === "withdraw" &&
     line.request.asset === asset && line.request.chain === "near" && line.request.recipient === binding.paymentAccount &&
     line.request.confidential === true && line.request.memo === undefined &&
     typeof line.request.amount === "string" && /^[1-9][0-9]*$/.test(line.request.amount) &&
     (stage !== "open" || line.request.amount === OPEN_ACCOUNT_WNEAR) &&
-    (stage !== "usdc" || BigInt(line.request.amount) <= BigInt(binding.approved.amount));
+    (stage !== "usdc" || BigInt(line.request.amount) <= BigInt(binding.approved.amount)) &&
+    (!allocation || stage === "usdc" && BigInt(line.request.amount) <= BigInt(allocation.maxTopUpUsdc));
 }
 
 /** Fixed identities ensure a retry follows a recorded funding stage instead of submitting a new withdrawal. */
@@ -241,6 +247,7 @@ const marketLandingLine = z.strictObject({
     context.addIssue({ code: "custom", message: "only a USDC landing may refuse a binding" });
 });
 const journalLine = z.union([
+  z.strictObject({ at: nonempty, idempotencyKey: nonempty, kind: z.literal("market-allocation"), journalVersion: z.literal(4), allocation: signedAllocationSchema }),
   marketBindingLine,
   marketLandingLine,
   preparationLine,
@@ -277,6 +284,7 @@ function readJournal(): { ops: Map<string, Op>; bindings: Map<string, MarketBind
   const bindings = new Map<string, MarketBinding>();
   const correlations = new Map<string, string>();
   const landedTransactions = new Set<string>();
+  const allocationNonces = new Set<string>();
   for (const [index, text] of (existsSync(log) ? readFileSync(log, "utf8") : "").split("\n").entries()) {
     if (!text.trim()) continue;
     const invalid = (reason: string): never => { throw new Error(`Invalid operation journal at line ${index + 1}: ${reason}; restore or investigate before sending`); };
@@ -285,6 +293,40 @@ function readJournal(): { ops: Map<string, Op>; bindings: Map<string, MarketBind
     const parsed = journalLine.safeParse(raw);
     if (!parsed.success) invalid("unsupported record shape");
     const line = parsed.data!;
+    if ("allocation" in line) {
+      let message: ReturnType<typeof parseAllocation>;
+      try { message = parseAllocation(line.allocation); } catch { invalid("invalid allocation signature"); }
+      const m = message!;
+      const remainingAtRecord = Date.parse(m.expiresAt) - Date.parse(line.at);
+      if (!Number.isFinite(remainingAtRecord) || remainingAtRecord <= 0 || remainingAtRecord > 3_600_000) invalid("invalid allocation authorization window");
+      const nonceKey = `${m.ownerPublicKey}:${m.nonce}`;
+      if (allocationNonces.has(nonceKey)) invalid("repeated allocation authorization");
+      allocationNonces.add(nonceKey);
+      const source = bindings.get(m.sourceBindingKey);
+      const targetKey = requestKey(m.target.actor, m.target.requestId);
+      if (m.agentId !== agentId() || line.idempotencyKey !== targetKey || targetKey === m.sourceBindingKey ||
+          !source?.fundingOnly || source.refused || source.paymentAccount !== m.paymentAccount || source.publicKey !== m.paymentPublicKey ||
+          m.target.approved.asset !== source.approved.asset || m.target.approved.network !== source.approved.network ||
+          source.approved.amount !== m.sourceUsdcAmount || ops.has(source.idempotencyKey) || ops.has(targetKey)) invalid("allocation source or target mismatch");
+      for (const stage of ["open", "usdc"] as const) {
+        const proof = stage === "open" ? m.sourceOpen : m.sourceUsdc;
+        const actual = source!.landed[stage], op = ops.get(marketStageKey(source!.idempotencyKey, stage));
+        if (!actual || actual.correlationId !== proof.correlationId || actual.destinationTxHash !== proof.destinationTxHash ||
+            actual.finalHeight !== proof.finalHeight || op?.status !== "SUCCESS" || op.request.recipient !== m.paymentAccount ||
+            (stage === "usdc" && op.request.amount !== m.sourceUsdcAmount)) invalid("allocation lacks exact source proofs");
+      }
+      const previous = source!.allocation && parseAllocation(source!.allocation);
+      if (previous && allocationIdentity(previous) !== allocationIdentity(m)) invalid("allocation changed its source or target");
+      const target = bindings.get(targetKey);
+      if (!previous && (target || [...bindings.values()].some(b => b.paymentAccount === m.paymentAccount && b !== source)))
+        invalid("allocation conflicts with an existing binding");
+      if (previous && (!target?.fundingSource || target.fundingOnly)) invalid("allocation renewal has no target");
+      source!.allocation = line.allocation;
+      if (target) target.fundingSource = line.allocation;
+      else bindings.set(targetKey, { at: line.at, idempotencyKey: targetKey, ...m.target,
+        paymentAccount: m.paymentAccount, publicKey: m.paymentPublicKey, landed: {}, fundingSource: line.allocation });
+      continue;
+    }
     if ("binding" in line) {
       if (bindings.has(line.idempotencyKey)) invalid("duplicate market binding");
       if (ops.has(line.idempotencyKey) || ops.has(marketStageKey(line.idempotencyKey, "open")) ||
@@ -382,7 +424,7 @@ export function readOps(): Op[] {
 }
 
 /** Write the exact hire identity before any funding. Caller holds the money lock. */
-export function recordMarketBinding(input: Omit<MarketBinding, "at" | "landed" | "refused">) {
+export function recordMarketBinding(input: Omit<MarketBinding, "at" | "landed" | "refused" | "allocation" | "fundingSource">) {
   const line = { at: new Date().toISOString(), idempotencyKey: input.idempotencyKey, kind: "market-binding" as const,
     journalVersion: 3 as const, binding: { actor: input.actor, requestId: input.requestId, brief: input.brief,
       approved: input.approved, paymentAccount: input.paymentAccount, publicKey: input.publicKey,
@@ -395,6 +437,46 @@ export function recordMarketBinding(input: Omit<MarketBinding, "at" | "landed" |
       op.idempotencyKey === marketStageKey(input.idempotencyKey, "open") ||
       op.idempotencyKey === marketStageKey(input.idempotencyKey, "usdc")))
     throw new Error("Market binding followed its money operation");
+  appendSynced(opsLog(), line);
+}
+
+/** Caller holds the money lock and has verified live owner authority and source receipts. */
+export function recordMarketAllocation(allocation: SignedAllocation) {
+  const message = parseAllocation(allocation);
+  if (Date.parse(message.expiresAt) <= Date.now() || Date.parse(message.expiresAt) > Date.now() + 3_600_000)
+    throw new Error("Allocation authorization must be live and within one hour");
+  const line = { at: new Date().toISOString(), idempotencyKey: requestKey(message.target.actor, message.target.requestId),
+    kind: "market-allocation", journalVersion: 4, allocation };
+  // Validate the prospective replay before appending; malformed authority must never poison the journal.
+  const original = readMarketBindings();
+  const source = original.find(b => b.idempotencyKey === message.sourceBindingKey);
+  if (!source?.fundingOnly || source.refused || !source.landed.open || !source.landed.usdc ||
+      source.paymentAccount !== message.paymentAccount || source.publicKey !== message.paymentPublicKey ||
+      source.approved.amount !== message.sourceUsdcAmount || message.agentId !== agentId() ||
+      source.approved.asset !== message.target.approved.asset || source.approved.network !== message.target.approved.network)
+    throw new Error("Allocation source is not a fully proven isolated observation");
+  for (const stage of ["open", "usdc"] as const) {
+    const proof = stage === "open" ? message.sourceOpen : message.sourceUsdc;
+    const actual = source.landed[stage]!;
+    if (JSON.stringify(actual) !== JSON.stringify(proof)) throw new Error("Allocation source proof changed");
+    const op = readOps().find(o => o.idempotencyKey === marketStageKey(source.idempotencyKey, stage));
+    if (!op || op.status !== "SUCCESS" || op.request.recipient !== message.paymentAccount ||
+        stage === "usdc" && op.request.amount !== message.sourceUsdcAmount) throw new Error("Allocation source amount differs");
+  }
+  const targetKey = line.idempotencyKey;
+  const target = original.find(b => b.idempotencyKey === targetKey);
+  if (!source.allocation && target) throw new Error("Allocation target is already bound");
+  if (readOps().some(o => o.idempotencyKey === targetKey || o.idempotencyKey === source.idempotencyKey)) throw new Error("Payment already recorded; follow its original status");
+  if (source.allocation) {
+    if (allocationIdentity(parseAllocation(source.allocation)) !== allocationIdentity(message)) throw new Error("Allocation target cannot change");
+    if (JSON.stringify(source.allocation) === JSON.stringify(allocation)) return;
+  } else if (original.some(b => b.paymentAccount === source.paymentAccount && b.idempotencyKey !== source.idempotencyKey))
+    throw new Error("Another binding owns this key");
+  if (targetKey === source.idempotencyKey) throw new Error("Funding-only binding cannot become a hire");
+  if (readFileSync(opsLog(), "utf8").split("\n").filter(Boolean).some(text => {
+    const row = JSON.parse(text);
+    return row.kind === "market-allocation" && row.allocation.publicKey === allocation.publicKey && row.allocation.nonce === allocation.nonce;
+  })) throw new Error("Allocation nonce was already recorded");
   appendSynced(opsLog(), line);
 }
 

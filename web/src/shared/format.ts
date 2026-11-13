@@ -1,6 +1,6 @@
 import type { client } from "./client";
 import type { Kind } from "../features/evidence/beats";
-export { exactPayment, fromUnits } from "../features/payables/payment-copy";
+export { exactPayment, fromUnits } from "./payment-copy";
 
 export type Overview = Awaited<ReturnType<typeof client.overview>>;
 export type Holding = Overview["book"][number];

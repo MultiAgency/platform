@@ -4,7 +4,7 @@ import { useState } from "react";
 import { errorMessage, gw } from "../shared/lib";
 import { Button, Card, ErrorBox, Spinner } from "../shared/ui";
 import { type GatewayViewer, useViewer } from "./viewer";
-import { signChallenge, signOutMember } from "../features/owner/wallet";
+import { signChallenge, signOutMember } from "../shared/wallet";
 
 /** An agent behind the gateway and the account it answers to; `dao` when that account is a DAO, signing by proposal. */
 export type GatewayAgent = { name: string; owner: string; dao: boolean; area?: Area; invoices?: string | null };

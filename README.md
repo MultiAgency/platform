@@ -33,6 +33,12 @@ built, 2026-11-08) with its invoices, agreements, work orders, guided walkthroug
 [agent connections](docs/agent-access.md); and the run-log adapter. The LLM steward was removed in SDK 0.5.5: the
 platform keeps no model of its own in the money path.
 
+## Repository boundaries
+
+- **Platform and SDK:** the supported app integration is `/apps/v1` through `@multiagency/sdk`. Deployment records live in [staging](docs/platform-staging.md) and [production](docs/platform-production.md); packaging and retained state live in [operations](docs/operations.md).
+- **Retired prototype:** the owner dashboard frontend and its browser suites have been removed. Legacy owner-session routes and supplier backend remain pending separate consumer review. Historical behavior is documented in [the prototype record](docs/prototype.md).
+- **Evidence:** [the review guide](docs/review.md) links claims to evidence; `evidence/inventory.ts` owns generated requirement tables. [Not done yet](#not-done-yet) tracks incomplete integrations and duplicated money paths.
+
 ## How it works
 
 - The **owner** signs a **policy**: allowed actions, assets, caps, budget, and where funds may go.
@@ -59,16 +65,14 @@ storage and the checks before each send) is in [docs/architecture.md](docs/archi
 
 ```sh
 pnpm install
-cp .env.example .env   # add an API key from https://partners.demo.agentsonintents.com
-pnpm demo              # dashboard on http://localhost:8787
+pnpm build:web
+pnpm test:e2e:stack --app <deployment> --no-browser
 ```
 
-That runs the experimental dashboard prototype. To build an app on the platform, run the local stack instead:
-`pnpm build:web && pnpm test:e2e:stack --app <deployment> --no-browser` (simulated provider and chain, an app credential
-issued at startup; see the [integration path](docs/integration-path.md)).
-
-The dashboard walks you through creating an agent and issuing its grant, and runs every money action.
-The command line has only what the dashboard doesn't: owner actions signed with a local key, and checks.
+This starts the local app integration stack with a simulated provider and chain and an app credential
+issued at startup; see the [integration path](docs/integration-path.md). The web build contains only
+the platform's confirm and stop entry. The retired owner dashboard is no longer built or served by this frontend.
+Owner interfaces belong to the consuming apps. Local-key owner commands and read-only checks remain below.
 
 | Owner actions, signed with `AGENT_OWNER_PRIVATE_KEY` instead of a wallet or DAO vote | |
 |---|---|
@@ -83,7 +87,7 @@ The command line has only what the dashboard doesn't: owner actions signed with 
 | `pnpm inspect [--whoami]` | The agent's policy, balances and grants, as the API returns them |
 | `pnpm reconcile [--poll]` | Operations without a proven outcome; `--poll` reads their statuses once, resending nothing |
 | `pnpm books [--csv]` | Balances against chain transfers and recorded executions; `--csv` prints the ledger |
-| `pnpm smoke` | Read-only check of the hosted dashboard and invoice page (`DASHBOARD_URL`, `INVOICES_URL`) and of a platform host (`PLATFORM_URL`); set any of them |
+| `pnpm smoke` | Read-only check of a platform host (`PLATFORM_URL`), or of a prototype dashboard and invoice page run from source (`DASHBOARD_URL`, `INVOICES_URL`; their hosts were retired 2026-11-08); set any of them |
 | `pnpm run-report` | The unattended-run report ([unattended run](docs/unattended-run.md)) |
 
 ## Test and deploy
@@ -129,7 +133,11 @@ out of both.
 
 ## Not done yet
 
-- The controlled [Market funding observation](docs/market-funding-proof.md) is a local owner-run tool with offline coverage; its deployed route and receipt recovery remain unverified. It cannot clear or reuse legacy funds.
+- The controlled [Market funding observation](docs/market-funding-proof.md) has offline coverage and one isolated
+  staging route [mainnet-observed on 2026-11-13](docs/mainnet-log.md#controlled-market-funding-on-platform-staging-2026-11-13-utc),
+  with exact final receipt and later chain evidence. Test funds remain reserved; hire acceptance and legacy-key
+  recovery remain unverified. The [owner-signed allocation candidate](docs/market-allocation.md) is offline-tested,
+  undeployed, and limited to one exact hire; it cannot clear or reuse legacy funds.
 
 Each line is a gap; the linked page says how the rest is known. The
 [enforcement assessment](docs/enforcement.md#status) tracks the signed spending envelope.
@@ -247,14 +255,15 @@ Each line is a gap; the linked page says how the rest is known. The
 - A refusal says `policy_denied` without naming the rule. Confidential credits from outside the API can't be
   attributed: nothing public indexes `intents.far`.
 - Signing requests stay open 5 to 10 minutes, so a slow council misses the window. Trezu shows these proposals as a
-  generic "sign on v1.signer"; the dashboard's "What am I voting on?" shows what each does.
+  generic "sign on v1.signer"; the retired dashboard's "What am I voting on?" explained each, and a consuming app now
+  owns that display.
 - DAO delegate preparations are serialized per owner on one host only (offline-tested); file them one at a time.
 
 **Owners, wallets and payees**
 - A wallet-owned agent was created, granted and swapped on its own from a local dashboard on mainnet (2026-10-13,
-  [mainnet log](docs/mainnet-log.md)); behind the hosted gateway it is offline-tested only. The dashboard offers the
+  [mainnet log](docs/mainnet-log.md)); behind the hosted gateway it is offline-tested only. The platform's confirm and stop page offers the
   wallets HOT's near-connect list declares for delegate signing (today HOT, Meteor, Intear, Ledger and NEAR Mobile);
-  Meteor has signed so far.
+  Meteor signed on the retired dashboard; what has signed on this page is in [app access](docs/app-access.md).
 - The wallet picker loads that list from its `main` branch, unpinned, and each wallet's code from where it points. The
   server checks every owner signature before relaying it, but a changed wallet could phish for keys.
 - Agreed terms (an amount per invoice and a deadline) are shown to voters beside each held payout; nothing refuses an
@@ -272,8 +281,8 @@ Each line is a gap; the linked page says how the rest is known. The
 - Campaign winner identity and prize validation aren't built.
 
 **Treasury**
-- The autopilot (off by default) hasn't run unattended for days; outside the dashboard its warnings reach the owner
-  only through the optional Telegram notices.
+- The autopilot (off by default) hasn't run unattended for days; with the dashboard retired, its warnings reach the owner
+  only through an app that reads `autopilot/get` under a `treasury` consent, or the optional Telegram notices.
 - The inline strategy workflow is offline- and browser-fixture-tested only. Stop prevents future ticks, but a tick
   already started can still submit; configuration coordination is single-host.
 - Sweep covers managed USDC, wNEAR and ETH only.
@@ -289,6 +298,3 @@ Each line is a gap; the linked page says how the rest is known. The
   ([follow-up](docs/archive/infrastructure-review.md#follow-up-review-2026-10-16)).
 - CI doesn't build or check the `platform` image (no Docker in the job): only a release candidate does, as its last
   gate (`pnpm check:platform-image`; [operations](docs/operations.md)).
-- Guided walkthroughs and short guides (`/demos`) are tested with offline browser fixtures, not on the deployed hosts,
-  and can't guarantee a swap, prompt approval or settlement. Guidance is deterministic, not an LLM; live AG-UI agent
-  orchestration isn't built.

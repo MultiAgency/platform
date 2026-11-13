@@ -12,7 +12,39 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
-## 0.5.9 (unreleased)
+## 0.6.0 (2026-11-13)
+
+A minor version: it removes an owner procedure and its capability. Nothing an app reaches through `/apps/v1` is
+removed or narrowed, so an app server on `appClient` moves from 0.5.9 without code changes.
+
+- **`demoGuide/compose` and the `payables-guide-v1` capability are removed.** They served the prototype dashboard's
+  interactive Payables guide, which is retired; no packaged contract covered the procedure. An owner frontend that
+  listed `payables-guide-v1` in `contract.json` must drop it. The platform makes no inference calls.
+- **`agent_create` accepts `creationProfile: "market-funding-proof"`** for a wallet-owned, uncreated hosted Market
+  reservation: the platform derives the one withdrawal destination from the reservation's payment key and builds the
+  initial policy with bounded test caps. No grant, consent or funding follows from it, and a DAO's creation refuses it.
+  A host older than this version ignores the field and prepares its default policy: read `policy.requested` before
+  the owner signs. Its two funding stages are mainnet-observed on platform staging (2026-11-13); no hire is. See
+  [market funding proof](market-funding-proof.md).
+- **The app-server skill names every scope a DAO's consent may carry** (`read`, `treasury`, `treasury-execute`,
+  `treasury-orders`, `market`, `payout`) and that setup admits the Treasury, market and Payables areas a host permits.
+  The package README and the treasury-app skill no longer say no production host serves `/apps/v1`: the production
+  host has since 2026-11-07, on an older platform version, with no app workflow observed there.
+
+Platform only:
+
+- **The retired owner dashboard is no longer built.** The web build has one entry, the confirm and stop page; the
+  dashboard's pages and their browser suites are deleted. The owner-session routes it called
+  (`/gw/*`, `/a/<agent>/rpc/*`) still answer for apps that hold a session.
+- **Owner-signed Market funding allocation** ([market allocation](market-allocation.md)): an operator command records a
+  wallet owner's NEP-413 permission to use a fully proven funding-only observation for one exact hire, as a
+  `market-allocation` journal line (`journalVersion: 4`). It sends nothing; the hire still goes through dispatch,
+  which re-checks owner, key, policy and expiry before each send. Additive: existing records need no conversion, and a
+  0.5.9 reader refuses a journal that holds one, so stop the executor and preserve state before adopting or rolling
+  back ([operations](operations.md#market-funding-allocation-candidate)). Offline-tested; not deployed.
+- Offline suite files run one at a time, so one suite's process fixtures don't use up another's readiness deadlines.
+
+## 0.5.9 (2026-11-12)
 
 - **Final receipt completeness:** omitted receipt bodies are recovered by exact RPC ID only from outcomes
   already named by the final transaction (at most 16). IDs and executors must match; unavailable or conflicting

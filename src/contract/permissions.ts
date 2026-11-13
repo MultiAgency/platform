@@ -38,7 +38,6 @@ export const READS = new Set([
   "workOrders/list",
   "workOrders/get",
   "workOrders/status",
-  "demoGuide/compose",
   "proposals/get",
   "proposals/list",
   "market/quote",

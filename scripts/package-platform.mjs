@@ -17,6 +17,7 @@ const assets = [...confirm.html, ...confirm.initial?.js ?? [], ...confirm.initia
 const { output, copy, finish } = releasePackage(destination);
 for (const name of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', 'src']) copy(join(root, name), join(output, name));
 copy(join(root, 'scripts/market-funding-proof.ts'), join(output, 'scripts/market-funding-proof.ts'));
+copy(join(root, 'scripts/market-allocation.ts'), join(output, 'scripts/market-allocation.ts'));
 for (const asset of assets) {
   copy(join(dist, asset), join(output, 'web/dist', asset));
   // A bundled library's license travels with it.

@@ -127,6 +127,7 @@ test("a headless host serves only app access and the confirm page, and sets up o
   assert.deepEqual([unsignedRead.status, JSON.parse(unsignedRead.body).error], [400, "Send the owner's signed disclosure and the payee's signed read: each message, nonce, publicKey and signature."]);
   // Only the confirm entry's own assets are served, as the web build's manifest lists them; the owner app's are not.
   const built = (() => { try { return JSON.parse(readFileSync(join(root, "web/dist/build-manifest.json"), "utf8")).entries as Record<string, { initial?: { js?: string[] } }>; } catch { return null; } })();
+  if (built) assert.deepEqual(Object.keys(built), ["confirm"], "the retired dashboard must not return as a build entry");
   for (const path of ["/static/js/missing.js", ...(built?.index?.initial?.js ?? []).filter(file => !built?.confirm?.initial?.js?.includes(file))]) await absent(path);
   for (const path of built?.confirm?.initial?.js ?? []) assert.equal((await call(path)).status, 200, path);
 
@@ -189,7 +190,7 @@ test("the platform package carries the gateway, confirm assets and bounded fundi
   const tree = mkdtempSync(join(tmpdir(), "platform-tree-")), out = join(tmpdir(), `platform-package-${randomBytes(4).toString("hex")}`);
   const write = (path: string, content = path) => { mkdirSync(join(tree, path, ".."), { recursive: true }); writeFileSync(join(tree, path), content); };
   try {
-    for (const path of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json", "src/gateway/server.ts", "Dockerfile.platform", "scripts/market-funding-proof.ts", "scripts/private-operator.ts",
+    for (const path of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.json", "src/gateway/server.ts", "Dockerfile.platform", "scripts/market-funding-proof.ts", "scripts/market-allocation.ts", "scripts/private-operator.ts",
       "deploy/railway.gateway.json", "deploy/platform-entrypoint.sh", "deploy/platform-staging.json", "deploy/platform.json", "deploy/dashboard.json",
       ".railway/local-state.json", ".railway/credentials.json", ".env", ".hosted/agent.env", ".ops/private", "railway.json", "railway.toml",
       "web/dist/index.html", "web/dist/confirm.html", "web/dist/static/js/index.1.js", "web/dist/static/js/confirm.2.js", "web/dist/static/js/lib.3.js",
@@ -206,7 +207,7 @@ test("the platform package carries the gateway, confirm assets and bounded fundi
     // The headless gateway serves the confirm entry's assets from the packaged manifest: the owner app's entry is listed
     // there too, but none of its files ships, so none is served.
     assert.deepEqual([...confirmAssets(join(out, "web/dist"))].sort(), ["/static/css/c.4.css", "/static/font/f.5.woff2", "/static/js/confirm.2.js", "/static/js/lib.3.js"]);
-    assert.deepEqual(files("scripts"), ["scripts/market-funding-proof.ts"], "only the reviewed bounded operator command ships");
+    assert.deepEqual(files("scripts").sort(), ["scripts/market-allocation.ts", "scripts/market-funding-proof.ts"], "only the reviewed bounded operator commands ship");
     assert.deepEqual(files("deploy").sort(), ["deploy/platform-entrypoint.sh", "deploy/platform-staging.json", "deploy/platform.json"]);
     assert.deepEqual(files(".railway").sort(), [".railway/railway.ts", ".railway/tsconfig.json"], "only declared IaC inputs ship, never local credentials or state");
     for (const path of ["railway.json", "railway.toml", "deploy/railway.gateway.json", ".env", ".hosted", ".ops", "node_modules"])
@@ -216,7 +217,7 @@ test("the platform package carries the gateway, confirm assets and bounded fundi
     assert.equal(readFileSync(join(out, "Dockerfile"), "utf8"), "Dockerfile.platform");
     const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8")) as { revisions: Record<string, unknown>; files: Record<string, string> };
     assert.deepEqual(Object.keys(manifest.revisions), ["platform"]);
-    for (const path of [".railway/railway.ts", ".railway/tsconfig.json", "scripts/market-funding-proof.ts"])
+    for (const path of [".railway/railway.ts", ".railway/tsconfig.json", "scripts/market-funding-proof.ts", "scripts/market-allocation.ts"])
       assert.equal(manifest.files[path], createHash("sha256").update(readFileSync(join(tree, path))).digest("hex"), `${path} is bound to the release manifest`);
     assert.equal(manifest.files["railway.json"], undefined, "the manifest contains no legacy Config as Code");
     assert.ok(manifest.files["web/dist/confirm.html"] && manifest.files["web/dist/build-manifest.json"] && !manifest.files["web/dist/index.html"]);

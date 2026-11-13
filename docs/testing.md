@@ -8,6 +8,13 @@ GitHub Actions runs `pnpm verify` on Node 24 for every push to `main` and every 
 (`.github/workflows/verify.yml`), with no secrets and actions pinned by commit. On failure it uploads
 `.test-artifacts/`. A CI pass is the narrow E2E run, not release-candidate evidence.
 
+The default E2E selection excludes the retained historical owner-dashboard scenarios in
+`agent-access`, `workspace`, `treasury-interruption`, `treasury-conformance`,
+`payables-conformance`, `payments`, `agent-connection`, `shared-payout` and `work-orders`.
+Those pages were removed from the platform;
+their retained scenarios do not establish current frontend coverage. Confirm/stop browser
+checks and app-access E2E scenarios remain part of current verification.
+
 ## What earns a test
 
 Each case must identify an important regression and assert its observable consequence. A failure
@@ -69,14 +76,12 @@ counters, journals and real crash/restart fixtures.
 
 Install the pinned Chromium with `pnpm exec playwright install chromium`, then run
 `pnpm test:browser`. To repeat selected suites against an existing build, use
-`node test/browser/run.cjs live-demo.cjs` (substitute the desired suite names).
+`node test/browser/run.cjs approval-confirm.cjs` (substitute the desired suite names).
 
-The platform's suites cover its own pages: sign-in and the public entry (`showcase.cjs`, `public-overview.cjs`), setup and
-onboarding (`setup.cjs`, `first-owner.cjs`, `walkthrough-entry.cjs`), walkthroughs and the rehearsal
-(`live-demo.cjs`, `signing-walkthrough.cjs`, `payables-player.cjs`), the redirect map (`app-redirects.cjs`), agent
-access (`agent-access.cjs`), a wallet owner's stop (`wallet-stop.cjs`), demo hosts (`demo-hosts.cjs`) and the payee pages the platform serves (`invoices.cjs`, `hosted-payee.cjs`, `work-orders.cjs`).
-The agents' operational screens and their suites (payments, funding, policy, strategy, runs, recovery and Activity)
-are in the Payables and Treasury repositories. A new test belongs beside its task, in the repository that serves it.
+The platform's suites cover confirm signing (`approval-confirm.cjs`), a wallet owner's stop
+(`wallet-stop.cjs`) and retained supplier pages (`invoices.cjs`, `hosted-payee.cjs`, `work-orders.cjs`).
+The old dashboard entry, setup, walkthrough, redirect and access-screen suites were retired with that frontend.
+Operational app screens and their browser suites belong in the consuming app repositories.
 
 Merged suites share one browser and close all contexts between scenario groups. The layout helper resizes an already
 loaded state at 320, 390 and 1280 pixels. New coverage adds extra viewports only when the interaction or layout depends
@@ -369,11 +374,11 @@ evidence of production correctness.
 
 ## Explicit live verification
 
-`pnpm test:live` requires `NEARAI_API_KEY`, `NEAR_INTENTS_AGENT_API_KEY`, `AGENT_ID` and
+`pnpm test:live` requires `NEAR_INTENTS_AGENT_API_KEY`, `AGENT_ID` and
 `AGENT_GRANT_TOKEN` from the configured environment/settings. Missing configuration fails before
 tests start. Live files refuse direct execution outside the live launcher and no longer silently skip.
 
-The attestation cases contact NEAR AI Cloud. Plan-refusal cases read current account/provider evidence
+Plan-refusal cases read current account/provider evidence
 and request dry quotes. A test-owned fetch barrier, loaded before the SDK, permits Agent API reads
 and exact `dry: true` swap requests, and refuses other Agent API writes before transport. Blocked
 attempts fail the process even if their errors are caught. Empty-operation-log assertions remain as

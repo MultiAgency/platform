@@ -3,8 +3,10 @@
 The [credential rotation procedure](credential-rotation.md) remains an owner-controlled production gate.
 
 Two areas, Payables and Treasury, share one core. Each agent runs in its own instance of the server (`src/server.ts`),
-with its own wallet, grant, money lock and logs; the hosted gateway signs members in and forwards
-their calls to those instances. Files are listed under `src/` unless a path says otherwise.
+with its own wallet, grant, money lock and logs. The headless platform gateway forwards app calls
+under owner consent through `/apps/v1`; the retained legacy backend separately supports member
+sign-in and owner-session calls. Its dashboard frontend has been removed. See [app access](app-access.md) for the supported app boundary and
+[the prototype record](prototype.md) for historical hosting. Files are listed under `src/` unless a path says otherwise.
 
 Work orders add private subprocesses on the invoice executor host, one per order. They expose no
 network listener and inherit infrastructure credentials but no parent grant or owner signing key.
@@ -64,7 +66,6 @@ existing domain calls. Submission remains centralized in dispatch.
 |---|---|
 | Planning | `treasury.ts` (rebalance legs, quotes, sweep), `planning/` (plan model, checks, storage, observations and execution; `plans.ts` retains compatibility exports), `strategy.ts`, `strategy-digest.ts` |
 | Running alone | `autopilot.ts` (the scheduled tick: sweep, then rebalance within its limit) |
-| Experimental | `llm.ts` (verified NEAR AI inference for the Payables guide; the steward it served was removed in 0.5.5) |
 
 ## Around them
 
@@ -266,48 +267,22 @@ classification and JSONL format remain readable; changing permissions creates no
 
 ## Frontend responsibilities (offline-tested)
 
-The platform's frontend is the infrastructure showcase: the public entry, sign-in, the agent launcher, agent setup,
-agent-access consent, walkthroughs, the Payables rehearsal and evidence. Each agent's operational screens (balances,
-policy and grants, agreements, payments, strategy, runs and Activity) are in its app, Payables or Treasury, which
-carry the browser suites for them (for example `test/browser/workspace.cjs`, `payments.cjs`, `policy-clarity.cjs`,
-`strategy.cjs`, `run-history.cjs` and `recovery-clarity.cjs` in each app's repository).
+The platform builds one frontend entry, the confirm and stop page (`web/src/confirm.tsx`): an owner action an app
+prepared whose terms the owner's wallet can't show (a NEP-366 action, or a vote on a held payout), shown from the
+platform's own record, and a wallet owner's own stop. It is standalone: no platform session, and nothing but the one
+action. `test/browser/approval-confirm.cjs` and `test/browser/wallet-stop.cjs` check it offline with a stand-in wallet;
+the headless host serves only this entry's assets (`test/platform-host.test.ts`). Owner interfaces (balances, policy and
+grants, agreements, payments, strategy, runs and Activity) belong to the consuming apps and their own suites.
 
-`main.tsx` lazy-loads the authenticated application after gateway admission. The public entry is sign-in only. The
-signed-in home is the launcher (`features/demo/launcher.tsx`), or `walkthrough-home.tsx` when the host offers
-self-service setup; both list each agent with a link to its app, its platform walkthroughs and, for Treasury, agent
-access. The app's origin comes from the gateway's `apps` map, so a local stack links to its own hosts; the hosted
-URL is used only when no host is configured (`features/demo/app-origin.ts`).
-
-Under `/a/<agent>/`, `agent-frame.tsx` reads setup and overview. Until an agent is configured it shows onboarding;
-afterwards `setup-progress.tsx` shows the next setup task, linking to the policy, grant or strategy screen in the
-agent's app. Onboarding reads recorded owner actions before offering agent creation: an unfinished creation, a
-succeeded creation awaiting setup readback, or unavailable records keeps that button disabled, and its refresh reads
-setup and owner records without signing or submitting. A failed overview refresh keeps the retained observations on
-screen; each page reports the failure itself. `test/browser/setup.cjs` and `test/browser/first-owner.cjs` check these
-paths offline.
-
-Pages that moved to an agent's app keep their platform paths as redirects (`MOVED` in `app/router.tsx`): the same path,
-query and hash in the app, with the area read from the gateway session rather than the agent's reads, so a failing
-setup read never strands a saved link. `test/browser/app-redirects.cjs` reads the map from the router and checks every
-path for both areas, a configured local host and a failing setup read.
-
-The agent page (`features/demo/agent-home.tsx`) links to the app and the walkthroughs and shows the area's
-requirements and evidence (`features/evidence/showcase.tsx`). Walkthrough chapters link to the agent's screens in its
-app instead of embedding them (`test/browser/signing-walkthrough.cjs`). `features/demo/live-demo.tsx` is embedded only
-in the Payables walkthrough: it reads the agent's observations and reuses manual payment review, the configured invoice
-link and payment discovery. Prerequisite observations do not authorize actions; failed observations keep its
-submission control unavailable. Explicit confirmation and required owner approval remain; no mutation runs on entry or
-reload. A non-refused payment response selects its returned identity; the guide never substitutes the newest record,
-and reload clears the selection. Payment records, policy, funding and recovery open in Payables.
-`test/browser/live-demo.cjs` checks these paths with intercepted requests; no deployed or mainnet behavior is inferred.
-
-`web/src/features/payables/payment-records.ts` joins retained local transfers, provider history, held observations and
-owner records for display. A failed or incomplete provider history read cannot hide a transfer already present in
-local activity. Display memory is scoped to the agent and document; it is neither durable evidence nor authorization.
-Queue rows do not start individual status polls; the selected payment does. Approval state and settlement are read
-separately. Owner action preparation exposes its correlation ID; status observation in `owner-observation.ts` stops on
-unmount, and server recovery remains independent. Unit tests (`test/frontend-boundaries.test.ts`, including payment
-stages) cover the derivations offline.
+The owner dashboard (public entry, sign-in, agent launcher, setup, agent-access consent, walkthroughs, the Payables
+rehearsal and the evidence view) and its browser suites were removed in 0.6.0; [the prototype record](prototype.md)
+describes what it did. Modules it used for session and query handling and for payment display remain under
+`web/src/app`, `web/src/features` and `web/src/shared`, built into no entry and kept with their offline unit tests:
+`payment-records.ts` joins retained local transfers, provider history, held observations and owner records, and a
+failed or incomplete provider history read cannot hide a transfer already present in local activity
+(`test/payment-records.test.ts`, `test/payment-queue.test.ts`, `test/frontend-boundaries.test.ts` with the payment
+stages); `owner-observation.ts` follows a prepared owner action by its correlation ID (`test/owner-observation.test.ts`).
+They are neither durable evidence nor authorization.
 
 The invoice listener serves the page and its browser module from the same origin. The browser module owns drafts,
 refresh ordering and DOM updates; TypeScript checks its JSDoc types during `pnpm typecheck`. Sign-out and an explicit

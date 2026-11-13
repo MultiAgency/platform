@@ -1,5 +1,7 @@
 import { marketStageKey, readMarketBindings, readOps, type MarketBinding, type MarketStage, type Op } from "../ops.js";
 import { isTerminal, isUnknownOutcome } from "../operation-status.js";
+import { parseAllocation } from "./allocation-types.js";
+import { requestKey } from "../request-key.js";
 
 /** A provider outcome without matching final landing proof needs review, even if it says SUCCESS. */
 export function marketFundingNeedsReview(binding: MarketBinding, ops: readonly Op[]): boolean {
@@ -37,8 +39,16 @@ export function legacyMarketFunding(paymentAccount: string): Op | null {
 export function pendingMarketFunding(paymentAccount: string, continuingBindingKey?: string):
   { binding: MarketBinding; stage: MarketStage; op: Op } | null {
   const ops = new Map(readOps().map(op => [op.idempotencyKey, op]));
-  for (const binding of readMarketBindings()) {
+  const bindings = readMarketBindings();
+  for (const binding of bindings) {
     if (binding.paymentAccount !== paymentAccount) continue;
+    if (binding.fundingOnly && binding.allocation && continuingBindingKey) {
+      const allocation = parseAllocation(binding.allocation);
+      const target = bindings.find(b => b.idempotencyKey === continuingBindingKey);
+      // This is only a routing exemption. Dispatch must verify fresh owner/key, policy and expiry before a send.
+      if (requestKey(allocation.target.actor, allocation.target.requestId) === continuingBindingKey &&
+          target?.fundingSource?.message === binding.allocation.message && target.fundingSource.signature === binding.allocation.signature) continue;
+    }
     if (binding.refused && !binding.fundingOnly) continue;
     // A proven local refusal or never-submitted stage closes this hire. Earlier landed opening funds may remain,
     // but no later credit can arrive for the refused stage and this request cannot continue to x402.

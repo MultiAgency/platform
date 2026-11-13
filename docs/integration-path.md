@@ -39,11 +39,17 @@ the complete examples, and `treasury-app` covers Treasury proposals.
    gateway, agent servers and simulated provider, and issues the app's credential at startup.
    `test/e2e/stack-app.spec.mjs` is the reference app server.
 
-Status: wallet-owned agents; for DAO-owned agents, consent, proposal votes and the Treasury grant by DAO vote (`read`,
-`treasury`, opt-in `treasury-execute`; offline- and stack-tested), and freeze and unfreeze by DAO vote (offline-tested).
-The `read`, `owner` and `payout` scopes are mainnet-observed on platform staging (2026-10-28, 2026-10-30) through the
-platform's own stand-in app; `treasury` and `treasury-execute` are offline- and stack-tested. No production host serves
-`/apps/v1` yet. Details: [app access](app-access.md).
+Status: wallet-owned app access has dated staging observations (2026-10-28, 2026-10-30).
+DAO Treasury setup, consent, grant and stop have staging observations (2026-11-04); Treasury execution
+has a separate 2026-11-05 observation. DAO Payables setup, `payout` consent, payout grant and held-payout
+approval votes are implemented in the 0.5.9 source and offline-tested; they are not deployed or
+mainnet-observed. DAO consent does not carry `owner`: allowed owner actions are prepared with
+`signer: "dao"` under the applicable area scope. See [app access](app-access.md).
+
+Production has served the headless platform since 2026-11-07, per [operations](operations.md).
+That deployment fact does not establish that the current source or SDK is deployed, nor that a
+particular consumer flow succeeds there. Use the exact local pairing and separate acceptance states in
+[the hackathon handoff](hackathon-platform-handoff.md); current hosted consumer execution is unverified.
 
 ## A browser product on a configured host: `ownerClient`
 
@@ -75,10 +81,10 @@ total. It is offline-tested only.
 
 ## Gaps
 
-- DAO-owned agents: Treasury only (no `payout` or `owner`), and owner intents (creation,
-  grant, freeze) complete only when the DAO's vote passes within the provider's window (600 s, or about 290 s for the
+- DAO-owned agents have no general `owner` consent. Payables support shipped in SDK 0.5.9 (offline-tested, not mainnet-observed);
+  owner intents (creation, grant, freeze) complete only when the DAO's vote passes within the provider's window (600 s, or about 290 s for the
   grant); a slower DAO approves swaps one proposal at a time and can't turn on autopilot (#20).
 - Host `demo` and agent `area` are fixed enums.
-- Owner procedures outside the Treasury/Payables set (for example `ownerIdentity`, `demoGuide/compose`) have no packaged contract.
+- Owner procedures outside the Treasury/Payables set (for example `ownerIdentity`) have no packaged contract.
 - Independent owner-app releases are proven on the local stack only.
 - No app-callback channel exists. Any server-side need is reviewed first.

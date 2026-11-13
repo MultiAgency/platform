@@ -9,7 +9,7 @@ metadata:
   purpose: 'Treasury proposals through an app: propose by requestId, the owner signs the exact terms, execute once, recover by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.5.9'
+  library_version: '0.6.0'
 requires:
   - getting-started
   - app-server
@@ -27,7 +27,7 @@ sources:
 Read app-server first: the same credential, consent and result kinds apply. An agent runtime (your CLI, an assistant)
 calls your server, never the platform. A proposal is a list of swaps your app proposes now; the agent's owner approves
 its exact terms later (hours or days), by signing a text in their own wallet; then your server asks for its execution,
-which runs once, under the owner's signed policy. No production host serves this yet; build against the SDK
+which runs once, under the owner's signed policy. It is mainnet-observed on the staging host only; build against the SDK
 repository's local stack.
 
 Four consent scopes, each named in the text the owner signs:

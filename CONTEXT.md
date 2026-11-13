@@ -63,7 +63,7 @@ requirements distinguish mainnet observations, offline tests, pinned provider so
 behavior unverified, and requirements not yet demonstrated.
 _Avoid_: prototype (for an area), use case
 
-**Workspace**:
+**Workspace** (historical prototype frontend, removed):
 The hosted owner entry starts with **Your agents**, agent-scoped task and recovery links, and optional
 self-service setup. Opening an agent resumes incomplete setup or opens its task workspace. Guided walkthroughs remain optional.
 It links funding, policy, grants, agreements and recovery for the selected agent.
@@ -385,25 +385,12 @@ The current guide is deterministic; it does not invoke an LLM. A selected plan o
 exact, and reload never infers a selection from the latest record. Work-order identities remain
 with the existing per-order controls. These are local candidate behaviors, not mainnet observations.
 
-**Interactive Payables demo**: The signed-in `/a/<agent>/demos/payables/play` experience has
-Watch and Try modes with fictional records, plus **Use my agent**, which mounts the existing
-live payment review controls. Watch plays a scripted example; Try branches into approval,
-rejection or an unresolved outcome. Simulation progress is neither evidence nor authority and
-is never passed to live controls. Reload restarts the rehearsal. An explicit question can ask
-NEAR AI Cloud to compose an explanation and select validated catalog panels and suggested
-actions, delivered as an AG-UI CUSTOM event. Generated UI contains no executable code,
-destinations or signing payloads. The existing owner-intent flow supplies real messages to sign.
-Generation and verification failures leave the scripted guide usable. The implementation and
-mocked model integration are offline-tested; live inference and hosted behavior of this new demo
-remain unverified. See `docs/payables-generative-guide.md`.
-
 **Signing walkthrough chapters**: All three scoped short and complete walkthroughs embed existing
 live controls beneath a four-chapter guide. Policy, agreement and strategy reviews open in place;
 wallet signatures and DAO proposals use the existing owner-action flow. Chapter selection never
 prepares an action or establishes completion. Opened reviews and exact payment/order selections
 remain mounted through chapter changes. Work-order owner actions stay with the selected order’s
-agent, never the parent’s owner-action history. The Payables player uses this same guide in live
-mode. These interactions are offline-tested with mocked wallets and provider responses, not
+agent, never the parent’s owner-action history. These interactions are offline-tested with mocked wallets and provider responses, not
 hosted/mainnet observations. Treasury and Invoices chapter narration is authored, not AI-generated.
 
 
@@ -488,11 +475,12 @@ the provider's evidence; the app also gets the vote's text, so the page is optio
 Offline- and browser-tested only. See docs/app-access.md.
 
 **Platform host**:
-The platform's own host for apps (`api.dev.multiagency.ai` for staging, later `api.multiagency.ai`), run from the
+The platform's own host for apps, run from the
 `platform` package as a headless gateway: it serves only `/health`, app access (`/apps/v1`) and the confirm page, with
-app setup for the areas its config lists (Payables). It has no sign-in, owner app, owner RPC or machine credentials;
-those stay with the prototype, whose hosts were retired on 2026-11-08 (its source still runs locally). Offline- and
-stack-tested; staging has run it since 2026-10-31 and production since 2026-11-07. See docs/operations.md, "Platform staging".
+app setup for the areas its config lists. It has no sign-in, owner app, owner RPC or machine credentials;
+the retained legacy backend still contains those routes, but its owner dashboard frontend has been removed. Hostnames, deployment dates and checks are recorded in
+[platform staging](docs/platform-staging.md) and [platform production](docs/platform-production.md);
+[operations](docs/operations.md) defines packaging and state preservation.
 
 
 **App setup**:
@@ -523,8 +511,9 @@ An independently built supplier experience for invoice submission/status, work-o
 contribution reports. Its source is in `MultiAgency/invoices`; the platform retains
 supplier sessions, scoped routing, compensation and invoice records, owner review authorization and
 guarded execution. A compatible frontend release can change without restarting the platform after the shared
-backend integration is installed. This extraction is a locally tested, undeployed candidate; the existing
-hosted Invoices experience remains unchanged. See docs/invoices-extraction.md.
+backend integration is installed. This extraction is a locally tested, undeployed candidate. Hosting and
+verification history are in [Invoices extraction](docs/invoices-extraction.md); the retired prototype is
+described in [the prototype record](docs/prototype.md).
 
 
 **Hosted-agent release**:
@@ -552,3 +541,11 @@ An explicit wallet-owner creation choice for an uncreated hosted Market reservat
 initial withdrawal destination from that reservation's original payment key and uses the bounded test
 caps. It grants no execution authority and moves no funds; the later funding-only journal binding is
 separate. Offline-tested candidate; see docs/market-funding-proof.md.
+
+**Market funding allocation (candidate)**:
+The wallet owner's exact NEP-413 permission to reserve a fully proven isolated funding observation to one
+named hire. Its append-only record preserves the source's `fundingOnly` marker and binds the original
+proofs, payment key, target caller/request/brief/terms, top-up ceiling, policy and expiry. It sends nothing
+and replaces neither the provider grant nor app consent. Legacy or short-delivered sources refuse;
+unknown outcomes and residual funds remain reserved. Offline-tested, not deployed or mainnet-observed.
+See docs/market-allocation.md.

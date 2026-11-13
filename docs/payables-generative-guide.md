@@ -1,5 +1,7 @@
 # Interactive Payables guide
 
+Historical prototype: the interactive rehearsal page and its browser suite have been removed. The guide RPC/model code, inference wrapper and their exclusive tests have also been removed. The sections below are historical.
+
 The signed-in demo index and Payables walkthrough link to
 `/a/<agent>/demos/payables/play`. The agent must be a Payables agent accessible to the member.
 The public entry remains static and has no simulated approvals or private reads.
@@ -62,7 +64,7 @@ scripted flow locally. Deployments remain the owner's action.
 
 Offline coverage: `test/payables-guide.test.ts` checks schema rejection, transition boundaries,
 AG-UI compatibility, verification before parsing, verification timeout and capability isolation.
-`test/browser/payables-player.cjs` covers desktop/mobile playback, pause, takeover, rewind, rejection,
+The retired `test/browser/payables-player.cjs` covered desktop/mobile playback, pause, takeover, rewind, rejection,
 unknown outcomes, mocked AI composition, invalid and stale response rejection, reload, and separation
 from the mounted live controls. Existing walkthrough suites retain the live confirmation tests.
 

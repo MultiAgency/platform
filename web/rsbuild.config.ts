@@ -9,9 +9,9 @@ const VAULT = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><styl
 
 export default defineConfig({
   plugins: [pluginReact()],
-  source: { entry: { index: "./src/main.tsx", confirm: "./src/confirm.tsx" } },
+  source: { entry: { confirm: "./src/confirm.tsx" } },
   html: {
-    title: ({ entryName }) => entryName === "confirm" ? "Confirm an owner action" : "Agentic Treasury",
+    title: "Confirm an owner action",
     // The Vault mark inline: no image file to ship.
     tags: [{ tag: "link", attrs: { rel: "icon", type: "image/svg+xml", href: `data:image/svg+xml,${encodeURIComponent(VAULT)}` } }],
   },

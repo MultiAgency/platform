@@ -373,3 +373,26 @@ This records the supplied run transcript, not an independent re-observation in t
 acceptance. Amounts, deposit and operation identities and transaction hashes remain in the private release record.
 The assignment's acceptance text mentioned a marketplace fee, but ledger entries were not supplied, so fee deduction
 remains unresolved (market spike S3). No archive, provider restore or hosted-agent release was performed by this run.
+
+## Controlled Market funding on platform staging (2026-11-13 UTC)
+
+Mainnet-observed on staging gateway deployment `36fdd8a8-24ee-4503-956b-03d49ddc557b`, using the preserved
+wallet-owned Market reservation and original payment key. No DAO proposal was involved. The owner signed
+ordinary read/owner consent and a short Market grant. Owner-signed source transactions were independently
+verified final with exact actions; the original provider deposit operations reported the corresponding
+confidential credits and available balances.
+
+The approved funding-only command submitted its opening and USDC withdrawal stages once each at about
+13:05 UTC, through dispatch with the signed policy's mandate digest and the durable original request binding.
+Both provider operations reported SUCCESS. The initial reply remained `funding_review` while the USDC
+destination proof was unavailable. Subsequent status reconciliation recorded both landing proofs without
+another submission. Independent re-observation completed at 13:18 UTC: exact final successful destination
+receipts and later final chain views proved both original stages. The refreshed previews quoted no route fee;
+the final delivered amounts matched the reviewed requested amounts.
+
+The funding-only binding and landed funds remain reserved. The generic status can still say `funding_review`
+for landed funds awaiting disposition; the retained per-stage proofs establish this route observation, not
+permission to pay a hire. No x402 payment or hire was submitted, no reservation was cleared, and legacy-key
+accounting remains unresolved. This is evidence for this isolated route and deployment, not general Market
+execution readiness. Original operation identities, transaction hashes, exact amounts, policy/grant details,
+source-cost accounting and raw final receipt/chain responses remain in the private release record.

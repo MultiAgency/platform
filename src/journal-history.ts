@@ -21,6 +21,8 @@ const cancellationFinal = z.strictObject({ at: z.string().optional(), idempotenc
 // report the omission explicitly, without exporting private terms or treating either payload as settlement evidence.
 // This observational reader does not validate the payload's journal relationships or destination proof.
 const marketMetadata = z.union([
+  z.strictObject({ at: z.string().min(1), idempotencyKey: id, kind: z.literal("market-allocation"), journalVersion: z.literal(4),
+    allocation: z.record(z.string(), z.unknown()) }),
   z.strictObject({ at: z.string().min(1), idempotencyKey: id, kind: z.literal("market-binding"), journalVersion: z.literal(3),
     binding: z.record(z.string(), z.unknown()) }),
   z.strictObject({ at: z.string().min(1), idempotencyKey: id, kind: z.literal("market-landing"), journalVersion: z.literal(3),
@@ -41,7 +43,7 @@ export function parseJournalHistory(agentId: string, source: string): JournalHis
       const raw = JSON.parse(lines[index]!);
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error();
       const idempotencyKey = id.parse(raw.idempotencyKey);
-      if (raw.journalVersion === 3 || raw.kind === "market-binding" || raw.kind === "market-landing" ||
+      if (raw.journalVersion === 3 || raw.journalVersion === 4 || raw.kind === "market-allocation" || raw.kind === "market-binding" || raw.kind === "market-landing" ||
           "binding" in raw || "marketLanding" in raw) {
         const metadata = marketMetadata.parse(raw);
         gaps.push({ code: "market_metadata_not_exported", line, ref: metadata.kind });

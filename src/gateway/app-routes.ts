@@ -3,7 +3,7 @@ import type { HostedAgents } from "./hosted-agents.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { daoPolicy } from "../chain.js";
 import { proposalTransaction } from "../dao-owner.js";
-import { z } from "zod";
+import type { z } from "zod";
 import type { Area } from "../contract/areas.js";
 import { readJson, sendJson as json } from "../http.js";
 import { chainKeyState, hourlyLimit, type KeyLookup, type KeyStateLookup } from "../signin.js";
@@ -18,8 +18,7 @@ import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import { proposalText, proposalView } from "../contract/treasury-proposals.js";
-import { limitOrderId, limitOrderText, limitOrderView } from "../contract/limit-orders.js";
-import { hireTerms, marketBrief, payoutRequestId } from "../contract/inputs.js";
+import { limitOrderText, limitOrderView } from "../contract/limit-orders.js";
 import { hireText, marketApproveInput, MAX_HIRE_APPROVAL_MS } from "../contract/market.js";
 import { marketHireOutput } from "../contract/owner-outputs.js";
 import { createHash } from "node:crypto";
@@ -31,7 +30,7 @@ import { forwardRpc } from "./rpc-proxy.js";
 import { issueNonce, nonceIssuedAt } from "./consent-nonce.js";
 import { walletStopCutoff } from "./wallet-stop.js";
 import { fairShare, type Decision } from "./fair-share.js";
-import { setupRequest } from "./hosted-agents.js";
+import { reservationQuery, daoConsentFiling, daoHireFiling, daoVoteFiling, daoOrderFiling } from "./app-inputs.js";
 
 const ROOT = ".app-access";
 class AppAccessEnded extends Error {}
@@ -57,18 +56,6 @@ const limitLogged = new Map<string, number>();
 const publicConsent = ({ message: _m, nonce: _n, signature: _s, ...record }: ConsentRecord) => record;
 
 const FOLLOW_CREATION = new Set(["owner/status", "owner/actions", "owner/pending"]);
-/** `GET /apps/v1/agents`: an Organization's reservations, narrowed by the owner and area a setup names. */
-const reservationQuery = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
-  owner: setupRequest.shape.owner.optional(), area: setupRequest.shape.area.optional() });
-const daoConsentFiling = z.strictObject({ message: z.string().min(1).max(2_048) });
-/** A DAO's approval of one market hire, as an app asks for it: the terms it quoted, the brief, and how long the approval may last. */
-const daoHireFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), agent: z.string().regex(/^[a-z0-9-]{1,32}$/),
-  requestId: payoutRequestId, brief: marketBrief, approved: hireTerms, validUntil: z.iso.datetime(),
-  recoverProposal: z.literal("dao-checked").optional() });
-const daoVoteFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), agent: z.string().regex(/^[a-z0-9-]{1,32}$/),
-  proposal: z.string().min(1).max(128), verdict: z.enum(["approve", "reject"]) });
-const daoOrderFiling = z.strictObject({ organization: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), agent: z.string().regex(/^[a-z0-9-]{1,32}$/),
-  order: limitOrderId, verdict: z.enum(["approve", "reject"]) });
 /** The gateway's own call to an agent, as this app under one of its consents: the agent applies its usual checks. */
 const agentCall = (agent: AgentEntry, deployment: string, host: string, organization: string, consent: string, live: string[]): RouterClient<Router> =>
   createORPCClient(new RPCLink({ origin: agentOrigin(agent), url: "/rpc", headers: { "x-gateway-actor": `app:${deployment}:${organization}`,

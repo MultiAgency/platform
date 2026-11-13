@@ -46,14 +46,14 @@ test("offline launcher removes inherited credentials, instance settings and prel
     AUTOPILOT: "on", EXECUTOR: "on", HTTPS_PROXY: "https://proxy.invalid" });
   for (const key of ["AGENT_GRANT_TOKEN", "NEARAI_API_KEY", "ENV_FILE", "AUTOPILOT", "EXECUTOR", "NODE_OPTIONS", "HTTPS_PROXY"]) assert.equal(key in env, false, key);
   assert.equal(env.NEAR_INTENTS_AGENT_API_URL, "http://127.0.0.1:9");
-  assert.deepEqual(liveFiles, ["attestation.test.ts", "execute-plan.test.ts"]);
+  assert.deepEqual(liveFiles, ["execute-plan.test.ts"]);
 });
 
 test("explicit live verification refuses missing configuration instead of skipping", () => {
   assert.throws(() => requireLiveConfiguration({}), /No tests were started/);
   assert.throws(() => requireLiveConfiguration({ NEARAI_API_KEY: "sentinel" }), /AGENT_GRANT_TOKEN/);
   assert.doesNotThrow(() => requireLiveConfiguration(Object.fromEntries(
-    ["NEARAI_API_KEY", "NEAR_INTENTS_AGENT_API_KEY", "AGENT_ID", "AGENT_GRANT_TOKEN"].map(key => [key, "sentinel"]))));
+    ["NEAR_INTENTS_AGENT_API_KEY", "AGENT_ID", "AGENT_GRANT_TOKEN"].map(key => [key, "sentinel"]))));
 });
 
 test("offline discovery and explicit selections cannot load live suites", () => {

@@ -2,8 +2,10 @@
 
 The 2026-10-16 four-domain release is recorded in [archive/](archive/) (the
 [execution record](archive/proto-release-execution.md) and [release review](archive/proto-release-review.md)).
-Future production changes require their own authorization and must preserve executor assignments
-and all four volumes. No deployment or restart is implied by committing source changes.
+That prototype deployment was retired on 2026-11-08; its four-volume layout is historical.
+Current host records are [platform staging](platform-staging.md) and [platform production](platform-production.md).
+Future production changes require their own authorization and must preserve each active executor's
+assignments and complete state, including the directories below. No deployment or restart is implied by committing source changes.
 
 
 These instructions describe the repository configuration. Deploys, restarts and money actions are
@@ -453,7 +455,7 @@ canonical list and every instance settings file, including payment keys, and rec
 build. Do not delete entries, strip new fields/scopes or restore older shared state to force a downgrade. No downgrade
 conversion has been tested; one needs a separate compatibility review and a state-preserving procedure.
 
-The unreleased 0.5.9 market funding binding adds version 3 lines to the same `.ops/<agent>.jsonl`: a durable request
+The 0.5.9 market funding binding adds version 3 lines to the same `.ops/<agent>.jsonl`: a durable request
 binding before any top-up and a landing marker only after an exact destination receipt is final and included in a later final
 chain view. The frozen 0.5.6/0.5.7 and signed 0.5.8 readers reject the first binding line
 (`test/market-binding-rollback.test.ts`). After the first version 3 line, recover that market executor on
@@ -696,4 +698,24 @@ A provider restore performed outside this executor needs operator recovery; it d
 
 ## Controlled Market funding observation
 
-The private owner-run [funding observation](market-funding-proof.md) adds an optional `fundingOnly: true` field to Market v3 bindings; no existing record is converted. Preserve all state directories listed above, original settings and the private review file. Older strict readers refuse this marker, so rollback must not remove it or its funding reservations. The tool has no legacy clearance or recovery procedure. Run its code by absolute path from the reviewed canonical state directory; setting `ENV_FILE` does not select the journal or lock. Preserve the matching hosted registry entry, settings and provider owner identity; missing ownership evidence refuses funding. It is offline-tested only, not deployed or mainnet-observed.
+The private owner-run [funding observation](market-funding-proof.md) adds an optional `fundingOnly: true` field to Market v3 bindings; no existing record is converted. Preserve all state directories listed above, original settings and the private review file. Older strict readers refuse this marker, so rollback must not remove it or its funding reservations. The tool has no legacy clearance or recovery procedure. Run its code by absolute path from the reviewed canonical state directory; setting `ENV_FILE` does not select the journal or lock. Preserve the matching hosted registry entry, settings and provider owner identity; missing ownership evidence refuses funding. One isolated staging route was [mainnet-observed on 2026-11-13](mainnet-log.md#controlled-market-funding-on-platform-staging-2026-11-13-utc); funds remain reserved and no hire is established.
+
+## Market funding allocation (candidate)
+
+The owner-signed [allocation](market-allocation.md) is an unreleased, offline-tested candidate. Stop the
+agent's executor and other writers before adopting a reader/writer capable of its new journalVersion 4
+permission record. Back up every canonical state directory listed above, including `.ops/`, `.invoices/`,
+`.owner-intents/`, `.strategy/`, `.plans/`, `.evidence/`, `.inbox/`, `.agreements/`, `.notify/`, `.work-orders/`,
+`.hosted/`, `.agent-connections/`, `.machine-auth/`, `.app-access/` and `.proposals/`. Preserve original hosted
+settings and keys, registry, signed reviews and all source/target operation identities together.
+
+Existing records need no conversion or directory creation: allocation is an additive append-only record.
+The prior reader is tested to refuse it, so rollback after the first allocation is not an automatic downgrade.
+A stopped-executor recovery review must retain the record, original funding-only marker, reservations and
+target history; never remove or rewrite permission metadata to let an older reader send.
+
+During the separately approved rollout, set `MARKET_ALLOCATION_HOST` in the original hosted settings to the
+exact platform signing host. Missing or mismatched host refuses allocation. Restart only after preserving
+state and reviewing the packaged command, policy, grant and intended exact hire. No deployment, settings
+change or live disposition is authorized by this documentation. The lease and money lock remain single-host,
+not distributed fencing. Legacy funds, general returns and arbitrary retargeting remain unsupported.

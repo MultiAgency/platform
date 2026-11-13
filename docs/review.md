@@ -7,6 +7,10 @@ adds owner consent, checks before each send, at-most-once execution with recover
 This page is the short version for a reviewer: each claim, how it is known, and where the evidence is. The detailed
 records are linked; nothing here is stronger than they are.
 
+For the Treasury and Paperwork submission pairing, public bootstrap and current consumer acceptance,
+see the [hackathon Platform handoff](hackathon-platform-handoff.md). Those local results distinguish
+simulated settlement from deployed and dated mainnet evidence.
+
 ## How each claim is known
 
 Every claim carries one of these labels, and no sentence in this repository should claim more than its label:
@@ -99,14 +103,14 @@ market records exist: the previous reader rejects a market reservation and preve
 including Treasury and Payables (`test/market-rollback.test.ts`). See [market](market.md#rollback) and [operations](operations.md).
 
 
-DAO-owned app payouts: SDK 0.5.9 candidate admits Payables setup and payout consent, and routes payout
+DAO-owned app payouts: SDK 0.5.9 admits Payables setup and payout consent, and routes payout
 grants and held-payout votes through existing verified DAO owner actions. Contract and gateway
 coverage: `test/app-dao.test.ts`. Paperwork adoption and local simulated acceptance are recorded in its
 `docs/job-demo.md` and the private local acceptance report. Clean database handoff to another process
 is covered; SIGKILL, provider-response-loss and hosted wallet/quorum/mainnet behavior remain unverified.
 Not deployed or mainnet-observed. See [app access](app-access.md).
 
-The unreleased 0.5.9 market funding-binding candidate records the caller, request ID, approved terms and payment key
+The 0.5.9 market funding binding (SDK published 2026-11-12) records the caller, request ID, approved terms and payment key
 before a top-up. Deterministic funding stages and final destination-receipt checks keep an unproved or still-owned
 credit reserved to its hire (`test/market-binding-journal.test.ts`, `test/market-funding-proof.test.ts`; the earlier
 `ae60790` market candidate passed the full offline suite, browser checks and narrow stack E2E on 2026-11-11). The public journal-history export reports version 3 binding and landing
@@ -118,15 +122,18 @@ The frozen 0.5.6/0.5.7 and signed 0.5.8 readers reject the first version 3 journ
 (`test/market-binding-rollback.test.ts`). Pin the exact reviewed source and package provenance. Submitted 0.5.6 through
 0.5.8 top-ups cannot be retroactively bound and block new hires on
 their old key. No supported fresh-key recovery or automatic clearance exists yet; hashless or unavailable receipt
-evidence also needs reviewed recovery. This candidate is not ready for a market-agent rollout. See
+evidence also needs reviewed recovery. It is not ready for a market-agent rollout. See
 [market](market.md#rollback) and [operations](operations.md).
 
 
 ## Controlled Market funding observation
 
-The local [funding observation](market-funding-proof.md) uses Market's bound withdrawal stages and final receipt checks without signing an x402 payment. Its mode persists in the journal and funds remain reserved. Offline coverage: `test/market-hire.test.ts` (replay, missing receipts, lost submission reply, isolation, direct-dispatch refusal and short delivery). It has no deployed or mainnet observation and no legacy recovery authorization. The operator CLI binds canonical state/settings paths before application imports; durable registry ownership and the provider wallet owner must agree before funding. Reviewed policy revision/digest and grant identity/expiry are checked again at dispatch. Regressions are in `test/market-funding-cli.test.ts` and `test/market-funding-review-repro.test.ts`.
+The [owner-signed allocation candidate](market-allocation.md) is offline-tested and undeployed. It preserves the original funding-only record and binds its proven credit to one exact target, with owner/key, policy, receipt, balance, nonce, top-up and expiry checks. Real-process contention, crash recovery and refusal by the previous journal reader are covered in `test/market-allocation.test.ts`; dispatch coverage is in `test/market-hire.test.ts`. This establishes no live allocation or hire acceptance.
+
+The owner-run [funding observation](market-funding-proof.md) uses Market's bound withdrawal stages and final receipt checks without signing an x402 payment. Its mode persists in the journal and funds remain reserved. Offline coverage: `test/market-hire.test.ts` (replay, missing receipts, lost submission reply, isolation, direct-dispatch refusal and short delivery). One isolated route was mainnet-observed on staging on 2026-11-13, deployment `36fdd8a8-24ee-4503-956b-03d49ddc557b`: both original stages have independently checked final successful receipts and later chain views ([dated evidence](mainnet-log.md#controlled-market-funding-on-platform-staging-2026-11-13-utc)). This proves the tested route, not hire acceptance or legacy recovery; funds remain reserved. The operator CLI binds canonical state/settings paths before application imports; durable registry ownership and the provider wallet owner must agree before funding. Reviewed policy revision/digest and grant identity/expiry are checked again at dispatch. Regressions are in `test/market-funding-cli.test.ts` and `test/market-funding-review-repro.test.ts`.
 
 
-The bounded Market creation profile is a local candidate: `test/market-creation-profile.test.ts`
+The bounded Market creation profile's input checks are offline-tested: `test/market-creation-profile.test.ts`
 checks the requested initial policy, original reservation/key binding, owner preview and refused
-mis-scoped inputs. See `docs/market-funding-proof.md`; no deployed or mainnet claim.
+mis-scoped inputs. The applied policy matched this profile for the isolated funding observation above;
+the original creation evidence is retained privately. See `docs/market-funding-proof.md`.

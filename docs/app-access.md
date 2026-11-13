@@ -240,8 +240,8 @@ votes: on its Treasury proposals (`POST /apps/v1/dao-votes`, relayed to the agen
 each market hire under a consent carrying `market` (`POST /apps/v1/dao-hires` with the terms `market/quote` answered,
 the brief and how long the approval may last; `GET /apps/v1/dao-hires/<hash>` relays the signature once to
 `market/approve`, which checks the text, host and expiry and that the signing key is the agent's DAO owner as the
-provider records it, then begins or resumes the bound hire, which may still await funding in the 0.5.9 candidate; a DAO-owned market agent
-refuses a plain `market/hire`. In the 0.5.9 candidate, a repeated same-ID filing returns `repeated: true` and no
+provider records it, then begins or resumes the bound hire, which may still await funding since 0.5.9; a DAO-owned market agent
+refuses a plain `market/hire`. Since 0.5.9, a repeated same-ID filing returns `repeated: true` and no
 transaction by default. After inspecting the DAO for an earlier submission, send `recoverProposal: "dao-checked"`
 to recover the original proposal transaction; an ended consent or changed signer blocks that recovery. An expired signed hire
 approval that was not relayed can be filed anew with the same terms and request ID), on a market
@@ -523,7 +523,9 @@ ended by a stop, lapsed with no signature found, or past what it signed) is remo
 its history, and reading it after that answers 404. A signature found once is recorded and completes the request on a
 later read until what the DAO signed expires (the consent's, setup's or proposal's `expiresAt`), never after.
 
-Limits: DAO owners as above (Treasury only; no `payout` or `owner`); payout requests
+Limits: DAO owners have no general `owner` consent. DAO Payables setup and `payout` consent,
+including payout grants and separate held-payout votes, shipped in SDK 0.5.9 (published 2026-11-12)
+(see the DAO payout section below), not deployed or mainnet-observed. Payout requests
 pay confidential USDC through `intents`, or withdraw wNEAR (arriving as native NEAR) or USDC to an agreed NEAR account
 (mainnet-observed on staging 2026-10-30), and a held withdrawal is approved like a transfer (offline- and stack-tested; its hash shape is mainnet-observed,
 an approval isn't), with `destination_asset`, which the hash doesn't cover, required to be the token withdrawn, and no field outside the
@@ -544,7 +546,13 @@ browser, and an owner's vote on a held payout was relayed by the app. Mainnet-ob
 platform's own stand-in app: the `read`, `owner` and `payout` scopes on a test agent
 ([2026-10-28](mainnet-log.md#app-access-on-platform-staging-2026-10-28-utc)) and payout withdrawals
 ([2026-10-30](mainnet-log.md#payout-withdrawals-on-platform-staging-2026-10-30-utc)). `treasury` and
-`treasury-execute` are offline- and stack-tested only. No production host serves `/apps/v1`.
+`treasury-execute` are mainnet-observed on platform staging: a DAO-owned Treasury agent
+([2026-11-04](mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc),
+[2026-11-05](mainnet-log.md#a-dao-funds-its-agent-and-approves-a-swap-through-an-app-on-platform-staging-2026-11-05-utc))
+and a wallet owner's approved rebalance
+([2026-11-07](mainnet-log.md#a-wallet-owner-approves-a-treasury-rebalance-through-an-app-on-platform-staging-2026-11-07-utc)).
+The production host has served `/apps/v1` since 2026-11-07 ([platform production](platform-production.md)); no app
+workflow is observed there.
 
 
 ## Releasing an Organization agent (0.5.6 released)

@@ -1,10 +1,15 @@
 # Controlled Market funding observation
 
-This private owner-run tool prepares a proof of one current Market funding route without hiring an agent. It is not deployed or mainnet-observed. Offline coverage is in `test/market-hire.test.ts`; the production provider may omit destination receipt fields and leave funding in review.
+This private owner-run tool observes one Market funding route without hiring an agent. Its two bound withdrawal
+stages were mainnet-observed on platform staging on 2026-11-13, deployment
+`36fdd8a8-24ee-4503-956b-03d49ddc557b`: independent final receipt checks and later final chain views proved the
+opening transfer and USDC credit to the preserved payment key. See the [dated observation](mainnet-log.md#controlled-market-funding-on-platform-staging-2026-11-13-utc).
+Funds remain reserved; this establishes neither hire acceptance nor legacy-key recovery. Offline coverage is in
+`test/market-hire.test.ts`; missing destination receipt evidence still leaves funding in review.
 
 `scripts/market-funding-proof.ts` calls `fundMarketOnly` in the same Market funding flow used by hires. Each withdrawal uses the same lock, request binding, stage identity, dispatch, authorization, mandate digest and final destination verifier. It does not request a Market quote, sign a delegate or make a paid call. A durable `fundingOnly: true` binding cannot become a hire; dispatch and journal replay reject an x402 operation for it. Landed funds stay reserved, including after short delivery closes the binding. Successful accounting does not authorize reuse or recovery.
 
-## Bounded creation (offline-tested candidate)
+## Bounded creation profile
 
 A wallet-owned, uncreated hosted Market reservation can explicitly request `agent_create` with
 `role: "market"` and `creationProfile: "market-funding-proof"`. The server derives the sole withdrawal
@@ -20,7 +25,8 @@ input field and return its default policy. A profile request alone is never evid
 Verify the applied policy and exact revision/digest before issuing the reviewed grant or funding the agent.
 This option does not add a permanent funding-only provider role; the later journal binding still prohibits
 x402 for that observation. Creation and signing remain separate owner actions. Coverage:
-`test/market-creation-profile.test.ts`; no deployed or mainnet observation.
+`test/market-creation-profile.test.ts`. The applied policy matched this profile for the isolated staging
+funding observation above; its original creation evidence remains in the private release record.
 
 ## Operator review
 
@@ -52,6 +58,18 @@ The provider credential and RPC configuration must already be available in that 
 
 ## Evidence and stop conditions
 
+Route observation and meeting the funding target are separate results. The receipt verifier checks the exact
+terminal provider `amount_out`, which may be below the requested withdrawal after fees. Once that net credit
+has final receipt proof and a later final chain view, the journal records its landing. If the payment-key balance
+is still below the original target, the same record closes the binding with `funding_shortfall`; the command
+returns `refused`, not `funded`. This can support a reviewed observation of that exact net credit, but does not
+establish that the target was met, that a hire can be paid, or that retained funds may be reused. A shortfall
+never increases the withdrawal or authorizes another request. Offline coverage reproduces a 10000-base-unit
+withdrawal delivering 5835 units, including missing-proof refusal and continued reservation after proof.
+Any live review accepting a fee-adjusted route observation must explicitly distinguish these outcomes and
+still retain the original correlations, exact receipt and later final chain evidence. A preview alone proves none
+of them; missing final evidence stays `funding_review`.
+
 Retain original requests/correlations and provider response provenance privately. A stage remains reserved unless provider SUCCESS includes `destination_tx_hash` and `amount_out`, the final receipt proves the exact recipient/asset/amount, and a later final chain view confirms the credit. The verifier also rejects reuse of one receipt for multiple stages. A final `funded` result establishes the recorded USDC stage's credit, not permission to hire or withdraw residual funds.
 
 After a lost reply, provider uncertainty or missing/conflicting receipt, preserve `funding_review` and the original identities. Status reads (`hireStatus`) can reconcile exact original stages without submitting funds after approval expiry. A top-up-only retry with the original live approval can finish an unsubmitted next stage; it never resubmits a recorded stage. Do not invent a new identity to get around an unresolved operation. Old accounting and provider receipt recovery remain separate from the current-route observation.
@@ -61,3 +79,7 @@ After a lost reply, provider uncertainty or missing/conflicting receipt, preserv
 The optional `fundingOnly: true` field is additive to Market v3 binding records. Existing bindings without it keep their previous hire semantics; no existing state needs conversion or directory creation. Preserve the canonical state directories listed in [operations](operations.md), the original settings, the private review and every journal/landing/reservation. No record may be dropped to make rollback succeed.
 
 Earlier v3 readers use a strict binding shape and reject a funding-only record rather than pay it; pre-v3 readers also reject it. Such rollback is fail closed and is not a supported way to resume this agent. A stopped-executor recovery review must preserve the funding-only marker and reservations before selecting any reader. There is no automatic clearance, rotation or recovery in this change.
+
+The separate [owner-signed allocation candidate](market-allocation.md) can earmark a fully proven isolated
+observation to one exact hire without changing `fundingOnly`. It is offline-tested and undeployed; it does not
+clear legacy funding, generally release residuals or authorize any live use of the observed funds by itself.

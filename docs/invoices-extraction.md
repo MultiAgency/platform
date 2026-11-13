@@ -1,5 +1,7 @@
 # Standalone Invoices candidate
 
+This records the local extraction candidate and its historical integration checks. The prototype hosting was retired on 2026-11-08; this page does not describe a currently hosted supplier service. See [the prototype record](prototype.md) for that retirement and [platform production](platform-production.md) for the headless host.
+
 Invoices' payee frontend is extracted to the [`invoices` repository](https://github.com/MultiAgency/invoices). It builds without importing the platform or Payables source. The extraction includes the Payables working-tree payee work-order request UI and contribution-report app, with a source hash manifest in that repository. Payables and Treasury checkouts were not changed. This is an undeployed candidate; no live credentials or owner actions were issued.
 
 ## Ownership and delivery

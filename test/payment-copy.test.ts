@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ASSETS } from "../src/policy.js";
 
-import { exactPayment } from "../web/src/features/payables/payment-copy.js";
+import { exactPayment } from "../web/src/shared/payment-copy.js";
 
 test("payment approval copy preserves every unit and the full recipient account", () => {
   for (const [raw, displayed] of [["100000001", "100.000001"], ["1", "0.000001"], ["9007199254740993", "9007199254.740993"]]) {

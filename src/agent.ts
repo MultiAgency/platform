@@ -2,6 +2,7 @@ import { createIdempotencyKey, type StatusResponse } from "@near-intents-agent-a
 import { limitOrderText } from "./contract/limit-orders.js";
 import { api, waitForStatus } from "./api.js";
 import { assertCanSendAfterRelease } from "./release-state.js";
+import { assertAllocationCurrent } from "./market/allocation.js";
 import { agentId, executes } from "./env.js";
 import { assertCanDispatch, assertMoneyLock, type MoneyLock, withMoneyLock } from "./lock.js";
 import { mandateDigest, type ReviewedPolicy } from "./mandate.js";
@@ -160,6 +161,9 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action | C
   if (preparedKey && !invoiceOperations().some((op) => op.idempotencyKey === preparedKey && op.submissionState === "PREPARED"))
     throw new Error("Invoice operation is not prepared; replay is blocked");
   assertCanDispatch(lock);
+  const allocationBinding = market && readMarketBindings().find(b => b.idempotencyKey === market.bindingKey);
+  const allocation = allocationBinding ? await assertAllocationCurrent(allocationBinding) : null;
+  if (allocation && market) market.approvalExpiresAt = Math.min(market.approvalExpiresAt ?? Infinity, Date.parse(allocation.expiresAt));
   // A payout (a transfer, or a withdrawal to chain `near`) is read against the confidential balance it is paid from, and
   // its payee must exist on NEAR.
   const payee = action.method === "transfer" || (action.method === "withdraw" && action.request.chain === "near") ? action.request.recipient : null;
@@ -210,6 +214,9 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action | C
         binding.paymentAccount !== currentKey.account || binding.publicKey !== currentKey.publicKey ||
         !sameTerms(binding.approved, market.hire))
       throw new LocalRefusal("market_binding_mismatch", "This market send has no matching durable hire and payment key. Nothing was sent.");
+    if (binding.fundingSource && (!allocation || binding.fundingSource.message !== allocationBinding?.fundingSource?.message ||
+        now >= Date.parse(allocation.expiresAt) || revision !== allocation.reviewedPolicy.revision || policyDigest !== allocation.reviewedPolicy.digest))
+      throw new LocalRefusal("market_allocation_changed", "Owner allocation, policy or deadline changed. Nothing was sent.");
     // A locally refused funding stage closes this hire, even after policy changes make another stage or payment
     // otherwise sendable. Its released key may serve a different request, never a continuation of the closed one.
     if (binding.refused || priorOps.some(op => op.refused !== undefined &&
@@ -217,6 +224,8 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action | C
          op.idempotencyKey === marketStageKey(binding.idempotencyKey, "usdc"))))
       throw new LocalRefusal("market_binding_closed", "This hire's funding ended in a recorded refusal. Use its status; no further payment was sent.");
     if (action.method === "withdraw") {
+      if (allocation && (market.stage !== "usdc" || BigInt(action.request.amount) > BigInt(allocation.maxTopUpUsdc)))
+        throw new LocalRefusal("market_allocation_limit", "This allocation permits only its exact bounded USDC top-up. Nothing was sent.");
       if (!market.stage || requestKey !== marketStageKey(binding.idempotencyKey, market.stage) ||
           action.request.recipient !== binding.paymentAccount ||
           action.request.asset !== (market.stage === "open" ? ASSETS.wNEAR : ASSETS.USDC) ||

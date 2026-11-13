@@ -12,7 +12,7 @@ const artifacts = mkdtempSync(join(parent, 'run-')), snapshot = join(artifacts, 
 // `--prebuilt-web`: test the frontend already built in this tree (a frozen candidate's web/dist) instead of rebuilding
 // it, so the build that ships is the build these cases tested. A rebuild isn't byte-reproducible.
 const prebuilt = process.argv.includes('--prebuilt-web'), builtWeb = join(root, 'web/dist');
-if (prebuilt && !existsSync(join(builtWeb, 'index.html'))) throw new Error('--prebuilt-web needs a built web/dist in this tree');
+if (prebuilt && !existsSync(join(builtWeb, 'confirm.html'))) throw new Error('--prebuilt-web needs a built web/dist in this tree');
 for (const name of ['src', 'web', 'evidence', 'scripts', 'examples', 'test/e2e', 'test/offline.env', 'test/fixtures/offline-network.cjs', 'package.json', 'pnpm-lock.yaml', 'tsconfig.json']) {
   const target = join(snapshot, name); mkdirSync(resolve(target, '..'), { recursive: true });
   cpSync(join(root, name), target, { recursive: true, filter: path => !path.endsWith('/node_modules') && (!path.endsWith('/dist') || (prebuilt && path === builtWeb)) });

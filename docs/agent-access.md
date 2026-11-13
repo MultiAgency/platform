@@ -7,7 +7,12 @@ authority.
 
 ## Owner access
 
-`/a/<name>/access` is a shared workspace page. It loads `/gw/access-session`, a host-local signed-in
+**The page was removed with the owner dashboard in 0.6.0.** The gateway routes described here remain, with their
+offline and stack tests; no frontend built from this repository calls them, so `/a/<name>/access` serves no page and
+"the UI" below describes the removed one. Issuance still needs a wallet owner's session on a host that serves these
+routes; a new app uses [app access](app-access.md) instead.
+
+`/a/<name>/access` was a shared workspace page. It loads `/gw/access-session`, a host-local signed-in
 view of configured Treasury agents, independently of provider observations. Wallet owners match the
 configured owner; DAO members need current onchain management permission to inspect or revoke existing
 records. DAO members still cannot issue or use machine authority. That view
@@ -175,8 +180,6 @@ fencing is not implemented. No deployment, production restart or live action is 
 - `test/machine-routes.test.ts`: scope and identity binding, body/lookup revocation race, sanitized forwarding,
   provider-outage management, and refusal on audit-storage failure.
 - `test/machine-hosts.test.ts`: real shared gateway host/session/agent isolation and DAO refusal.
-- `test/browser/agent-access.cjs`: desktop/light and mobile/dark, defaults, explicit review, focus,
-  copy failure, one-time secrets, ambiguous outcomes, denial redaction and late issuance after navigation.
 - `test/e2e/agent-access.spec.mjs`: real shared gateway and executor with a simulated provider and wallet;
   consent, exact chosen-swap preparation/execution with autopilot ceiling zero, duplicate refusal and
   provider-outage revocation after reload. With `--treasury-skill PATH`, uses the actual snapshotted helper.

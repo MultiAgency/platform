@@ -13,8 +13,11 @@ test("gateway waits for managed children to stop before reporting a clean exit",
     { name: "fixture", owner: "owner.near", port: 9898, envFile: ".env.fixture" },
   ] }));
   const child = spawn(process.execPath, ["--import", resolve("node_modules/tsx/dist/loader.mjs"), resolve("test/fixtures/gateway-lifecycle.ts")], {
-    cwd: dir, env: { ...process.env, PORT: "0", SESSION_SECRET: "synthetic-session-".repeat(3) }, stdio: "ignore",
+    cwd: dir, env: { ...process.env, PORT: "0", SESSION_SECRET: "synthetic-session-".repeat(3) }, stdio: ["ignore", "pipe", "pipe"],
   });
+  let diagnostics = "";
+  child.stdout!.on("data", chunk => diagnostics += chunk);
+  child.stderr!.on("data", chunk => diagnostics += chunk);
   const exited = once(child, "exit");
   t.after(async () => {
     child.kill("SIGKILL");
@@ -24,8 +27,9 @@ test("gateway waits for managed children to stop before reporting a clean exit",
     await exited;
     rmSync(dir, { recursive: true, force: true });
   });
-  for (let i = 0; i < 200 && !existsSync(join(dir, "child-ready")); i++) await delay(20);
-  assert.ok(existsSync(join(dir, "child-ready")), "synthetic child started");
+  const deadline = Date.now() + 4_000;
+  while (!existsSync(join(dir, "child-ready")) && child.exitCode === null && child.signalCode === null && Date.now() < deadline) await delay(20);
+  assert.ok(existsSync(join(dir, "child-ready")), `synthetic child did not start (exit ${child.exitCode}, signal ${child.signalCode}): ${diagnostics}`);
   child.kill("SIGTERM");
   assert.deepEqual(await exited, [0, null]);
   assert.ok(existsSync(join(dir, "child-stopped")), "gateway must not exit before its child finishes shutdown");

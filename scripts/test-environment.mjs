@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parseEnv } from "node:util";
 
-export const liveFiles = ["attestation.test.ts", "execute-plan.test.ts"];
+export const liveFiles = ["execute-plan.test.ts"];
 export function offlineFiles(entries, requested = []) {
   const available = entries.filter(name => name.endsWith(".test.ts") && !liveFiles.includes(name)).sort();
   if (!requested.length) return available;
@@ -19,7 +19,7 @@ export function offlineEnvironment(parent = process.env) {
 }
 
 export function requireLiveConfiguration(env) {
-  const required = ["NEARAI_API_KEY", "NEAR_INTENTS_AGENT_API_KEY", "AGENT_ID", "AGENT_GRANT_TOKEN"];
+  const required = ["NEAR_INTENTS_AGENT_API_KEY", "AGENT_ID", "AGENT_GRANT_TOKEN"];
   const missing = required.filter(key => !env[key]?.trim());
   if (missing.length) throw new Error(`Live tests require ${missing.join(", ")}. No tests were started.`);
 }

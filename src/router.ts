@@ -5,7 +5,6 @@ import { marketRoutes } from "./rpc/market.js";
 import { treasuryRoutes } from "./rpc/treasury.js";
 import { observationsRoutes } from "./rpc/observations.js";
 import { workOrderRoutes } from "./rpc/work-orders.js";
-import { demoGuideRoutes } from "./rpc/demo-guide.js";
 import { proposalRoutes } from "./rpc/proposals.js";
 import { limitOrderRoutes } from "./rpc/limit-orders.js";
 
@@ -17,7 +16,6 @@ export const router = {
   ...treasuryRoutes,
   ...observationsRoutes,
   ...workOrderRoutes,
-  ...demoGuideRoutes,
   ...proposalRoutes,
   ...limitOrderRoutes,
   ...marketRoutes,

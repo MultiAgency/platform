@@ -45,6 +45,12 @@ const fundingUsage = spawnSync("/app/node_modules/.bin/tsx", ["/app/scripts/mark
 assert.notEqual(fundingUsage.status, 0);
 assert.match(fundingUsage.stderr, /Usage: tsx scripts\/market-funding-proof.ts/);
 assert.doesNotMatch(fundingUsage.stderr, /NEAR_INTENTS_AGENT_API_KEY is not set|ERR_MODULE_NOT_FOUND/);
+const allocationUsage = spawnSync("/app/node_modules/.bin/tsx", ["/app/scripts/market-allocation.ts"], {
+  cwd: state, env: { PATH: process.env.PATH, HOME: "/tmp" }, encoding: "utf8", timeout: 15_000,
+});
+assert.notEqual(allocationUsage.status, 0);
+assert.match(allocationUsage.stderr, /Usage: market-allocation.ts/);
+assert.doesNotMatch(allocationUsage.stderr, /NEAR_INTENTS_AGENT_API_KEY is not set|ERR_MODULE_NOT_FOUND/);
 
 let child: ChildProcess | undefined;
 const stop = async () => {

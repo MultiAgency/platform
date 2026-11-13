@@ -19,7 +19,7 @@ evidence refuses. Every listed public and confidential balance must be zero unle
 agent this also checks the payment key's native NEAR (including locked storage) and USDC. Other unsolicited assets on
 that key are not enumerated; retain the key and inspect it before explicitly leaving funds behind.
 
-The unreleased 0.5.9 market binding candidate also refuses `unresolved` while a submitted top-up lacks final
+The 0.5.9 market binding (SDK published 2026-11-12) also refuses `unresolved` while a submitted top-up lacks final
 destination proof, even if the provider reports `SUCCESS`, current balances are zero, or `allowBalance` is true.
 Archive does not cancel a possible later credit. This includes legacy unbound top-ups, which require reviewed
 recovery. Proven landed funds can still be left behind with the existing explicit balance override; release preserves

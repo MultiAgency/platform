@@ -1000,7 +1000,7 @@ Limits:
   proposals are invalidated. The owner's own plans run without the floor. Read from the code, not tested.
 - A DAO's proposals are public, so a DAO's floor is public once its grant proposal is filed.
 
-### Market hires: the payment key (0.5.6 and 0.5.7 released; 0.5.9 binding candidate)
+### Market hires: the payment key (0.5.6, 0.5.7 and the 0.5.9 binding released)
 
 A market agent hires listed agents on the NEAR AI Agent Market over x402 ([agent market](market.md)). The provider
 enforces every send up to the agent's payment key: the market policy lets the agent `withdraw` only USDC and wNEAR,
@@ -1013,7 +1013,7 @@ USD budgets still count provider withdrawals, not the timing or sum of later pay
 A DAO's approval deadline is checked after asynchronous signing and before every new claim; expiry stops paid-call
 retries without resolving an already attempted payment. Earlier top-ups remain recorded even if the final payment is
 refused. These boundaries are offline-tested in `test/market-deadline.test.ts` and `test/market-signing-race.test.ts`.
-The 0.5.9 candidate writes a version 3 binding of the caller, requestId, brief, approved terms and payment key before
+0.5.9 writes a version 3 binding of the caller, requestId, brief, approved terms and payment key before
 any top-up. The opening and USDC stages use fixed keys derived from it. Different terms with the same ID refuse
 `request_conflict` even before x402 preparation; `market/status` sees a bound request as `funding` or
 `funding_review`, not `not_found`. A submitted stage reserves the payment key across hires until a final destination
@@ -1261,7 +1261,7 @@ acceptance does not cover SIGKILL recovery, provider-response loss, hosted membe
 actual quorum or mainnet settlement; see docs/app-access.md.
 
 
-### Final receipt completeness (0.5.9 candidate)
+### Final receipt completeness (0.5.9)
 
 The Market funding verifier does not discard unmatched receipt outcomes. If a final transaction omits receipt
 bodies, it reads at most 16 exact IDs already present in that transaction's outcomes and requires matching IDs

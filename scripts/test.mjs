@@ -25,6 +25,9 @@ const guard = fileURLToPath(new URL(live ? "../test/fixtures/live-network.cjs" :
 env.NODE_OPTIONS = `--require ${JSON.stringify(guard)}`;
 const files = live ? liveFiles : offlineFiles(readdirSync(new URL("../test/", import.meta.url)), requested);
 if (!files.length) throw new Error("No tests discovered");
-const result = spawnSync(process.execPath, ["--import", "tsx", "--test", ...files.map(name => `test/${name}`)], { cwd: root, env, stdio: "inherit" });
+// Offline suites start real SQLite/process fixtures. Run suite files serially so
+// unrelated fixture startups do not consume each other's readiness deadlines.
+// Races inside each suite still use real concurrent children and unchanged assertions.
+const result = spawnSync(process.execPath, ["--import", "tsx", "--test", ...(!live ? ["--test-concurrency=1"] : []), ...files.map(name => `test/${name}`)], { cwd: root, env, stdio: "inherit" });
 if (result.error) console.error(result.error.message);
 process.exitCode = result.status ?? 1;

@@ -10,7 +10,7 @@ metadata:
   purpose: 'An app server''s access to agents: credential, consents, relayed owner actions, and payout requests by requestId with recovery by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.5.9'
+  library_version: '0.6.0'
 requires:
   - getting-started
   - owner-workflows
@@ -38,9 +38,8 @@ routes; a capability grants neither owner consent nor provider support.
 The local stack serves HTTPS with its own self-signed certificate, written to `<stack dir>/environment/localhost.crt`
 (the stack prints `<stack dir>/state.json` when ready). Trust that certificate only, never turn verification off. In
 Node, start your server with `NODE_EXTRA_CA_CERTS=<stack dir>/environment/localhost.crt`, as the platform's own
-end-to-end tests do. In Bun, pass `appClient` a `fetch` that adds Bun's `tls.ca` option:
-`fetch: (input, init) => fetch(input, { ...init, tls: { ca: caPem } })`, where `caPem` is that file's text. Covenant
-runs on the stack this way.
+end-to-end tests do. In Bun, pass `appClient` a `fetch` that adds Bun's `tls.ca` option: `fetch: (input, init) =>
+fetch(input, { ...init, tls: { ca: caPem } })`, where `caPem` is that file's text. Covenant runs on the stack this way.
 
 ## Setup
 
@@ -218,9 +217,10 @@ reading `state` after it passed is what finds the DAO's signature and stores the
 final (for a vote, `state` is also what relays it). 410 means the vote didn't pass before `votingUntil`: file again
 for a new vote. `proposalAndVote` is null when the DAO's next proposal id couldn't be read; file `proposal` then. The
 same shape covers the rest:
-- **Setup:** `app.daoSetups.file(setupMessage({ … owner: dao, area: "treasury", … }))`, at most 7 days ahead, Treasury
-  only, and only on a host whose setup includes Treasury (the deployed platform host's doesn't yet: 403). `state` answers `reserved` with the agent and a setup consent. Then `owner/prepare` with
-  `{ type: "agent_create", role: "treasury" }` and `signer: "dao"`. Then file the DAO's consent naming the new `agentId`.
+- **Setup:** `app.daoSetups.file(setupMessage({ … owner: dao, area: "treasury", … }))`, at most 7 days ahead.
+  Treasury, market and Payables setup are implemented; the host must explicitly permit the selected area, and its
+  configuration and child readiness are verified separately. `state` answers `reserved` with the agent and a setup consent.
+  Then `owner/prepare` with `{ type: "agent_create", role: "treasury" }` and `signer: "dao"`. Then file the DAO's consent naming the new `agentId`.
 - **Owner actions:** under a `treasury` consent, `owner/prepare` with `signer: "dao"` prepares the `treasury` grant,
   `grant_revoke`, a `policy_update`, freeze or unfreeze. The grant may name `expiresAt`, as above; its proposal names
   the grant's expiry apart from the signing window. A policy edit's public proposal names only the fields it
@@ -234,7 +234,10 @@ same shape covers the rest:
   itself once the vote passes; follow `owner/status`.
 - **Treasury proposals:** see treasury-app.
 
-Scopes: `read`, `treasury`, and `treasury-execute` if the DAO votes it in. Not `owner` or `payout`. Consent and
+Scopes: `read`, `treasury`, opt-in `treasury-execute`, `treasury-orders`, `market`, and `payout`. A DAO has no general
+`owner` consent. Under `payout`, Payables owner actions use `signer: "dao"`, including a payout grant and a separate
+`approval_vote` on a held payout. Payables creation uses `role: "payout"`; area setup uses `payables`. Provider evidence is
+verified before the approval signature is submitted. DAO Payables is offline-tested, not deployed or mainnet-observed. Consent and
 proposal votes may take the DAO's voting period (at most 7 days). Creation, the grant, its revocation, policy edits, freeze and unfreeze are provider
 intents with fixed windows, 600 s for wallet requests (creation, freeze, unfreeze, on-chain policy edits) and about 290 s for consent messages (the grant, a revocation, off-chain policy edits), per the provider's docs (owner-signing, signing-standards, read 2026-11-05); nothing lengthens them. They complete only for a DAO whose vote passes that fast:
 show `expiresAt`. A slower DAO can still approve each swap as a Treasury proposal (treasury-app), but can't issue the
@@ -346,12 +349,11 @@ withdrawal is approved or rejected like a transfer (0.5.5; offline- and stack-te
 
 ## Hire a listed agent on the agent market
 
-A market agent (0.5.6 base released; pre-reconciliation binding candidate `ae60790` passed full offline, browser and narrow stack checks
-on 2026-11-11; not yet observed through the platform on mainnet)
+A market agent (base released in 0.5.6, pre-funding binding in 0.5.9; no hire observed through the platform on mainnet)
 hires listed agents on the NEAR AI Agent Market over x402. Set one up for an Organization like any hosted agent, with
 `area: "market"` and `agent_create` `role: "market"`; the owner consents with `market` (and `read`, `owner`) and grants
-`label: "market"`. For an isolated wallet-owned funding observation, the local candidate additionally accepts
-`creationProfile: "market-funding-proof"` on creation. It derives the original reserved destination and bounds
+`label: "market"`. For an isolated wallet-owned funding observation, creation also accepts
+`creationProfile: "market-funding-proof"`. It derives the original reserved destination and bounds
 USDC/wNEAR caps; no grant or hire consent is issued. Inspect the exact prepared/applied policy before signing
 or funding: older hosts can omit this field. DAO creation refuses it. See `docs/market-funding-proof.md`.
 Fund it with `deposit`. Once, the owner registers its payment key on USDC: `market/account` answers
@@ -404,9 +406,8 @@ credit for inspection. An unknown x402 attempt stays poll-only.
 
 The full hire price must fit the policy's USDC per-transaction ceiling, including funds already on the key; dispatch
 rechecks it after funding. Daily/monthly caps and budgets count the provider's top-ups. Older readers reject shared
-market records below 0.5.6 and version 3 funding lines on any reader lacking the reviewed binding support.
-The released 0.5.8 limit-order package lacks that reader too; pin the exact source/package provenance. Stop writers and inspect legacy unbound top-ups
-before upgrade. Any submitted pre-binding top-up blocks further hires and sends to its key with
+market records below 0.5.6, and a reader before 0.5.9 rejects version 3 funding lines. Stop writers and inspect legacy
+unbound top-ups before upgrade. Any submitted pre-binding top-up blocks further hires and sends to its key with
 `legacy_funding_review_required`, even if terminal. Preserve state, key, retained funds and pending payments. New
 hires need a separately reviewed fresh-key recovery; there is no automatic rotation or clearance.
 
@@ -430,21 +431,20 @@ await calls.call("payouts/status", { requestId: "r-1" }); // state "succeeded"
 ```
 
 It answers `payouts/request`, `payouts/status`, `held` and `overview`. It runs the platform's own authorization rule,
-mandate digest, payout policy template and input schemas, so refusals carry the platform's codes
-(`insufficient_balance` less held payouts, `duplicate_held_payout`, `per_transaction_exceeded`,
-`policy_not_in_force`, `reviewed_policy_changed`, `grant_purpose_denied`, `payee_not_agreed` and `asset_not_allowed`
-for withdrawals, `request_conflict`, `chain_not_supported`, the recipient checks). It answers requests with the
-platform's own code; the order of the checks is restated, and the platform's tests run every scenario against both and
-require the same answers.
-Controls: `setPolicy`, `setPolicyState`, `setGrant`, `setBalance`, `vote`, `settle`, `loseNextAnswer` (an `unknown`
-that blocks new requests), `recipients.absent` / `unregistered` / `unchecked`, `revokeConsent` (`forbidden`,
-`no_consent`); a consent without `payout` answers `forbidden` with `code: "scope"`. Not modelled: budgets and hourly or
-monthly limits, approval expiry, provider outages, owner actions (`owner/prepare`: votes are `double.vote`), `deposit`
-and other procedures, including `market/*` (refused with `code: "not_modelled"` from 0.5.7, so a test never retries
-them; listed by `double.unmodelled()`). For those, and for the wire to a real gateway, use
-the local stack (`pnpm test:e2e:stack --app <deployment>`): its controls sign as the owner (`signOwner`) or a payee
-(`signPayee`), lose a transfer's or withdrawal's reply, unregister a recipient, refuse the next payout under a provider
-code, expire an approval and end a payout `FAILED` or `REFUNDED` (docs/testing.md).
+mandate digest, payout policy template and input schemas, so refusals carry the platform's codes (`insufficient_balance`
+less held payouts, `duplicate_held_payout`, `per_transaction_exceeded`, `policy_not_in_force`,
+`reviewed_policy_changed`, `grant_purpose_denied`, `payee_not_agreed` and `asset_not_allowed` for withdrawals,
+`request_conflict`, `chain_not_supported`, the recipient checks). It answers requests with the platform's own code; the
+order of the checks is restated, and the platform's tests run every scenario against both and require the same answers.
+Controls: `setPolicy`, `setPolicyState`, `setGrant`, `setBalance`, `vote`, `settle`, `loseNextAnswer` (an `unknown` that
+blocks new requests), `recipients.absent` / `unregistered` / `unchecked`, `revokeConsent` (`forbidden`, `no_consent`); a
+consent without `payout` answers `forbidden` with `code: "scope"`. Not modelled: budgets and hourly or monthly limits,
+approval expiry, provider outages, owner actions (`owner/prepare`: votes are `double.vote`), `deposit` and other
+procedures, including `market/*` (refused with `code: "not_modelled"` from 0.5.7, so a test never retries them; listed
+by `double.unmodelled()`). For those, and for the wire to a real gateway, use the local stack (`pnpm test:e2e:stack
+--app <deployment>`): its controls sign as the owner (`signOwner`) or a payee (`signPayee`), lose a transfer's or
+withdrawal's reply, unregister a recipient, refuse the next payout under a provider code, expire an approval and end a
+payout `FAILED` or `REFUNDED` (docs/testing.md).
 
 ## Common mistakes
 

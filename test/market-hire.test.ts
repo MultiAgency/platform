@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { after, beforeEach, mock, test } from "node:test";
-import { generateKey, parseKey, Near } from "near-kit";
+import { generateKey, parseKey, Near, TransactionBuilder } from "near-kit";
 import lockfile from "proper-lockfile";
 import { fundingContextFixture } from "./fixtures/funding-context.js";
 import { MARKET_USDC, market } from "./e2e/market.mjs";
@@ -28,6 +28,8 @@ const { readOps, readMarketBindings, marketStageKey } = await import("../src/ops
 const { ASSETS, marketPolicy } = await import("../src/policy.js");
 const { hire, hireStatus, quoteHire, fundMarketOnly: observedFunding } = await import("../src/market/hire.js");
 const { fundingProof } = await import("../src/market/funding-proof.js");
+const { prepareMarketAllocation, commitMarketAllocation } = await import("../src/market/allocation.js");
+const { signedFixture, allocationOwnerPublicKey } = await import("./fixtures/market-allocation.js");
 const { acquireMoneyLock, UnresolvedOperations } = await import("../src/lock.js");
 const { requestKey } = await import("../src/payout-requests.js");
 const { authorityFixture, fixtureGrant, policyView, timedPrices } = await import("./fixtures/authority.js");
@@ -43,6 +45,7 @@ let deliveredAmount: string | undefined;
 freshDirectory("market-hire");
 after(() => sim.close());
 beforeEach(() => {
+  mock.restoreAll();
   withdrawals = [];
   fundingProofAvailable = true;
   deliveredAmount = undefined;
@@ -620,20 +623,39 @@ test("dispatch independently blocks an x402 action for a funding-only binding", 
   assert.equal(readOps().some(o => o.method === "x402"), false);
 });
 
-test("a short-delivered funding observation remains reserved after a terminal binding refusal", async () => {
+test("a fee-adjusted funding observation proves exact net credit while refusing the unmet target and reserving funds", async () => {
   sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
-  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const approved = { ...(await quoteHire({ handle: "writer", brief: BRIEF })), amount: "10000" };
   mock.method(api, "forGrant", () => ({ withdraw: async (_id: string, request: { asset: string; amount: string; recipient: string }, { idempotencyKey }: { idempotencyKey: string }) => {
-    withdrawals.push({ ...request, key: idempotencyKey }); sim.fund(request.recipient, "1");
+    withdrawals.push({ ...request, key: idempotencyKey }); sim.fund(request.recipient, "5835");
     return { correlation_id: "op_1" };
   } }));
-  deliveredAmount = "1";
+  deliveredAmount = "5835";
+  const proofs: { amount: string; recipient: string; asset: string }[] = [];
+  mock.method(fundingProof, "verify", async (input: { destinationTxHash: string; recipient: string; asset: string; amount: string }) => {
+    proofs.push(input);
+    return fundingProofAvailable ? { ...input, blockHeight: sim.chain.height.toString() } : null;
+  });
   const input = { requestId: "proof-short", brief: BRIEF, approved };
-  assert.equal((await fundMarketOnly(APP, input, Date.now() + 60_000)).state, "refused");
+  const deadline = Date.now() + 60_000;
+  fundingProofAvailable = false;
+  assert.equal((await fundMarketOnly(APP, input, deadline)).state, "funding_review", "credit alone cannot prove the route");
+  assert.equal(readMarketBindings().find(b => b.requestId === input.requestId)?.landed.usdc, undefined);
+  fundingProofAvailable = true;
+  const result = await fundMarketOnly(APP, input, deadline);
+  assert.equal(result.state, "refused");
+  assert.equal(result.code, "funding_shortfall", "the original gross funding target remains unmet");
+  assert.ok(proofs.length > 0);
+  assert.ok(proofs.every(p => p.amount === "5835" && p.recipient === KEY && p.asset === ASSETS.USDC), "prove net delivery, never the gross withdrawal");
+  const binding = readMarketBindings().find(b => b.requestId === input.requestId);
+  assert.ok(binding?.landed.usdc, "the exact net credit was proven before recording the shortfall");
+  assert.equal(binding?.refused, "funding_shortfall");
+  assert.deepEqual(withdrawals.map(w => [w.asset, w.amount]), [[ASSETS.USDC, "10000"]]);
   const { pendingMarketFunding } = await import("../src/market/binding-guard.js");
   assert.ok(pendingMarketFunding(KEY), "a successful proof does not authorize residual reuse");
-  assert.equal((await hire(APP, { ...input, requestId: "consume-short-proof" })).state, "funding");
+  assert.equal((await hire(APP, { ...input, requestId: "consume-short-proof", approved: await quoteHire({ handle: "writer", brief: BRIEF }) })).state, "funding");
   assert.equal(withdrawals.length, 1);
+  assert.equal(readOps().some(o => o.method === "x402"), false);
 });
 
 test("a funding observation rejects a key with retained USDC before writing its binding", async () => {
@@ -737,4 +759,123 @@ for (const changed of ["policy", "grant"] as const) test(`funding dispatch refus
   assert.equal(result.state, "refused");
   assert.equal(result.code, changed === "policy" ? "reviewed_policy_changed" : "reviewed_grant_changed");
   assert.equal(withdrawals.length, 0);
+});
+
+async function allocationFixture() {
+  process.env.NEAR_INTENTS_AGENT_API_URL = "https://provider.example";
+  process.env.MARKET_ALLOCATION_HOST = "platform.example";
+  process.env.HOSTED_OWNER_KIND = "wallet";
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY);
+  mock.method(api, "getStatus", async (correlation_id: string) => {
+    const w = withdrawals[Number(correlation_id.replace("op_", "")) - 1];
+    return { correlation_id, agent_id: process.env.AGENT_ID, type: "withdraw", status: "SUCCESS",
+      details: { destination_tx_hash: String(withdrawals.indexOf(w!) + 1).padStart(44, "2"), amount_out: w?.amount,
+        request: w && { asset: w.asset, amount: w.amount, recipient: w.recipient, chain: "near", confidential: true } } };
+  });
+  const sourceTerms = { ...(await quoteHire({ handle: "writer", brief: BRIEF })), amount: "10000" };
+  const sourceInput = { requestId: "allocation-source", brief: BRIEF, approved: sourceTerms };
+  const context = fundingContextFixture(secretKey);
+  assert.equal((await fundMarketOnly(APP, sourceInput, Date.now() + 60_000, context)).state, "funded");
+  const source = readMarketBindings()[0]!;
+  assert.ok(source.landed.open && source.landed.usdc);
+  const rpc = new Near({ network: "mainnet" }).rpc;
+  const prototype = Object.getPrototypeOf(rpc);
+  const original = prototype.getAccessKey;
+  const access = { permission: "FullAccess" };
+  mock.method(prototype, "getAccessKey", async function(this: typeof rpc, ...args: unknown[]) {
+    if (args[0] === "owner.near") return { nonce: 0, permission: access.permission };
+    return original.apply(this, args);
+  });
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const target = { actor: APP, requestId: "allocated-hire", brief: BRIEF, approved };
+  const prepared = await prepareMarketAllocation({ host: "platform.example",
+    providerOrigin: new URL(process.env.NEAR_INTENTS_AGENT_API_URL ?? "https://api.demo.agentsonintents.com").origin,
+    ownerAccount: "owner.near", ownerPublicKey: allocationOwnerPublicKey, agentId: process.env.AGENT_ID!,
+    paymentAccount: KEY, paymentPublicKey: parseKey(secretKey).publicKey.toString(), sourceBindingKey: source.idempotencyKey,
+    sourceOpen: source.landed.open!, sourceUsdc: source.landed.usdc!, sourceUsdcAmount: "10000", maxTopUpUsdc: "490000",
+    target, reviewedPolicy: context.reviewedPolicy, expiresAt: new Date(Date.now() + 60_000).toISOString() });
+  return { sourceInput, target, signed: signedFixture(JSON.parse(prepared.message)), access };
+}
+
+test("a wallet allocation uses only its exact hire through dispatch and leaves the original observation immutable", async () => {
+  const { sourceInput, target, signed } = await allocationFixture();
+  await commitMarketAllocation(signed);
+  const before = withdrawals.length;
+  const answer = await hire(APP, target);
+  assert.equal(answer.state, "unknown", "a completed task alone does not prove payment");
+  assert.equal((await hireStatus(APP, target.requestId)).state, "paid");
+  assert.equal(withdrawals.length, before + 1);
+  assert.deepEqual(withdrawals.at(-1) && [withdrawals.at(-1)!.asset, withdrawals.at(-1)!.amount], [ASSETS.USDC, "490000"]);
+  assert.equal(readOps().filter(o => o.method === "x402").length, 1);
+  assert.equal(readMarketBindings()[0]?.fundingOnly, true);
+  await assert.rejects(hire(APP, sourceInput), /cannot change/);
+  assert.equal((await hire(APP, target)).state, "paid");
+  assert.equal(withdrawals.length, before + 1, "no repeated payment or top-up");
+  assert.equal((await hire(APP, { ...target, requestId: "another-hire" })).state, "funding", "residual/source reservation is not generally cleared");
+  assert.equal(withdrawals.length, before + 1);
+});
+
+for (const change of ["key", "host", "policy", "proof", "owner", "balance", "nonce", "dao"] as const) test(`allocation refuses ${change} drift before recording or sending`, async () => {
+  const { signed, access } = await allocationFixture();
+  const before = withdrawals.length;
+  if (change === "key") access.permission = "FunctionCall";
+  if (change === "host") process.env.MARKET_ALLOCATION_HOST = "other.example";
+  if (change === "policy") mock.method(api, "getPolicy", async () => policyView(marketPolicy(KEY), 2));
+  if (change === "proof") fundingProofAvailable = false;
+  if (change === "owner") {
+    const agent = await api.getAgent(process.env.AGENT_ID!);
+    mock.method(api, "getAgent", async () => ({ ...agent, owner: { type: "near", account_id: "other.near", public_key: allocationOwnerPublicKey } }));
+  }
+  if (change === "balance") sim.fund(KEY, "1");
+  if (change === "nonce") sim.chain.accounts.get(KEY)!.nonce = 1n;
+  if (change === "dao") process.env.HOSTED_OWNER_KIND = "dao";
+  await assert.rejects(commitMarketAllocation(signed));
+  assert.equal(readMarketBindings().length, 1);
+  assert.equal(withdrawals.length, before);
+});
+
+test("dispatch cannot add native funding or exceed an allocation's signed USDC top-up ceiling", async () => {
+  const { target, signed } = await allocationFixture();
+  await commitMarketAllocation(signed);
+  const { dispatch } = await import("../src/agent.js");
+  const key = requestKey(APP, target.requestId), lock = await acquireMoneyLock();
+  try {
+    for (const stage of ["open", "usdc"] as const) {
+      await assert.rejects(dispatch(lock, "market-topup", { method: "withdraw", request: {
+        asset: stage === "open" ? ASSETS.wNEAR : ASSETS.USDC, amount: stage === "open" ? "20000000000000000000000" : "490001",
+        chain: "near", recipient: KEY, confidential: true,
+      } }, undefined, undefined, undefined, marketStageKey(key, stage), undefined,
+      { hire: target.approved, bindingKey: key, stage }), /exact bounded USDC top-up/);
+    }
+  } finally { await lock.release(); }
+  assert.equal(withdrawals.length, 2);
+});
+
+test("dispatch rechecks allocated owner key after admission and sends nothing after revocation", async () => {
+  const { target, signed, access } = await allocationFixture();
+  await commitMarketAllocation(signed);
+  access.permission = "FunctionCall";
+  const before = withdrawals.length;
+  await assert.rejects(hire(APP, target), /owner\/key unavailable/);
+  assert.equal(withdrawals.length, before);
+  assert.equal(readOps().some(o => o.method === "x402"), false);
+});
+
+test("allocation expiry during delegate signing prevents the payment claim", async t => {
+  const { target, signed } = await allocationFixture();
+  await commitMarketAllocation(signed);
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const delegate = TransactionBuilder.prototype.delegate;
+  t.mock.method(TransactionBuilder.prototype, "delegate", async function(this: TransactionBuilder, ...args: Parameters<typeof delegate>) {
+    const result = await delegate.apply(this, args);
+    t.mock.timers.tick(61_000);
+    return result;
+  });
+  const result = await hire(APP, target);
+  assert.equal(result.state, "refused");
+  assert.equal(result.code, "approval_expired");
+  const payment = readOps().find(o => o.method === "x402");
+  assert.equal(payment?.submissionState, "PREPARED");
+  assert.equal(payment?.refused, "approval_expired");
+  assert.equal(sim.chain.accounts.get(KEY)!.transfers.length, 0);
 });

@@ -17,7 +17,19 @@ for (const enabled of [false, true]) test(`shared discovery advertises area boun
   const child = spawn(process.execPath, ['--import', join(process.cwd(), 'node_modules/tsx/dist/loader.mjs'), join(process.cwd(), 'src/gateway/server.ts')], {cwd:dir, env:{...process.env, PORT:String(port),SESSION_SECRET:'offline-discovery-secret-'.repeat(3)},stdio:['ignore','pipe','pipe']});
   t.after(async () => { if(child.exitCode === null) { child.kill(); await new Promise(resolve => child.once('exit',resolve)); } });
   let diagnostics=''; child.stderr!.on('data', chunk=>diagnostics+=chunk);
-  await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error(diagnostics||'startup timeout')),8000);child.stdout!.on('data',chunk=>{if(String(chunk).includes('on port')){clearTimeout(timer);resolve();}});child.once('exit',()=>{clearTimeout(timer);reject(new Error(diagnostics));});});
+  await new Promise<void>((resolve, reject) => {
+    let output = '';
+    const timer = setTimeout(() => reject(new Error(`Gateway startup timed out: ${diagnostics}\n${output}`)), 8_000);
+    child.stdout!.on('data', chunk => {
+      output += chunk;
+      if (output.includes('on port')) { clearTimeout(timer); resolve(); }
+    });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('exit', (code, signal) => {
+      clearTimeout(timer);
+      reject(new Error(`Gateway exited during startup (${code}, ${signal}): ${diagnostics}\n${output}`));
+    });
+  });
   for(const host of ['payables.test','other.test']) {
     const body = await new Promise<any>((resolve, reject) => {
       const req = request({ hostname: '127.0.0.1', port, path: '/gw/me', headers: { host } }, res => {

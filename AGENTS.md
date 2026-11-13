@@ -50,9 +50,8 @@ Files: `src/agent.ts` (dispatch), `authorize.ts`, `lock.ts`, `ops.ts`, `plans.ts
   replica, state on its `/data` volume. Staging's hosted agents hold and move real funds on mainnet.
   The prototype's hosts (proto, invoices, payables, treasury.multiagency.ai) were retired on 2026-11-08.
 - Deploys, restarts and dashboard money actions are the user's. Prepare and verify; let them ship.
-- The signed-out public page shows the two areas and each requirement's stage, never the evidence,
-  and reads nothing from the server: no balances, amounts, payees, policies, invoices, roster or
-  proposals. `test/public.test.ts` pins `web/src/public.tsx`.
+- The retired owner dashboard frontend and its public entry are removed. `web` builds only the confirm/stop
+  entry. Keep it independent of owner-session reads; consuming apps own their product UI.
 - `pnpm test:live` moves or touches real funds: run only when asked, never scheduled. `PLATFORM_URL=<host> pnpm smoke` is the read-only check of a host.
 - An unattended run or freeze may be in progress: ask the user before editing money-path files.
 

@@ -21,18 +21,6 @@ function runtimeDependencies(entry: string, seen = new Set<string>()) {
   }
   return seen;
 }
-test("legacy public overviews cannot reach authenticated clients, queries or actions", () => {
-  const dependencies = runtimeDependencies("public/prototype-explorer.tsx");
-  const presentation = ["features/evidence/showcase.tsx", "features/evidence/beats.ts"];
-  for (const dependency of [...presentation, "../../evidence/inventory.ts", "shared/ui.tsx", "components/ui/card.tsx", "components/ui/button.tsx"]) {
-    assert.ok(dependencies.has(resolve(web, dependency)), `Public presentation dependency must be checked: ${dependency}`);
-  }
-  for (const file of dependencies) {
-    if (!presentation.some(entry => file === resolve(web, entry))) assert.doesNotMatch(file, /\/(?:app|features)\//);
-    assert.doesNotMatch(file, /\/(?:client|queries|viewer|wallet|owner|confirm-button)\.[tj]sx?$/);
-    assert.doesNotMatch(readFileSync(file, "utf8"), /fetch\(|useQuery|WebSocket|EventSource|sendBeacon|localStorage|sessionStorage/);
-  }
-});
 test("generic UI primitives have no permission or transport dependency", () => {
   const dependencies = runtimeDependencies("shared/ui.tsx");
   for (const file of dependencies) assert.doesNotMatch(file, /\/(?:client|queries|viewer|wallet|owner|confirm-button)\.[tj]sx?$/);

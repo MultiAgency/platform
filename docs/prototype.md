@@ -1,18 +1,20 @@
 # The dashboard prototype
 
-**Experimental.** The `dao` dashboard and `invoices` packages: the original agency experiment, run from this repository
-before the headless platform host and `/apps/v1`. Their source still runs locally; their hosted services were retired
+**Historical deployment and frontend.** The `dao` dashboard and `invoices` packages were the original agency experiment, run from this repository
+before the headless platform host and `/apps/v1`. The owner dashboard frontend has been removed; the shared backend remains. Their hosted services were retired
 and their packages are no longer built (2026-11-08). The platform's core loops are in the [README](../README.md#the-product). Gaps are in the README's
 [Not done yet](../README.md#not-done-yet).
 
-The [shared frontend integration](shared-frontend-integration.md) keeps the platform's own page as the static
-three-idea showcase and serves independently built Treasury and Payables frontends. Invoices is
+The sections below record historical prototype behavior; they are not current local dashboard instructions.
+
+The [shared frontend integration](shared-frontend-integration.md) kept the prototype's own page as the static
+three-idea showcase and served independently built Treasury and Payables frontends. Invoices was
 Payables' payee-facing entry. The 2026-10-16 UTC [release record](archive/proto-release-execution.md)
 records that release's sign-in, private access and routing checks.
 Agents retain separate balances, authority and executors.
 A new app builds on the platform through the [integration path](integration-path.md).
 
-The initial agency experiment has two areas, each with its own agent owned by
+The initial agency experiment had two areas, each with its own agent owned by
 `agentic.sputnik-dao.near`. Other owners reserve separate instances. Each area runs a brief from
 the Agent Connect catalog and plans more:
 
@@ -27,8 +29,8 @@ The app shows the two running briefs and their evidence stages; additional roadm
 ## Hosted demo (retired 2026-11-08)
 
 The prototype's four public entry points ran on Railway until 2026-11-08, when the user deleted their services; they
-no longer answer. They are described below as they ran. Their source still runs locally (`pnpm demo`,
-`pnpm invoices`); their packages are no longer built. What's hosted now is the platform host only: `api.dev.multiagency.ai` (staging) and `api.multiagency.ai`
+no longer answer. They are described below as they ran. The owner dashboard build and browser suites have been removed. The retained supplier backend still runs with
+`pnpm invoices`; the prototype packages are no longer built. What's hosted now is the platform host only: `api.dev.multiagency.ai` (staging) and `api.multiagency.ai`
 (production), the headless `platform` package ([platform production](platform-production.md)). Signing in with a
 NEAR wallet signs a message, never a transaction.
 
@@ -62,7 +64,7 @@ unresolved; approval does not establish settlement. Opening or reloading a guide
 When a payee host is configured, owner-created Payables agents receive an isolated payee entry
 at `/i/<instance>/` after provider agent creation. The existing approve-only payout agent retains its
 separate invoice executor. New owner-created agents never share that executor’s state or grant.
-The shared routing is deployed. New-owner provisioning and scoped payee journeys retain
+Shared routing was deployed in the historical prototype release. New-owner provisioning and scoped payee journeys retain
 offline coverage only; the release did not create an agent or issue a grant.
 
 There are no public read-only walkthroughs or requirement cards at the entry. Legacy example hashes

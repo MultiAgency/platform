@@ -39,7 +39,8 @@ owner signs `consentMessage(...)` (or `setupMessage(...)` for a hosted agent) wi
 it. A consent reaches the listed reads (`APP_READS`) and owner actions (`APP_OWNER`) and, for `owner/prepare`, only
 actions the owner can read when signing or that platform code builds entirely (`AppOwnerAction`); everything else is
 refused. The app never asks an owner to sign the platform's sign-in text. See the platform's `docs/app-access.md`.
-No production MultiAgency host serves the `/apps/v1` routes yet. Build against the platform repository's local stack
+The production host (`api.multiagency.ai`) has served the `/apps/v1` routes since 2026-11-07, on an older platform
+version than this package; no app workflow is observed there. Build against the platform repository's local stack
 (below), with a simulated provider, chain and wallet; then ask for a staging credential through
 [developer access](https://github.com/MultiAgency/platform/blob/main/docs/developer-access.md).
 

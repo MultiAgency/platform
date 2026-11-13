@@ -1,7 +1,7 @@
 # Agencies on the NEAR AI Agent Market
 
 **Status: the market base shipped in 0.5.6 on 2026-11-10; #62's approval-deadline and requestId checks shipped in
-0.5.7 on 2026-11-11. The pre-funding binding below is an unreleased 0.5.9 candidate. Its pre-reconciliation head
+0.5.7 on 2026-11-11. The pre-funding binding below shipped in SDK 0.5.9 on 2026-11-12. Its pre-reconciliation head
 `ae60790` was tested offline, in the browser, and in narrow stack E2E on 2026-11-11. The full E2E suite with the Treasury skill fixture was not run, and no hire
 has been observed through the platform on mainnet. Rollout is held pending the audit in [Rollback](#rollback).** Built,
 against a simulated market and chain (`test/e2e/market.mjs`) and a stand-in Agent API: the quote check, client,
@@ -10,7 +10,7 @@ written at reservation, the market role and policy, creation bound to them (`tes
 operation through `dispatch` → `send`, the `market` purpose in `authorize` (`test/authorize.test.ts`), resolution in
 reconciliation, the hire flow and the `market` app scope (`src/market/hire.ts`, `test/market-hire.test.ts`); the DAO
 path: `market` in DAO consents and setup, `/apps/v1/dao-hires` and `market/approve` (`test/app-dao.test.ts`). The simulated market is wired into the local stack (`test/e2e/market.spec.mjs`). A separate offline worker test exercises the market directory, a self-hosted worker's token-scoped assignment, signed webhook, polling fallback, submission and x402 payment after delivery (`test/e2e/market-worker.spec.mjs`). The app-server skill supplies typed guidance. Gaps are in
-[enforcement](enforcement.md#market-hires-the-payment-key-056-and-057-released-059-binding-candidate). Decisions
+[enforcement](enforcement.md#market-hires-the-payment-key-056-057-and-the-059-binding-released). Decisions
 recorded with the user on 2026-11-09: agencies take both sides of the market (they hire agents as clients and list
 agents as workers); hires are paid over A2A + x402; the upstream asks below are pursued; the app is Covenant
 (`MultiAgency/demo`) over `/apps/v1`; a `market` purpose joins `authorize` (payee the market's published `payTo`, asset
@@ -105,14 +105,14 @@ code.
 2. **Approve.** A wallet owner's consent with `market` scope pays within the signed policy with no further signature,
    as `payout` does with `owner_approval: false`. A DAO approves each hire's exact terms by vote first, as it approves
    Treasury proposals (`proposalText`): the hire is filed as a durable proposal and paid only once the vote passes.
-   In the 0.5.9 candidate, a repeated filing returns no transaction by default. If its first answer was lost, inspect
+   Since 0.5.9, a repeated filing returns no transaction by default. If its first answer was lost, inspect
    the DAO for prior submission before explicitly asking for the original proposal with
    `recoverProposal: "dao-checked"`; an ended original consent or changed signer blocks recovery.
    A vote takes days and the agent's price can change meanwhile: the hire re-quotes before paying and refuses unless
    the new `402` row equals the approved terms. The signed `validUntil` is checked before each new submission,
    after asynchronous preflight and signing, including top-ups and paid-call retries.
 3. **Hire.** `market/hire { requestId, brief, approved }` sends once per caller and `requestId`, under the money
-   lock, through `dispatch`, purpose `market`. In the 0.5.9 candidate, after the quote and policy checks, it first
+   lock, through `dispatch`, purpose `market`. Since 0.5.9, after the quote and policy checks, it first
    writes a version 3 journal binding of the caller, ID, brief, approved terms and payment key. A retry with different
    terms now refuses `request_conflict` before an x402 payment exists. The two money legs are:
    - *Top-up:* a provider `withdraw` of the shortfall (the quote less what the payment key already holds) and, the
@@ -187,7 +187,7 @@ signing and retry waits (`test/market-deadline.test.ts`), and lost lock/shutdown
 ### State
 
 No new state directory. The payment key is in the agent's settings file, preserved with it (`docs/operations.md`).
-The 0.5.9 candidate adds version 3 binding and verified-landing lines to the agent's `.ops/` journal before and
+0.5.9 adds version 3 binding and verified-landing lines to the agent's `.ops/` journal before and
 beside version 2 money operations. The binding is durable before funding; the landing line identifies the exact
 submitted stage, provider correlation, destination transaction and final receipt height. The x402 operation records
 its terms, delegate nonce, `max_block_height` and key balance at signing. The market's task id and observed task
@@ -218,7 +218,7 @@ recover on a compatible 0.5.6-or-later build. There is no tested downgrade conve
 strip scopes or request fields, or restore older shared directories: that can discard identity, revocation or payment
 evidence. A downgrade requires a separate compatibility review and a tested state-preserving procedure.
 
-The 0.5.9 binding candidate adds a second rollback boundary: after the first version 3 binding or landing line, a
+The 0.5.9 binding adds a second rollback boundary: after the first version 3 binding or landing line, a
 0.5.6, 0.5.7 or 0.5.8 executor rejects that agent's entire operation journal. Before starting the new executor, stop every
 executor and inspect legacy market top-ups written by 0.5.6 through 0.5.8 without a request binding. Reconcile their provider
 correlations, on-chain credits, payment-key balances and any outstanding x402 payment; do not treat the new binding
@@ -228,8 +228,8 @@ the old journal, settings and key. New hires would require a separately designed
 provisions an isolated fresh key after the old funds and any pending payment are accounted for; no supported
 fresh-key recovery route, automatic rotation or clearance exists yet. Once version 3
 is written, recover with the exact reviewed binding-capable reader and retain its source commit and package
-provenance. The released 0.5.8 SDK and platform source have no version 3 binding reader; the 0.5.9 development version
-alone does not establish this capability without exact reviewed source and package provenance. A downgrade needs a separate state-preserving compatibility procedure.
+provenance. The released 0.5.8 SDK and platform source have no version 3 binding reader; 0.5.9 (tag `sdk-v0.5.9`, commit `252cba1`) has one:
+retain that exact source and package provenance. A downgrade needs a separate state-preserving compatibility procedure.
 Rollout remains held until the stopped-writer audit establishes which existing market keys have submitted 0.5.6 through
 0.5.8 unbound top-ups and pending x402 payments, and confirms that the provider route supplies a destination
 transaction with a final receipt the executor can verify. Any affected key needs a separate reviewed recovery design.
@@ -330,7 +330,7 @@ Live runs are the user's to make, with small amounts.
   (MCP or the web), so it isn't reachable from the platform today.
 
 
-### Omitted receipt recovery (0.5.9 candidate)
+### Omitted receipt recovery (0.5.9)
 
 A final transaction response can omit its first receipt when signer and receiver are the same account
 ([NEAR RPC reference](https://docs.near.org/api/rpc/transactions)). Funding proof reads at most 16 omitted
@@ -343,4 +343,4 @@ receipts on 2026-11-12. This is historical payout evidence, not deployed Market 
 
 ## Funding without a hire
 
-A private owner-run [funding observation](market-funding-proof.md) can exercise the bound withdrawal stages without a live hire. Its durable funding-only marker blocks later x402 preparation and keeps landed funds reserved. This local tool is offline-tested in `test/market-hire.test.ts`, not deployed or mainnet-observed; missing provider destination evidence still requires funding review. It does not reconcile or clear legacy keys.
+A private owner-run [funding observation](market-funding-proof.md) exercises the bound withdrawal stages without a live hire. Its two stages were mainnet-observed on platform staging on 2026-11-13, deployment `36fdd8a8-24ee-4503-956b-03d49ddc557b`, with independent final receipt and later chain checks; see the [dated observation](mainnet-log.md#controlled-market-funding-on-platform-staging-2026-11-13-utc). Its durable funding-only marker keeps landed funds reserved. This does not establish a platform-hosted hire or clear legacy keys; missing provider destination evidence still requires funding review.

@@ -4,8 +4,8 @@ import { createRoot } from "react-dom/client";
 import { ASSETS } from "../../src/contract/assets.js";
 import { EVERY_AGENT, walletStopMessage } from "../../src/gateway/wallet-stop-text.js";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { fromUnits } from "./features/payables/payment-copy";
-import { connect, connectStopWallet, signIntent, signStopIntent, signStopMessage, switchStopWallet, useStopWallet, useWallet } from "./features/owner/wallet";
+import { fromUnits } from "./shared/payment-copy";
+import { connect, connectStopWallet, signIntent, signStopIntent, signStopMessage, switchStopWallet, useStopWallet, useWallet } from "./shared/wallet";
 import { Badge, Button, Card, ErrorBox, Loading } from "./shared/ui";
 import "./styles.css";
 
