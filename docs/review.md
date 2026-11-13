@@ -40,7 +40,7 @@ Every claim carries one of these labels, and no sentence in this repository shou
 | A DAO acts as owner by its own vote, through NEAR's MPC signer | Mainnet-observed; owner intents that expire before a slow vote passes can't complete | [DEMO verification](../DEMO.md#what-is-verified), [mainnet log](mainnet-log.md) |
 | The treasury's resting position stays confidential | Enforced by this server (every swap sent confidential, deposits land confidential), not by the policy; unverified on mainnet | [the envelope](enforcement.md#the-envelope) |
 | Every plan and money action records the policy it ran under | The mandate digest (sha256 of the policy's canonical JSON) is recorded with each; anyone holding the policy can recompute it. It is this server's own, not the provider's | `src/mandate.ts` |
-| The books reconcile | Not independent proof: public balances are compared with chain transfers, confidential ones with the provider's recorded executions; differences are reported as unexplained | `pnpm books` |
+| The books reconcile | Not independent proof: public balances are compared with chain transfers, confidential ones with known execution flows and labelled receipt-backed incoming credits; incomplete incoming history is distinct from a shortfall (see [incoming credits](incoming-credits.md)) | `pnpm books` |
 
 ## What isn't done
 

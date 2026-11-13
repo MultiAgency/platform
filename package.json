@@ -46,7 +46,8 @@
     "crash": "node --import tsx scripts/crash/run.mjs",
     "crash:replay": "node scripts/crash/replay.mjs",
     "release:candidate": "node scripts/release-candidate.mjs",
-    "check:platform-image": "node scripts/check-platform-image.mjs"
+    "check:platform-image": "node scripts/check-platform-image.mjs",
+    "record:incoming-credit": "tsx --env-file-if-exists=.env src/record-incoming-credit.ts"
   },
   "dependencies": {
     "@ag-ui/core": "1.0.3",

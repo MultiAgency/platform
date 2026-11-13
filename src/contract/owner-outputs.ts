@@ -442,7 +442,12 @@ export const reconcileBooksOutput = z.array(z.looseObject({
   asset: z.string(),
   symbol: z.string(),
   public: z.looseObject({ api: z.string(), chain: z.string(), drift: z.string() }),
-  confidential: z.looseObject({ api: z.string(), recorded: z.string(), unattributed: z.string() }),
+  confidential: z.looseObject({ api: z.string(), recorded: z.string(), unattributed: z.string(),
+    executionRecorded: z.string().optional(), incomingRecorded: z.string().optional(),
+    coverage: z.literal("execution-history-and-receipts").optional(),
+    status: z.enum(["matched", "history-incomplete", "balance-mismatch"]).optional(),
+    credits: z.array(z.strictObject({ issuer: z.string(), receiptId: z.string(), evidence: z.enum(["operator-receipt", "provider-status"]) })).optional(),
+  }),
 }));
 /** payouts.ts paymentHistory. */
 export const paymentHistoryOutput = z.looseObject({
