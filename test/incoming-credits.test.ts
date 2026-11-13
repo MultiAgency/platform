@@ -5,13 +5,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { additionalIncomingCredits, recordIncomingCredit, readIncomingCredits, type IncomingCredit } from "../src/incoming-credits.js";
 import { assertProviderCredit } from "../src/record-incoming-credit.js";
-const sample = (extra: Partial<IncomingCredit> = {}): IncomingCredit => ({ agent: "agent", recipient: "wallet.near", asset: "nep141:usdc", amount: "10000000", settledAt: "2026-11-08T17:44:00Z", source: { issuer: "https://receipts.example", receiptId: "dao:71" }, recordedBy: "owner operator", recordedAt: "2026-11-12T22:00:00Z", evidence: "operator-receipt", ...extra });
+const sample = (extra: Partial<IncomingCredit> = {}): IncomingCredit => ({ agent: "agent", recipient: "wallet.near", asset: "nep141:usdc", amount: "10000000", settledAt: "2026-01-01T12:00:00Z", source: { issuer: "https://receipts.example", receiptId: "fixture:credit-1" }, recordedBy: "owner operator", recordedAt: "2026-01-02T12:00:00Z", evidence: "operator-receipt", ...extra });
 const receipt = Buffer.from("Executed funding receipt; synthetic fixture");
 const root = () => join(mkdtempSync(join(tmpdir(), "incoming-credit-")), "credits");
 test("receipt-backed credits persist without touching an execution journal; repeat import is idempotent", () => {
  const dir = root(); assert.deepEqual(readIncomingCredits("agent", dir), []);
  assert.equal(recordIncomingCredit(sample(), receipt, dir).created, true);
- assert.equal(recordIncomingCredit(sample({ recordedAt: "2026-11-13T22:00:00Z" }), receipt, dir).created, false);
+ assert.equal(recordIncomingCredit(sample({ recordedAt: "2026-01-03T12:00:00Z" }), receipt, dir).created, false);
  const credits = readIncomingCredits("agent", dir); assert.equal(credits.length, 1);
  assert.equal(additionalIncomingCredits(credits, [], "wallet.near").totals.get("nep141:usdc"), 10000000n);
 });
