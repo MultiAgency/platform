@@ -32,3 +32,10 @@ test("CLI refuses unresolved preparations without resolving or editing the execu
  const result=f.run(["--executor-stopped","--attest-receipt"]);assert.notEqual(result.status,0);assert.match(result.stderr,/no proven outcome/);
  assert.equal(readFileSync(file,"utf8"),journal);assert.equal(existsSync(join(f.dir,".evidence")),false);
 });
+
+test("receipt attestation cannot bypass a known provider operation's unresolved status",()=>{
+ const f=fixture();const p=join(f.dir,"credit.json"),credit=JSON.parse(readFileSync(p,"utf8"));credit.correlationId="known-operation";writeFileSync(p,JSON.stringify(credit));
+ writeFileSync(join(f.dir,"provider.mjs"),`import {AgentApi} from ${JSON.stringify(sdk)};AgentApi.prototype.getAgent=async()=>({wallet:{near_account_id:'wallet.near'}});AgentApi.prototype.getStatus=async()=>({correlation_id:'known-operation',type:'transfer',status:'PROCESSING'});`);
+ const result=f.run(["--executor-stopped","--attest-receipt"]);
+ assert.notEqual(result.status,0);assert.match(result.stderr,/does not establish this exact incoming/);assert.equal(existsSync(join(f.dir,".evidence")),false);
+});

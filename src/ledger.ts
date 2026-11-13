@@ -223,13 +223,16 @@ const add = (book: Map<string, bigint>, asset: string | null, amount: string | n
 
 /** Duplicate provider projections of one incoming settlement cannot credit it twice. */
 function executionCredits(rows: Row[]) {
-  const unique: Row[] = [];
+  const unique: Row[] = [], identities = new Map<string, Row>();
   for (const row of rows.filter(r => r.status === "SUCCESS" && (r.type === "shield" || r.type === "deposit" && r.confidential))) {
-    const same = unique.find(r => r.correlationId === row.correlationId || !!row.intentHash && r.intentHash === row.intentHash);
-    if (same) {
-      if (same.assetOut !== row.assetOut || same.amountOut !== row.amountOut || same.intentHash && row.intentHash && same.intentHash !== row.intentHash)
-        throw new Error("Conflicting provider incoming-credit evidence");
-    } else unique.push(row);
+    const keys = [`operation:${row.correlationId}`, ...(row.intentHash ? [`intent:${row.intentHash}`] : [])];
+    const matches = [...new Set(keys.flatMap(k => identities.has(k) ? [identities.get(k)!] : []))];
+    const same = matches[0];
+    if (matches.length > 1 || same && (same.assetOut !== row.assetOut || same.amountOut !== row.amountOut || same.intentHash !== row.intentHash))
+      throw new Error("Conflicting provider incoming-credit evidence");
+    const canonical = same ?? row;
+    if (!same) unique.push(row);
+    for (const key of keys) identities.set(key, canonical);
   }
   return unique;
 }

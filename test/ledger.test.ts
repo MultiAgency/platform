@@ -192,3 +192,20 @@ test("reconciliation includes receipt-backed incoming funds and retains positive
   assert.equal(shortfall.confidential.status, "balance-mismatch");
   assert.equal(shortfall.confidential.unattributed, "-10000000");
 });
+
+test("duplicate provider incoming projections credit once, while conflicting projections refuse reconciliation", async () => {
+ const {reconcileBooks}=await import("../src/ledger.js");
+ const shield=(correlation_id:string,amount_out="10000000")=>({correlation_id,type:"shield",status:"SUCCESS",created_at:"2026-01-01T00:00:00Z",updated_at:"2026-01-01T00:00:01Z",details:{provider_request_id:"request-1",amount_out,intent_hash:"settlement-1"}});
+ let rows=[shield("op-1"),shield("op-2")];
+ mock.method(api,"getHistory",async()=>({data:rows}));
+ mock.method(api,"listProviderRecords",async()=>({data:{events:[{type:"confidential_shield",request_id:"request-1",origin_asset:"nep141:usdc",destination_asset:"nep141:usdc"}]}}));
+ mock.method(api,"getAgent",async()=>({wallet:{near_account_id:"wallet.near"}}));
+ mock.method(api,"getTokens",async()=>[{asset_id:"nep141:usdc",symbol:"USDC"}]);
+ mock.method(api,"getBalances",async(_id:string,query?:{source?:string})=>({balances:query?.source==="confidential"?[{asset_id:"nep141:usdc",balance_raw:"10000000"}]:[]}));
+ mock.method(globalThis,"fetch",async()=>Response.json({transfers:[]}));
+ assert.equal((await reconcileBooks())[0]?.confidential.recorded,"10000000");
+ rows=[shield("op-1"),shield("op-2","11000000")];
+ await assert.rejects(reconcileBooks(),/Conflicting provider incoming-credit evidence/);
+ rows=[shield("op-1"),shield("op-2"),{...shield("op-2"),details:{...shield("op-2").details,intent_hash:"another-settlement"}}];
+ await assert.rejects(reconcileBooks(),/Conflicting provider incoming-credit evidence/);
+});
