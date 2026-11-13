@@ -287,8 +287,9 @@ recipes and filming, and keeps it running. It builds the web into its snapshot f
 directly, as an app's own stack tests do, serves this checkout's `web/dist`: run `pnpm build:web` there first. Without
 the confirm page's build (its manifest entry, page and listed assets) the stack refuses to start and names that command,
 rather than serve a confirm page that loads blank. `stack/state.json` lists the application URLs, CDP endpoint,
-owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`: the stack clicks a button named exactly
-"Connect wallet" and, if near-connect asks which wallet to use, picks the local test wallet), with `--treasury` the portfolio's access page and
+owner and payee wallet contexts (the owner's starts signed in on `/a/payout/`: the stack opens the gateway session from
+that page with the local test wallet's signature, whatever the page serves), with `--treasury` the portfolio's access path (`treasury.access`; the platform
+serves no page there since 0.6.0, so issue a credential with the `machineCredential` control) and
 machine base (with `--dao-treasury` both `null`, since a DAO has no owner session, plus the DAO's account and Group members, the agent's owner and `signer: "dao"`), with `--app` the deployment, base and credential file, the simulated chain's RPC (`chain.rpc`), the payout policy and revision, created agents, deposits, simulated transfers and invoice records,
 refreshed every 250 ms. Write `stack/controls/<name>.json` whole (write another name, then rename) with a `command` of `fund`, `fundPayout`, `settle`
 (`correlation`; optional `outcome`: `SUCCESS`, the default, `FAILED` or `REFUNDED`), `dropTransferResponse`, `dropWithdrawResponse` (the provider

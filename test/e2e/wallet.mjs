@@ -2,20 +2,32 @@ import { readFileSync } from 'node:fs';
 import { sign, signDelegate, PUBLIC_KEY } from './provider.mjs';
 
 /**
- * Connects the simulated wallet on an owner page and waits until the gateway session names `account`. Every owner
- * frontend reloads itself once the session is set, so the session is read only after that reload has loaded: a read
- * during the navigation is destroyed with the page (seen under load in the release candidate, 2026-10-30). A page whose
- * near-connect asks which wallet to use (an app's default `connect()`) is answered with the local test wallet.
+ * Signs `account` in to the gateway from a page on its origin and waits until the session names it: the page asks for
+ * the gateway's challenge, the simulated wallet signs it, and the page opens the session, as any owner frontend does.
+ * The platform serves no owner page of its own, so nothing here depends on one; a frontend already loaded on the page
+ * reads the session on its next load.
  */
 export async function connectWallet(page, account) {
-  const reloaded = page.waitForEvent('load');
-  await page.getByRole('button', { name: 'Connect wallet', exact: true }).first().click();
-  const chooser = page.getByText('Local test wallet', { exact: true });
-  await Promise.race([reloaded, chooser.waitFor({ timeout: 15_000 }).then(() => chooser.click()).catch(() => {})]);
-  await reloaded;
-  const viewer = await page.evaluate(async () => (await (await fetch('/gw/me')).json()).viewer?.account ?? null);
-  if (viewer !== account) throw new Error(`The owner page signed in as ${viewer}, not ${account}`);
+  const viewer = await page.evaluate(async account => {
+    const challenge = await (await fetch('/gw/challenge')).json();
+    const signed = await window.__localSign(challenge);
+    const session = await fetch('/gw/session', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ accountId: account, publicKey: signed.publicKey, signature: signed.signature, nonce: challenge.nonce, callbackUrls: [] }) });
+    if (!session.ok) throw new Error(`Gateway sign-in refused: ${session.status} ${await session.text()}`);
+    return (await (await fetch('/gw/me')).json()).viewer?.account ?? null;
+  }, account);
+  if (viewer !== account) throw new Error(`The gateway session names ${viewer}, not ${account}`);
 }
+
+/**
+ * The signed-in wallet owner's machine access on a Treasury agent, through the gateway's own routes from the page:
+ * `POST` issues (`{ label, scopes }`), `GET` lists, `DELETE` with a credential's id revokes.
+ */
+export const machineAccess = (page, agent) => (method, id = '', body) => page.evaluate(async ({ agent, method, id, body }) => {
+  const response = await fetch(`/gw/machine-credentials/${agent}${id && `/${id}`}`,
+    { method, ...(body && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) });
+  return { status: response.status, body: await response.json() };
+}, { agent, method, id, body });
 
 /** External wallet boundary only: actual app routes and RPC responses are never intercepted. */
 export async function browserContext(browser, env, account, options = {}) {

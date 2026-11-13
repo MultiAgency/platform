@@ -549,3 +549,6 @@ proofs, payment key, target caller/request/brief/terms, top-up ceiling, policy a
 and replaces neither the provider grant nor app consent. Legacy or short-delivered sources refuse;
 unknown outcomes and residual funds remain reserved. Offline-tested, not deployed or mainnet-observed.
 See docs/market-allocation.md.
+
+**Incoming credit**:
+Receipt-backed funds received by an agent outside its own execution history. Reconciliation may retain a provider-status-backed credit or an explicitly operator-attested funding receipt, with exact wallet/asset/amount binding and duplicate prevention. This is additive accounting evidence, not a payment, journal repair or owner signature. Positive residuals indicate incomplete incoming history; they do not establish missing funds. See docs/incoming-credits.md.

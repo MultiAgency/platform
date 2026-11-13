@@ -22,7 +22,7 @@ const payablesDist = values('--payables-release').at(-1);
 // `--payout-funding <raw USDC>`: the payout agent's starting balance (default 100 USDC); fund it later with `fundPayout`.
 const builder = values('--builder').at(-1), payoutFunding = values('--payout-funding').at(-1);
 // `--treasury`: also a Treasury agent, `portfolio`, owned by the owner (100 simulated USDC). The owner issues machine
-// credentials at /a/portfolio/access, or with the `machineCredential` control; a server reads it at /machine/v1/a/portfolio.
+// credentials with the `machineCredential` control; a server reads it at /machine/v1/a/portfolio.
 const treasury = args.includes('--treasury');
 // `--dao-treasury`: the Treasury agent `portfolio` belongs to the simulated DAO instead: apps reach it only under a DAO's
 // consent, and its owner signatures are DAO votes the `daoVote` control passes. Use with `--app`, without `--treasury`.

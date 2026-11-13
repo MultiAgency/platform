@@ -8,7 +8,7 @@ import { offlineEnvironment } from '../../scripts/test-environment.mjs';
 import { createORPCClient } from '@orpc/client';
 import { RPCLink } from '@orpc/client/fetch';
 import { environment, strategyFixture } from './environment.mjs';
-import { browserContext } from './wallet.mjs';
+import { browserContext, connectWallet, machineAccess } from './wallet.mjs';
 import { PAYEE } from './provider.mjs';
 
 const localFetch = (url, options) => new Promise((resolve, reject) => {
@@ -17,7 +17,7 @@ const localFetch = (url, options) => new Promise((resolve, reject) => {
     res.on('end', () => resolve(new Response(Buffer.concat(chunks), { status: res.statusCode, headers: res.headers })));
   }); req.on('error', reject); req.end(options.body);
 });
-test('shared consent issues once, machine calls stay guarded, and outage revocation survives reload', async ({ browser }, info) => {
+test('machine access issues once, machine calls stay guarded, and outage revocation survives reload', async ({ browser }, info) => {
   const stack = await environment(info.outputPath('environment'), { workspace: true, independentFrontend: true });
   const wallet = await browserContext(browser, stack, PAYEE);
   const page = await wallet.context.newPage();
@@ -25,19 +25,15 @@ test('shared consent issues once, machine calls stay guarded, and outage revocat
   await wallet.context.tracing.start({ screenshots: true, snapshots: true });
   try {
     expect(await (await localFetch(`${stack.dashboard}/`, { method: 'GET' })).text()).toContain('Independent Treasury frontend');
-    await page.goto(`${stack.dashboard}/a/portfolio/access`);
-    await page.getByRole('button', { name: 'Connect wallet', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Agent access', exact: true })).toBeVisible();
-    await expect(page.getByRole('checkbox', { name: 'Read Treasury' })).toBeChecked();
-    await page.getByLabel('Access label').fill(label);
-    await page.getByRole('checkbox', { name: 'Prepare plans' }).check();
-    await page.getByRole('checkbox', { name: 'Execute saved plans' }).check();
-    await page.getByRole('button', { name: 'Review access', exact: true }).click();
-    await expect(page.getByText(/There is no separate budget/)).toBeVisible();
-    await page.getByRole('button', { name: 'Grant access', exact: true }).click();
-    const secret = page.getByLabel('Access credential');
-    await expect(secret).toBeVisible();
-    const token = await secret.inputValue();
+    // The owner signs in on the product's own page and manages access through the gateway's routes.
+    await page.goto(`${stack.dashboard}/`);
+    await connectWallet(page, PAYEE);
+    const access = machineAccess(page, 'portfolio');
+    const scopes = ['read', 'prepare', 'execute-plan'];
+    const issued = await access('POST', '', { label, scopes });
+    expect(issued.status).toBe(201);
+    expect(issued.body.credential).toMatchObject({ label, scopes, agent: 'portfolio', agentId: stack.portfolio.id, revoked: false });
+    const token = issued.body.token;
     const client = createORPCClient(new RPCLink({ origin: stack.dashboard, url: '/machine/v1/a/portfolio/rpc', headers: { authorization: `Bearer ${token}` }, fetch: localFetch }));
     expect((await client.instance()).agentId).toBe(stack.portfolio.id);
     // Outside the credential's scopes: the gateway's plain route refusal (403, surfaced as oRPC's malformed response).
@@ -88,24 +84,18 @@ test('shared consent issues once, machine calls stay guarded, and outage revocat
     expect(disk).not.toContain(token); expect(disk).not.toContain(token.split('.').at(-1));
     stack.portfolio.setUnavailable(true);
     await expect(client.instance()).rejects.toThrow();
+    // Listing and revoking read nothing from the provider, so both answer during its outage, after a reload too.
     await page.reload();
-    await expect(page.getByRole('button', { name: `Revoke access for ${label}`, exact: true })).toBeVisible();
-    await expect(page.getByLabel('Access credential')).toHaveCount(0);
-    await page.getByRole('button', { name: `Revoke access for ${label}`, exact: true }).click();
-    await page.getByRole('button', { name: 'Confirm revocation' }).click();
-    await expect(page.getByText('Revoked', { exact: true })).toBeVisible();
+    const listed = await access('GET');
+    expect(listed.body.credentials.map(c => c.label)).toEqual([label]);
+    expect(JSON.stringify(listed.body)).not.toContain(token.split('.').at(-1));
+    expect(await access('DELETE', records[0].id)).toEqual({ status: 200, body: { revoked: true } });
+    expect((await access('GET')).body.credentials[0].revoked).toBe(true);
     stack.portfolio.setUnavailable(false);
     // Revoked: the credential no longer authenticates (401), even for a read it was granted.
     await expect(client.instance()).rejects.toMatchObject({ response: { status: 401 } });
     expect(stack.simulated.transfers).toHaveLength(0);
     expect(stack.portfolio.intents).toHaveLength(0);
-    await page.evaluate(() => window.scrollTo(0, 0));
-    await page.screenshot({ path: info.outputPath('access-desktop.png'), fullPage: true });
-    await page.setViewportSize({ width: 390, height: 844 }); await page.emulateMedia({ colorScheme: 'dark' });
-    await page.evaluate(async () => { await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); await Promise.all(document.getAnimations().map(a => a.finished.catch(() => {}))); });
-    await page.evaluate(() => window.scrollTo(0, 0));
-    expect(await page.locator('body').evaluate(e => e.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: info.outputPath('access-mobile-dark.png'), fullPage: true });
     expect(wallet.unexpected).toEqual([]);
   } finally {
     await wallet.context.tracing.stop({ path: info.outputPath('access-trace.zip') });

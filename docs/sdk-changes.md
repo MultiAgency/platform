@@ -30,6 +30,11 @@ removed or narrowed, so an app server on `appClient` moves from 0.5.9 without co
   `treasury-orders`, `market`, `payout`) and that setup admits the Treasury, market and Payables areas a host permits.
   The package README and the treasury-app skill no longer say no production host serves `/apps/v1`: the production
   host has since 2026-11-07, on an older platform version, with no app workflow observed there.
+- **`reconcileBooks` answers how each confidential balance is accounted** (#93): its `confidential` entry gains optional
+  `executionRecorded`, `incomingRecorded`, `coverage`, `status` (`matched`, `history-incomplete`, `balance-mismatch`) and
+  `credits` (issuer, receipt and evidence kind of each receipt-backed incoming credit). `history-incomplete` is a
+  positive residual: incoming history is missing, not a shortfall. An older host omits them. Offline-tested; see
+  [incoming credits](incoming-credits.md).
 
 Platform only:
 
@@ -42,6 +47,10 @@ Platform only:
   which re-checks owner, key, policy and expiry before each send. Additive: existing records need no conversion, and a
   0.5.9 reader refuses a journal that holds one, so stop the executor and preserve state before adopting or rolling
   back ([operations](operations.md#market-funding-allocation-candidate)). Offline-tested; not deployed.
+- `pnpm record:incoming-credit` records an operator-attested or provider-status-backed incoming credit for the books
+  (#93); it is accounting evidence, never a payment, journal repair or owner signature.
+- The stack's sign-in and the E2E cases that used the dashboard's pages now open the gateway session and manage
+  machine access through the gateway's own routes, so `pnpm test:e2e:stack` starts signed in without any owner page.
 - Offline suite files run one at a time, so one suite's process fixtures don't use up another's readiness deadlines.
 
 ## 0.5.9 (2026-11-12)

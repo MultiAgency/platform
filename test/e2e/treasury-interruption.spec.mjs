@@ -4,7 +4,7 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { offlineEnvironment } from '../../scripts/test-environment.mjs';
 import { environment, strategyFixture } from './environment.mjs';
-import { browserContext } from './wallet.mjs';
+import { browserContext, connectWallet, machineAccess } from './wallet.mjs';
 import { PAYEE, USDC } from './provider.mjs';
 
 for (const fault of ['lost provider response', 'lost second response after first success', 'client killed after first success']) {
@@ -16,15 +16,11 @@ for (const fault of ['lost provider response', 'lost second response after first
     const children = []; let gate;
     try {
       const page = await wallet.context.newPage();
-      await page.goto(`${stack.dashboard}/a/portfolio/access`);
-      await page.getByRole('button', { name: 'Connect wallet', exact: true }).click();
-      await page.getByLabel('Access label').fill('Offline interruption test');
-      await page.getByRole('checkbox', { name: 'Prepare plans' }).check();
-      await page.getByRole('checkbox', { name: 'Execute saved plans' }).check();
-      await page.getByRole('button', { name: 'Review access', exact: true }).click();
-      await page.getByRole('button', { name: 'Grant access', exact: true }).click();
-      const secret = page.getByLabel('Access credential'); await expect(secret).toBeVisible();
-      const token = await secret.inputValue();
+      await page.goto(`${stack.dashboard}/`);
+      await connectWallet(page, PAYEE);
+      const issued = await machineAccess(page, 'portfolio')('POST', '', { label: 'Offline interruption test', scopes: ['read', 'prepare', 'execute-plan'] });
+      expect(issued.status).toBe(201);
+      const token = issued.body.token;
       const env = { ...offlineEnvironment(), FORCE_COLOR: undefined, NODE_OPTIONS: process.env.NODE_OPTIONS,
         NODE_EXTRA_CA_CERTS: join(stack.directory, 'localhost.crt'), TREASURY_URL: stack.dashboard,
         TREASURY_NAME: 'portfolio', TREASURY_MACHINE_TOKEN: token };

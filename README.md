@@ -133,6 +133,8 @@ out of both.
 
 ## Not done yet
 
+- [Incoming confidential credits](docs/incoming-credits.md) have receipt-backed accounting and offline coverage. Automatic discovery of all incoming credits and a production correction remain unverified; operator attestations are explicitly weaker than provider settlement evidence.
+
 - The controlled [Market funding observation](docs/market-funding-proof.md) has offline coverage and one isolated
   staging route [mainnet-observed on 2026-11-13](docs/mainnet-log.md#controlled-market-funding-on-platform-staging-2026-11-13-utc),
   with exact final receipt and later chain evidence. Test funds remain reserved; hire acceptance and legacy-key

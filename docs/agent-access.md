@@ -181,7 +181,7 @@ fencing is not implemented. No deployment, production restart or live action is 
   provider-outage management, and refusal on audit-storage failure.
 - `test/machine-hosts.test.ts`: real shared gateway host/session/agent isolation and DAO refusal.
 - `test/e2e/agent-access.spec.mjs`: real shared gateway and executor with a simulated provider and wallet;
-  consent, exact chosen-swap preparation/execution with autopilot ceiling zero, duplicate refusal and
+  issuance through the gateway's routes, exact chosen-swap preparation/execution with autopilot ceiling zero, duplicate refusal and
   provider-outage revocation after reload. With `--treasury-skill PATH`, uses the actual snapshotted helper.
 - `test/external-plan.test.ts`: input validation, ordered choices/floors, whole-plan rejection, policy and
   balance races, stale valuation and storage failure without sends.
