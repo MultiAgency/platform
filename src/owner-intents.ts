@@ -35,7 +35,7 @@ import { checkHostedCreation } from "./hosted-binding.js";
  */
 
 export type OwnerAction =
-  | { type: "agent_create"; owner?: OwnerWallet; role?: AgentRole; payees?: string[] }
+  | { type: "agent_create"; owner?: OwnerWallet; role?: AgentRole; payees?: string[]; creationProfile?: "market-funding-proof" }
   | { type: "grant_issue"; label?: GrantLabel; suffix?: string; expectedStrategyDigest?: string; expiresAt?: string }
   /** Stops one grant at once; operations it already committed still finish. */
   | { type: "grant_revoke"; grantId: string }
@@ -258,7 +258,7 @@ async function build(
       // Onboarding creates the server's one agent; it never replaces a configured one.
       if (process.env.AGENT_ID) throw new Error("An agent is already configured");
       if (!action.owner) throw new Error("agent_create needs an owner");
-      return { request: ownerRequests.agent_create(action.owner, action.role, action.payees) };
+      return { request: ownerRequests.agent_create(action.owner, action.role, action.payees, action.creationProfile) };
     case "grant_issue": {
       // The new grant's token is saved where it is prepared: only the agent's executor may hold it.
       if (!executes()) throw new PublicError("This copy only reads and approves: issue the grant from the agent's executor, which must hold its token");
@@ -292,6 +292,8 @@ export function prepare(action: OwnerAction, signer: Signer = "wallet") {
 
 async function prepareLocked(action: OwnerAction, signer: Signer) {
   assertNotReleased();
+  if (action.type === "agent_create" && action.creationProfile !== undefined && signer !== "wallet")
+    throw new PublicError("The funding-proof creation profile supports wallet owners only.");
   if (signer === "dao" && (action.type === "agent_archive" || action.type === "agent_restore")) throw new PublicError("Archive and restore through apps currently support wallet owners only.");
   if (process.env.HOSTED_OWNER && action.type === "agent_create" && [...pending.values()].some(p => p.type === "agent_create" && p.stage !== "settled"))
     // Coded, so an app whose prepare reply was lost can tell this apart and find the open action (`owner/pending`).

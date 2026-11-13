@@ -125,3 +125,8 @@ evidence also needs reviewed recovery. This candidate is not ready for a market-
 ## Controlled Market funding observation
 
 The local [funding observation](market-funding-proof.md) uses Market's bound withdrawal stages and final receipt checks without signing an x402 payment. Its mode persists in the journal and funds remain reserved. Offline coverage: `test/market-hire.test.ts` (replay, missing receipts, lost submission reply, isolation, direct-dispatch refusal and short delivery). It has no deployed or mainnet observation and no legacy recovery authorization. The operator CLI binds canonical state/settings paths before application imports; durable registry ownership and the provider wallet owner must agree before funding. Reviewed policy revision/digest and grant identity/expiry are checked again at dispatch. Regressions are in `test/market-funding-cli.test.ts` and `test/market-funding-review-repro.test.ts`.
+
+
+The bounded Market creation profile is a local candidate: `test/market-creation-profile.test.ts`
+checks the requested initial policy, original reservation/key binding, owner preview and refused
+mis-scoped inputs. See `docs/market-funding-proof.md`; no deployed or mainnet claim.

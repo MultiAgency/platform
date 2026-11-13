@@ -3,6 +3,7 @@ import type { OwnerWallet, Policy } from "@near-intents-agent-api/sdk";
 import { agentId } from "./env.js";
 import { api } from "./api.js";
 import { type AgentRole, marketPolicy, payoutPolicy, treasuryPolicy } from "./policy.js";
+import { fundingProofCreationPolicy } from "./market/creation-policy.js";
 import { paymentKey } from "./market/payment-key.js";
 import { mandateDigest, type ReviewedPolicy } from "./mandate.js";
 import { currentWorkOrder, workOrderPolicy } from "./work-order-store.js";
@@ -12,15 +13,17 @@ import { currentWorkOrder, workOrderPolicy } from "./work-order-store.js";
  * the dashboard's connected wallet.
  */
 export const ownerRequests = {
-  agent_create: (owner: OwnerWallet, role: AgentRole = "treasury", payees: string[] = []) => {
+  agent_create: (owner: OwnerWallet, role: AgentRole = "treasury", payees: string[] = [], creationProfile?: "market-funding-proof") => {
     const order = currentWorkOrder();
+    if (creationProfile !== undefined && (creationProfile !== "market-funding-proof" || order || payees.length || role !== "market"))
+      throw new PublicError("The funding-proof creation profile requires a wallet-owned hosted Market reservation without payees or a work order.");
     if (order && (owner.type !== "near" || owner.account_id !== order.owner.account_id || owner.public_key !== order.owner.public_key))
       throw new PublicError("The work order owner changed. Preserve the original order and review its authority.");
     return {
       type: "agent_create",
       name: order ? "Work order" : role === "payout" ? "Payouts" : role === "market" ? "Market hires" : "Agentic Treasury",
       owner,
-      policy: order ? workOrderPolicy(order) : role === "payout" ? payoutPolicy(payees) : role === "market" ? marketPolicy(paymentKey().account) : treasuryPolicy,
+      policy: creationProfile ? fundingProofCreationPolicy(owner) : order ? workOrderPolicy(order) : role === "payout" ? payoutPolicy(payees) : role === "market" ? marketPolicy(paymentKey().account) : treasuryPolicy,
     } as const;
   },
   agent_freeze: () => ({ type: "agent_freeze", agent_id: agentId() }) as const,

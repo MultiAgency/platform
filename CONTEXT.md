@@ -545,3 +545,10 @@ not deployed or mainnet-observed; see docs/app-access.md.
 
 **Funding observation**:
 A separately reviewed, bounded owner-run Market top-up to an isolated payment key, with no hire or signed x402 payment. Its funding-only binding keeps the original request identity and reserves any landed funds pending reviewed recovery. It proves only the route and exact credit for its recorded operation, after independent final receipt verification; it does not clear legacy accounting or authorize reuse. The local tool supports wallet owners only. See docs/market-funding-proof.md.
+
+
+**Market funding-proof creation profile**:
+An explicit wallet-owner creation choice for an uncreated hosted Market reservation. It derives the
+initial withdrawal destination from that reservation's original payment key and uses the bounded test
+caps. It grants no execution authority and moves no funds; the later funding-only journal binding is
+separate. Offline-tested candidate; see docs/market-funding-proof.md.

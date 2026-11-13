@@ -1,0 +1,76 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { generateKey } from "near-kit";
+import { fundingContextFixture } from "./fixtures/funding-context.js";
+import { ASSETS } from "../src/policy.js";
+import { appMayAskDao } from "../src/contract/app-access.js";
+import { ownerAction } from "../src/contract/inputs.js";
+
+test("creation contract retains the explicitly reviewed bounded Market profile", () => {
+  const parsed = ownerAction.parse({ type: "agent_create", role: "market", creationProfile: "market-funding-proof" });
+  assert.equal(ownerAction.safeParse({ type: "agent_create", creationProfile: "arbitrary" }).success, false);
+  assert.equal(appMayAskDao({ type: "agent_create", role: "market", creationProfile: "market-funding-proof" }), false);
+  assert.equal((parsed as { creationProfile?: string }).creationProfile, "market-funding-proof");
+});
+
+test("bounded creation derives its original destination and refuses scope or settings substitution before generating an intent", async t => {
+  const cwd = process.cwd(), env = { ...process.env }, dir = mkdtempSync(join(tmpdir(), "market-create-profile-"));
+  process.chdir(dir);
+  const secret = generateKey().secretKey;
+  delete process.env.AGENT_ID;
+  delete process.env.TREASURY_ACCOUNT;
+  const context = fundingContextFixture(secret, { owner: "owner.near" });
+  // An uncreated reservation has no provider agent yet.
+  writeFileSync(context.settingsFile, `MARKET_PAYMENT_KEY=${secret}\n`, { mode: 0o600 });
+  Object.assign(process.env, { ENV_FILE: context.settingsFile, MARKET_PAYMENT_KEY: secret, HOSTED_OWNER: "owner.near", HOSTED_OWNER_KIND: "wallet", DASHBOARD_AREA: "market" });
+  t.after(() => { process.chdir(cwd); process.env = env; rmSync(dir, { recursive: true, force: true }); });
+  const { ownerRequests } = await import("../src/owner-requests.js");
+  const owner = { type: "near" as const, account_id: "owner.near", public_key: "ed25519:key" };
+  const create = ownerRequests.agent_create as (...args: any[]) => ReturnType<typeof ownerRequests.agent_create>;
+  const request = create(owner, "market", [], "market-funding-proof");
+  for (const window of ["per_transaction", "daily", "monthly"] as const)
+    assert.deepEqual(request.policy.limits[window], { [ASSETS.USDC]: "10000", [ASSETS.wNEAR]: "20000000000000000000000" });
+  assert.deepEqual(request.policy.destinations, { mode: "only", list: [{ action: "withdraw", chain: "near", address: context.paymentAccount, memo: null }] });
+  assert.equal(request.policy.max_actions_per_hour, 2);
+  assert.equal(request.policy.confidential, true);
+  assert.equal(request.policy.owner_approval, false);
+  assert.equal(request.policy.frozen, false);
+  assert.equal(request.policy.timelock_ms, 0);
+  assert.deepEqual(request.policy.budget, { daily_usd: "1", weekly_usd: null, monthly_usd: "1" });
+  assert.deepEqual(request.policy.actions, ["withdraw"]);
+  assert.deepEqual(request.policy.assets, [ASSETS.USDC, ASSETS.wNEAR]);
+  assert.equal(create(owner, "market").policy.limits.per_transaction?.[ASSETS.USDC], "25000000", "default stays explicit and unchanged");
+  assert.throws(() => create(owner, "treasury", [], "market-funding-proof"));
+  assert.throws(() => create(owner, "market", ["payee.near"], "market-funding-proof"));
+  assert.throws(() => create({ ...owner, account_id: "other.near" }, "market", [], "market-funding-proof"));
+  assert.throws(() => create(owner, "market", [], "unknown"));
+  process.env.HOSTED_OWNER_KIND = "dao";
+  assert.throws(() => create(owner, "market", [], "market-funding-proof"));
+  process.env.HOSTED_OWNER_KIND = "wallet";
+  process.env.MARKET_PAYMENT_KEY = generateKey().secretKey;
+  assert.throws(() => create(owner, "market", [], "market-funding-proof"));
+  process.env.MARKET_PAYMENT_KEY = secret;
+  const originalRegistry = readFileSync(join(dir, ".hosted", "apps.json"), "utf8");
+  writeFileSync(join(dir, ".hosted", "apps.json"), JSON.stringify({ version: 1, entries: [] }));
+  assert.throws(() => create(owner, "market", [], "market-funding-proof"), /original uncreated/);
+  writeFileSync(join(dir, ".hosted", "apps.json"), originalRegistry);
+  const originalSettings = readFileSync(context.settingsFile, "utf8");
+  writeFileSync(context.settingsFile, originalSettings + "AGENT_ID=already-created\n");
+  assert.throws(() => create(owner, "market", [], "market-funding-proof"));
+  writeFileSync(context.settingsFile, originalSettings);
+  delete process.env.HOSTED_OWNER;
+  assert.throws(() => create(owner, "market", [], "market-funding-proof"));
+  process.env.HOSTED_OWNER = "owner.near";
+  const { api } = await import("../src/api.js"), { prepare } = await import("../src/owner-intents.js");
+  let calls = 0;
+  t.mock.method(api, "generateIntent", async (sent: any) => { calls++; assert.deepEqual(sent.policy, request.policy); return { type: "agent_create", correlation_id: "bounded-create", expires_at: "2099-01-01T00:00:00Z", preview: {}, signer: owner, intent: { standard: "nep413", payload: {} } } as never; });
+  await assert.rejects(prepare({ type: "agent_create", role: "market", creationProfile: "market-funding-proof" } as any, "dao"));
+  assert.equal(calls, 0);
+  const result = await prepare({ type: "agent_create", owner, role: "market", creationProfile: "market-funding-proof" } as any);
+  assert.deepEqual(result.policy?.requested, request.policy);
+  assert.equal(calls, 1);
+  assert.ok(readFileSync(join(dir, ".owner-intents", context.settingsFile.split("/").at(-1)! + ".json"), "utf8").includes("bounded-create"));
+});

@@ -141,8 +141,8 @@ export const DAO_APP_ACTIONS = ["grant_issue", "grant_revoke", "policy_update", 
  * (which only removes authority), a policy edit that changes something, freeze, unfreeze or a held-payout vote, or, under
  * a DAO's setup consent only, the agent's creation (its owner is the DAO's derived account, never given).
  */
-export function appMayAskDao(action: { type: string; label?: string; owner?: unknown; role?: string; payees?: readonly unknown[]; changes?: object }) {
-  if (action.type === "agent_create") return action.owner === undefined && !action.payees?.length && ["treasury", "market", "payout"].includes(action.role ?? "treasury");
+export function appMayAskDao(action: { type: string; label?: string; owner?: unknown; role?: string; payees?: readonly unknown[]; creationProfile?: unknown; changes?: object }) {
+  if (action.type === "agent_create") return action.creationProfile === undefined && action.owner === undefined && !action.payees?.length && ["treasury", "market", "payout"].includes(action.role ?? "treasury");
   if (action.type === "policy_update") {
     // On-chain edits too: like a wallet owner, members rely on the provider's preview of the encrypted policy.
     return Object.keys(action.changes ?? {}).length > 0;

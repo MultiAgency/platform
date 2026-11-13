@@ -4,6 +4,24 @@ This private owner-run tool prepares a proof of one current Market funding route
 
 `scripts/market-funding-proof.ts` calls `fundMarketOnly` in the same Market funding flow used by hires. Each withdrawal uses the same lock, request binding, stage identity, dispatch, authorization, mandate digest and final destination verifier. It does not request a Market quote, sign a delegate or make a paid call. A durable `fundingOnly: true` binding cannot become a hire; dispatch and journal replay reject an x402 operation for it. Landed funds stay reserved, including after short delivery closes the binding. Successful accounting does not authorize reuse or recovery.
 
+## Bounded creation (offline-tested candidate)
+
+A wallet-owned, uncreated hosted Market reservation can explicitly request `agent_create` with
+`role: "market"` and `creationProfile: "market-funding-proof"`. The server derives the sole withdrawal
+destination from the original reserved payment-key settings, checks the durable app reservation and owner,
+and builds the initial policy with per-transaction, daily and monthly limits of 10000 USDC base units and
+20000000000000000000000 wNEAR base units, two actions/hour and daily/monthly USD budgets of 1.
+Other Market policy fields keep their existing values. The default creation policy is unchanged when the
+profile is omitted. The profile refuses DAO, non-Market, work-order, payee-bearing, created or conflicting
+reservation requests. No grant, consent or funding is issued by choosing it.
+
+Inspect the exact prepared `policy.requested` before signing: an older deployed host can omit an unknown
+input field and return its default policy. A profile request alone is never evidence of the bounded policy.
+Verify the applied policy and exact revision/digest before issuing the reviewed grant or funding the agent.
+This option does not add a permanent funding-only provider role; the later journal binding still prohibits
+x402 for that observation. Creation and signing remain separate owner actions. Coverage:
+`test/market-creation-profile.test.ts`; no deployed or mainnet observation.
+
 ## Operator review
 
 Use a separately reserved isolated payment key and wallet-owned Market agent whose owner-signed policy names only that key for withdrawals, with the intended assets, caps and budget. Preserve its private settings before any send; never replace an existing key. The review must name the canonical absolute `stateDirectory`, the original absolute `settingsFile` under its `.hosted/` directory, and `ownerAccount`. The CLI refuses another working directory before application imports, requires an explicit absolute `ENV_FILE` matching the reviewed settings, and requires existing canonical `.hosted/` and `.ops/` directories. It never creates a replacement state directory or changes cwd to make a review pass. An existing journal must be the canonical regular file.

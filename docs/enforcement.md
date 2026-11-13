@@ -1270,3 +1270,12 @@ and executors before checking credits. Missing, conflicting or unavailable bodie
 exact separately captured receipt bodies on 2026-11-12; no Market-route deployment or new withdrawal is established.
 The deployed Market top-up route, external authority, retained balances and legacy-key recovery remain unverified;
 SDK package publication does not authorize a Market executor rollout or clear an affected key.
+
+
+### Bounded Market creation candidate
+
+An explicit wallet-only hosted Market creation profile builds the proposed initial test caps from the
+original durable reservation and payment-key settings (offline-tested in
+`test/market-creation-profile.test.ts`; see `docs/market-funding-proof.md`). It is not a deployed-provider
+observation or permanent restriction on later owner policy edits. Older servers can omit an unknown
+profile input; verify the exact prepared and applied policy before any grant or funding.

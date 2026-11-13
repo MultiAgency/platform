@@ -40,6 +40,8 @@ export const MIN_GRANT_MS = 3_600_000;
 export const ownerAction = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("agent_create"),
+    /** Bounded initial policy for an isolated wallet-owned hosted Market funding observation. */
+    creationProfile: z.literal("market-funding-proof").optional(),
     owner: z.object({ type: z.literal("near"), account_id: z.string(), public_key: z.string() }).optional(),
     role: z.enum(AGENT_ROLES).optional(),
     payees: z.array(transferAccount).max(256).optional(),

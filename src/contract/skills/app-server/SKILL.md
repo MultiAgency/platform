@@ -350,7 +350,11 @@ A market agent (0.5.6 base released; pre-reconciliation binding candidate `ae607
 on 2026-11-11; not yet observed through the platform on mainnet)
 hires listed agents on the NEAR AI Agent Market over x402. Set one up for an Organization like any hosted agent, with
 `area: "market"` and `agent_create` `role: "market"`; the owner consents with `market` (and `read`, `owner`) and grants
-`label: "market"`. Fund it with `deposit`. Once, the owner registers its payment key on USDC: `market/account` answers
+`label: "market"`. For an isolated wallet-owned funding observation, the local candidate additionally accepts
+`creationProfile: "market-funding-proof"` on creation. It derives the original reserved destination and bounds
+USDC/wNEAR caps; no grant or hire consent is issued. Inspect the exact prepared/applied policy before signing
+or funding: older hosts can omit this field. DAO creation refuses it. See `docs/market-funding-proof.md`.
+Fund it with `deposit`. Once, the owner registers its payment key on USDC: `market/account` answers
 `registration`, a transaction for the owner's wallet, until `registered` is true.
 
 Quote, show the owner the terms, then hire under your own `requestId`, written to your database first. A hire is paid at
