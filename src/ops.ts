@@ -84,6 +84,8 @@ export type MarketBinding = {
   paymentAccount: string;
   publicKey: string;
   landed: Partial<Record<MarketStage, MarketLanding>>;
+  /** A controlled funding observation can never authorize an x402 payment. */
+  fundingOnly?: true;
   /** Terminal refusal written with the final USDC landing when delivered funds cannot cover the hire. */
   refused?: "funding_shortfall";
 };
@@ -97,7 +99,7 @@ const boundX402Request = z.object({
 
 function matchesBoundPayment(binding: MarketBinding, line: { kind: string; method?: Method; journalVersion?: 2;
   request: Record<string, unknown> }): boolean {
-  if (line.kind !== "market-hire" || line.method !== "x402" || line.journalVersion !== 2) return false;
+  if (binding.fundingOnly || line.kind !== "market-hire" || line.method !== "x402" || line.journalVersion !== 2) return false;
   const request = boundX402Request.safeParse(line.request);
   if (!request.success || request.data.brief !== binding.brief || request.data.payer !== binding.paymentAccount ||
       request.data.publicKey !== binding.publicKey || request.data.row.scheme !== "exact" ||
@@ -222,7 +224,7 @@ const outcome = { ...identity, ...noOutcome, request: z.never().optional(), jour
 const marketBindingLine = z.strictObject({
   at: nonempty, idempotencyKey: nonempty, kind: z.literal("market-binding"), journalVersion: z.literal(3),
   binding: z.strictObject({ actor: nonempty, requestId: payoutRequestId, brief: marketBrief, approved: hireTerms,
-    paymentAccount: nonempty, publicKey: nonempty }),
+    paymentAccount: nonempty, publicKey: nonempty, fundingOnly: z.literal(true).optional() }),
 }).superRefine((line, context) => {
   if (line.idempotencyKey !== requestKey(line.binding.actor, line.binding.requestId))
     context.addIssue({ code: "custom", message: "binding identity does not match its caller and request ID" });
@@ -383,7 +385,8 @@ export function readOps(): Op[] {
 export function recordMarketBinding(input: Omit<MarketBinding, "at" | "landed" | "refused">) {
   const line = { at: new Date().toISOString(), idempotencyKey: input.idempotencyKey, kind: "market-binding" as const,
     journalVersion: 3 as const, binding: { actor: input.actor, requestId: input.requestId, brief: input.brief,
-      approved: input.approved, paymentAccount: input.paymentAccount, publicKey: input.publicKey } };
+      approved: input.approved, paymentAccount: input.paymentAccount, publicKey: input.publicKey,
+      ...(input.fundingOnly && { fundingOnly: true as const }) } };
   if (!marketBindingLine.safeParse(line).success) throw new Error("Market binding identity or terms are invalid");
   if (readMarketBindings().some(binding => binding.idempotencyKey === input.idempotencyKey))
     throw new Error("Market binding identity already recorded");

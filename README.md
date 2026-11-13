@@ -129,6 +129,8 @@ out of both.
 
 ## Not done yet
 
+- The controlled [Market funding observation](docs/market-funding-proof.md) is a local owner-run tool with offline coverage; its deployed route and receipt recovery remain unverified. It cannot clear or reuse legacy funds.
+
 Each line is a gap; the linked page says how the rest is known. The
 [enforcement assessment](docs/enforcement.md#status) tracks the signed spending envelope.
 

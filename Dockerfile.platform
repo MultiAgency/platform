@@ -6,6 +6,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 COPY tsconfig.json ./
 COPY src ./src
+COPY scripts/market-funding-proof.ts ./scripts/market-funding-proof.ts
 COPY web/dist ./web/dist
 COPY deploy ./deploy
 COPY manifest.json ./release-manifest.json

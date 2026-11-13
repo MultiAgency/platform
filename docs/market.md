@@ -340,3 +340,7 @@ all existing finality, recipient, asset, amount and later-view requirements rema
 reads keep funding unresolved. Synthetic tests cover recovery and refusals (`test/market-funding-proof.test.ts`).
 A private offline replay of two historical payout withdrawals also passed with separately captured exact RPC
 receipts on 2026-11-12. This is historical payout evidence, not deployed Market top-up qualification.
+
+## Funding without a hire
+
+A private owner-run [funding observation](market-funding-proof.md) can exercise the bound withdrawal stages without a live hire. Its durable funding-only marker blocks later x402 preparation and keeps landed funds reserved. This local tool is offline-tested in `test/market-hire.test.ts`, not deployed or mainnet-observed; missing provider destination evidence still requires funding review. It does not reconcile or clear legacy keys.

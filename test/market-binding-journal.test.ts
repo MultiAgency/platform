@@ -456,3 +456,23 @@ for (const [name, change] of Object.entries({
   await assert.rejects(acquireMoneyLock(), /Invalid operation journal/);
   assert.equal(readFileSync(opsLog(), "utf8"), raw);
 });
+
+
+test("a funding-only binding survives restart and rejects payment both before append and on replay", () => {
+  recordMarketBinding({ ...binding(), fundingOnly: true });
+  const before = readFileSync(opsLog(), "utf8");
+  const moduleUrl = new URL("../src/ops.js", import.meta.url).href;
+  const child = spawnSync(TSX, ["--input-type=module", "--eval", `
+    import assert from 'node:assert/strict';
+    import {readMarketBindings,readOps} from ${JSON.stringify(moduleUrl)};
+    assert.equal(readMarketBindings()[0].fundingOnly, true);
+    assert.deepEqual(readOps(), []);
+  `], { cwd: process.cwd(), env: { ...process.env, ENV_FILE: "" }, encoding: "utf8", timeout: 15_000 });
+  assert.equal(child.status, 0, child.stderr || child.stdout);
+  const preparation = { at: new Date().toISOString(), idempotencyKey: binding().idempotencyKey,
+    kind: "market-hire", method: "x402" as const, journalVersion: 2 as const, request: paymentRequest() };
+  assert.throws(() => record(preparation), /differs from its binding/);
+  assert.equal(readFileSync(opsLog(), "utf8"), before);
+  writeFileSync(opsLog(), before + JSON.stringify(preparation) + "\n");
+  assert.throws(readOps, /market payment differs from its binding/);
+});

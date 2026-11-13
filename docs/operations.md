@@ -692,3 +692,8 @@ During re-reservation `RESTORE_REQUIRED=<provider agent ID>` replaces the releas
 write. Dispatch remains refused until this executor records a successful owner-signed `agent_restore`; a host slot alone
 never authorizes a send, including the market key's locally signed last leg. Preserve this key with the release keys.
 A provider restore performed outside this executor needs operator recovery; it does not silently clear this marker.
+
+
+## Controlled Market funding observation
+
+The private owner-run [funding observation](market-funding-proof.md) adds an optional `fundingOnly: true` field to Market v3 bindings; no existing record is converted. Preserve all state directories listed above, original settings and the private review file. Older strict readers refuse this marker, so rollback must not remove it or its funding reservations. The tool has no legacy clearance or recovery procedure. Run its code by absolute path from the reviewed canonical state directory; setting `ENV_FILE` does not select the journal or lock. Preserve the matching hosted registry entry, settings and provider owner identity; missing ownership evidence refuses funding. It is offline-tested only, not deployed or mainnet-observed.

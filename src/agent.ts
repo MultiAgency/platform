@@ -59,7 +59,7 @@ type X402Action = Extract<Action, { method: "x402" }>;
 /** A market hire's payment, taken by the market: its identity on chain and the task it pays for. Its outcome is the chain's. */
 export type X402Sent = { paymentId: string; taskId: string; state: string };
 /** The hire a market send is for, as approved: what its payment must pay and its top-up may fund. */
-export type MarketSend = { hire: HireTerms; bindingKey: string; stage?: MarketStage; approvalExpiresAt?: number };
+export type MarketSend = { hire: HireTerms; bindingKey: string; stage?: MarketStage; approvalExpiresAt?: number; reviewedGrant?: { id: string; expiresAt: string } };
 
 /** First submissions only. Remote deduplication semantics are not assumed. */
 const FIRST_SUBMISSION = Symbol("first submission in this dispatch");
@@ -223,6 +223,8 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action | C
           (market.stage === "open" && action.request.amount !== OPEN_ACCOUNT_WNEAR))
         throw new LocalRefusal("market_binding_mismatch", "This top-up does not match its bound funding stage. Nothing was sent.");
     } else if (action.method === "x402") {
+      if (binding.fundingOnly)
+        throw new LocalRefusal("funding_only", "This request only proves funding and cannot authorize a payment. Nothing was sent.");
       if (market.stage || requestKey !== binding.idempotencyKey || action.request.payer !== binding.paymentAccount ||
           action.request.publicKey !== binding.publicKey || action.request.brief !== binding.brief ||
           !sameTerms(binding.approved, termsOf(action.request)))
@@ -267,6 +269,9 @@ export async function dispatch(lock: MoneyLock, kind: string, action: Action | C
   // The provider enforces most of the policy itself; `authorize` refuses what it can't tell apart or
   // doesn't check (what a swap buys, a grant's purpose, a public or duplicate payout, a changed plan).
   const grant = liveGrant(grants, process.env.AGENT_GRANT_TOKEN);
+  if (market?.reviewedGrant && (!grant || grant.label !== "market" || grant.grant_id !== market.reviewedGrant.id ||
+      Date.parse(grant.expires_at) !== Date.parse(market.reviewedGrant.expiresAt)))
+    refuseLocally("reviewed_grant_changed", "The live market grant differs from the reviewed grant. Review again before submitting.");
   const orderProblem = workOrderDispatchProblem(action, preparedKey, policy, grant, now);
   if (orderProblem) refuseLocally("work_order_binding", orderProblem);
   // A payout or invoices grant only pays out (a transfer or a withdrawal): anything else it sends is judged, and refused,

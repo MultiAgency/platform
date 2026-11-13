@@ -39,10 +39,10 @@ export function pendingMarketFunding(paymentAccount: string, continuingBindingKe
   const ops = new Map(readOps().map(op => [op.idempotencyKey, op]));
   for (const binding of readMarketBindings()) {
     if (binding.paymentAccount !== paymentAccount) continue;
-    if (binding.refused) continue;
+    if (binding.refused && !binding.fundingOnly) continue;
     // A proven local refusal or never-submitted stage closes this hire. Earlier landed opening funds may remain,
     // but no later credit can arrive for the refused stage and this request cannot continue to x402.
-    if ((["open", "usdc"] as const).some(stage =>
+    if (!binding.fundingOnly && (["open", "usdc"] as const).some(stage =>
       ops.get(marketStageKey(binding.idempotencyKey, stage))?.refused !== undefined)) continue;
     for (const stage of ["open", "usdc"] as const) {
       if (binding.landed[stage]) continue;

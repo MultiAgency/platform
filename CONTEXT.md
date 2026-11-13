@@ -542,3 +542,6 @@ Its `payout` consent admits app-scoped payout requests and payout-agent owner ac
 payout grant and a separate held-payout approval vote through `owner/prepare`, signer `dao`.
 The agent verifies provider evidence before submitting the DAO signature. This extension is local,
 not deployed or mainnet-observed; see docs/app-access.md.
+
+**Funding observation**:
+A separately reviewed, bounded owner-run Market top-up to an isolated payment key, with no hire or signed x402 payment. Its funding-only binding keeps the original request identity and reserves any landed funds pending reviewed recovery. It proves only the route and exact credit for its recorded operation, after independent final receipt verification; it does not clear legacy accounting or authorize reuse. The local tool supports wallet owners only. See docs/market-funding-proof.md.

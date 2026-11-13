@@ -16,6 +16,7 @@ if (!confirm?.html?.includes('/confirm.html')) throw new Error('Build first: web
 const assets = [...confirm.html, ...confirm.initial?.js ?? [], ...confirm.initial?.css ?? [], ...confirm.async?.js ?? [], ...confirm.async?.css ?? [], ...confirm.assets ?? []];
 const { output, copy, finish } = releasePackage(destination);
 for (const name of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.json', 'src']) copy(join(root, name), join(output, name));
+copy(join(root, 'scripts/market-funding-proof.ts'), join(output, 'scripts/market-funding-proof.ts'));
 for (const asset of assets) {
   copy(join(dist, asset), join(output, 'web/dist', asset));
   // A bundled library's license travels with it.

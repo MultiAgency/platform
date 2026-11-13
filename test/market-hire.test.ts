@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync, writeFileSync } from "node:fs";
 import { after, beforeEach, mock, test } from "node:test";
-import { generateKey, parseKey } from "near-kit";
+import { generateKey, parseKey, Near } from "near-kit";
 import lockfile from "proper-lockfile";
+import { fundingContextFixture } from "./fixtures/funding-context.js";
 import { MARKET_USDC, market } from "./e2e/market.mjs";
 
 /**
@@ -24,7 +26,7 @@ Object.assign(process.env, { MARKET_URL: sim.url, NEAR_RPC_URL: sim.rpc, MARKET_
 const { api } = await import("../src/api.js");
 const { readOps, readMarketBindings, marketStageKey } = await import("../src/ops.js");
 const { ASSETS, marketPolicy } = await import("../src/policy.js");
-const { hire, hireStatus, quoteHire } = await import("../src/market/hire.js");
+const { hire, hireStatus, quoteHire, fundMarketOnly: observedFunding } = await import("../src/market/hire.js");
 const { fundingProof } = await import("../src/market/funding-proof.js");
 const { acquireMoneyLock, UnresolvedOperations } = await import("../src/lock.js");
 const { requestKey } = await import("../src/payout-requests.js");
@@ -32,6 +34,8 @@ const { authorityFixture, fixtureGrant, policyView, timedPrices } = await import
 const { freshDirectory } = await import("./fixtures/harness.js");
 
 const APP = "app:covenant:acme";
+const fundMarketOnly = (...args: Parameters<typeof observedFunding>) =>
+  observedFunding(args[0], args[1], args[2], args[3] ?? fundingContextFixture(secretKey));
 let withdrawals: { asset: string; amount: string; recipient: string; key: string }[];
 let fundingProofAvailable: boolean;
 let deliveredAmount: string | undefined;
@@ -43,7 +47,9 @@ beforeEach(() => {
   fundingProofAvailable = true;
   deliveredAmount = undefined;
   for (const [name, method] of Object.entries(authorityFixture())) mock.method(api, name as keyof typeof api, method as never);
-  mock.method(api, "listGrants", async () => [fixtureGrant("market")]);
+  const marketGrant = fixtureGrant("market");
+  process.env.FIXTURE_MARKET_GRANT_EXPIRES = marketGrant.expires_at;
+  mock.method(api, "listGrants", async () => [marketGrant]);
   mock.method(api, "getPolicy", async () => policyView(marketPolicy(KEY)));
   mock.method(api, "getTokens", async () => timedPrices([{ asset_id: ASSETS.USDC, symbol: "USDC", decimals: 6, price: 1 },
     { asset_id: ASSETS.wNEAR, symbol: "wNEAR", decimals: 24, price: 2 }]));
@@ -534,3 +540,201 @@ test("a quote for an unlisted agent, or one not taking calls, is refused with a 
   assert.equal(readOps().length, 0);
 });
 
+
+
+test("funding-only observation never calls Market or pays, persists its mode, and reserves the key", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
+  const approved = { ...(await quoteHire({ handle: "writer", brief: BRIEF })), amount: "10000" };
+  const input = { requestId: "proof-only", brief: BRIEF, approved };
+  const calls = sim.calls.length;
+  mock.method(Near.prototype, "transaction", () => { throw new Error("funding must never sign a delegate"); });
+  const deadline = Date.now() + 60_000;
+  assert.equal((await fundMarketOnly(APP, input, deadline)).state, "funded");
+  assert.deepEqual(withdrawals.map(w => [w.asset, w.amount]), [[ASSETS.USDC, "10000"]]);
+  assert.equal(sim.calls.slice(calls).filter(c => c.path.includes("/a2a/") || c.payment !== null).length, 0, "no Market quote or paid call");
+  assert.equal(sim.chain.accounts.get(KEY)!.transfers.length, 0);
+  assert.equal(readOps().some(o => o.method === "x402"), false);
+  assert.equal(readMarketBindings().find(b => b.requestId === input.requestId)?.fundingOnly, true, "mode survives journal reread");
+  assert.equal((await fundMarketOnly(APP, input, deadline)).state, "funded");
+  assert.equal(withdrawals.length, 1, "same stage is never submitted twice");
+  await assert.rejects(hire(APP, input), /cannot change/);
+  await assert.rejects(fundMarketOnly(APP, { ...input, approved: { ...approved, amount: "10001" } }, deadline), /another hire/);
+  assert.equal(withdrawals.length, 1);
+  assert.equal((await hire(APP, { ...input, requestId: "consume-proof", approved: { ...approved, amount: "500000" } })).state, "funding");
+  assert.equal(withdrawals.length, 1, "another request cannot consume reserved observation funds");
+});
+
+test("funding-only SUCCESS without a receipt stays in review and never pays on repeated reads", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  fundingProofAvailable = false;
+  const input = { requestId: "proof-no-receipt", brief: BRIEF, approved };
+  for (let i = 0; i < 2; i++) assert.equal((await fundMarketOnly(APP, input, Date.now() + 60_000)).state, "funding_review");
+  assert.equal((await hireStatus(APP, input.requestId)).state, "funding_review");
+  assert.equal(withdrawals.length, 1);
+  assert.equal(sim.chain.accounts.get(KEY)!.transfers.length, 0);
+  await assert.rejects(hire(APP, input), /cannot change/);
+});
+
+test("funding-only lost submission reply remains unresolved with one withdrawal", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
+  mock.method(api, "forGrant", () => ({ withdraw: async (_id: string, request: { asset: string; amount: string; recipient: string }, { idempotencyKey }: { idempotencyKey: string }) => {
+    withdrawals.push({ ...request, key: idempotencyKey });
+    sim.fund(request.recipient, request.amount);
+    throw new Error("lost accepted reply");
+  } }));
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const input = { requestId: "proof-lost", brief: BRIEF, approved };
+  assert.equal((await fundMarketOnly(APP, input, Date.now() + 60_000)).state, "funding_review");
+  await fundMarketOnly(APP, input, Date.now() + 60_000);
+  assert.equal(withdrawals.length, 1);
+  assert.equal(readOps().find(o => o.kind === "market-topup")?.submissionState, "SUBMISSION_ATTEMPTED");
+  assert.equal(readOps().some(o => o.method === "x402"), false);
+});
+
+test("funding-only requires a live explicit approval deadline", async () => {
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const input = { requestId: "proof-expired", brief: BRIEF, approved };
+  await assert.rejects(fundMarketOnly(APP, input, Number.NaN), /explicit approval deadline/);
+  await assert.rejects(fundMarketOnly(APP, input, Date.now() - 1), /approval expired/);
+  assert.equal(withdrawals.length, 0);
+});
+
+
+test("dispatch independently blocks an x402 action for a funding-only binding", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const requestId = "proof-dispatch", bindingKey = requestKey(APP, requestId);
+  await fundMarketOnly(APP, { requestId, brief: BRIEF, approved }, Date.now() + 60_000);
+  const { dispatch } = await import("../src/agent.js");
+  const lock = await acquireMoneyLock();
+  try {
+    await assert.rejects(dispatch(lock, "market-hire", { method: "x402", request: {
+      handle: approved.handle, brief: BRIEF, messageId: crypto.randomUUID(),
+      row: { scheme: "exact", network: approved.network, asset: approved.asset, amount: approved.amount,
+        payTo: approved.payTo, maxTimeoutSeconds: approved.maxTimeoutSeconds },
+      asset: ASSETS.USDC, amount: approved.amount, payer: KEY, publicKey: parseKey(secretKey).publicKey.toString(),
+      nonce: "1", maxBlockHeight: (sim.chain.height + 1_200n).toString(), balanceAtSigning: approved.amount,
+    } }, undefined, undefined, undefined, bindingKey, undefined, { hire: approved, bindingKey }), /funding_only/);
+  } finally { await lock.release(); }
+  assert.equal(readOps().some(o => o.method === "x402"), false);
+});
+
+test("a short-delivered funding observation remains reserved after a terminal binding refusal", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  mock.method(api, "forGrant", () => ({ withdraw: async (_id: string, request: { asset: string; amount: string; recipient: string }, { idempotencyKey }: { idempotencyKey: string }) => {
+    withdrawals.push({ ...request, key: idempotencyKey }); sim.fund(request.recipient, "1");
+    return { correlation_id: "op_1" };
+  } }));
+  deliveredAmount = "1";
+  const input = { requestId: "proof-short", brief: BRIEF, approved };
+  assert.equal((await fundMarketOnly(APP, input, Date.now() + 60_000)).state, "refused");
+  const { pendingMarketFunding } = await import("../src/market/binding-guard.js");
+  assert.ok(pendingMarketFunding(KEY), "a successful proof does not authorize residual reuse");
+  assert.equal((await hire(APP, { ...input, requestId: "consume-short-proof" })).state, "funding");
+  assert.equal(withdrawals.length, 1);
+});
+
+test("a funding observation rejects a key with retained USDC before writing its binding", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "1");
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  await assert.rejects(fundMarketOnly(APP, { requestId: "proof-reused", brief: BRIEF, approved }, Date.now() + 60_000), /unused isolated/);
+  assert.equal(readMarketBindings().length, 0);
+  assert.equal(withdrawals.length, 0);
+});
+
+
+test("funding-only rechecks the durable wallet owner at the provider before sending", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const original = (await api.getAgent(process.env.AGENT_ID!));
+  mock.method(api, "getAgent", async () => ({ ...original, owner: { type: "near" as const, account_id: "other.near", public_key: "ed25519:fixture" } }));
+  await assert.rejects(fundMarketOnly(APP, { requestId: "proof-owner-changed", brief: BRIEF, approved }, Date.now() + 60_000), /reviewed active wallet owner/);
+  assert.equal(withdrawals.length, 0);
+  assert.equal(readMarketBindings().length, 0);
+});
+
+test("missing funding context refuses instead of inferring wallet ownership from absent runtime variables", async () => {
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  await assert.rejects(observedFunding(APP, { requestId: "proof-no-context", brief: BRIEF, approved }, Date.now() + 60_000));
+  assert.equal(withdrawals.length, 0);
+  assert.equal(readMarketBindings().length, 0);
+});
+
+
+test("a registry owner-kind change after opening stops the next funding stage and retains the original opening", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY);
+  const context = fundingContextFixture(secretKey);
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  mock.method(api, "forGrant", () => ({ withdraw: async (_id: string, request: { asset: string; amount: string; recipient: string }, { idempotencyKey }: { idempotencyKey: string }) => {
+    withdrawals.push({ ...request, key: idempotencyKey });
+    sim.fund(request.recipient, "0");
+    const registry = `${context.stateDirectory}/.hosted/apps.json`;
+    const value = JSON.parse(readFileSync(registry, "utf8"));
+    value.entries[0].kind = "dao";
+    writeFileSync(registry, JSON.stringify(value));
+    return { correlation_id: "op_1" };
+  } }));
+  await assert.rejects(fundMarketOnly(APP, { requestId: "proof-owner-during-opening", brief: BRIEF, approved }, Date.now() + 60_000, context), /durable wallet-owner reservation/);
+  assert.deepEqual(withdrawals.map(w => w.asset), [ASSETS.wNEAR]);
+  assert.equal(readOps().some(o => o.method === "x402"), false);
+  const { pendingMarketFunding } = await import("../src/market/binding-guard.js");
+  assert.ok(pendingMarketFunding(KEY), "owner-context failure never clears the already funded stage");
+});
+
+
+test("a lost locked owner-context read cannot report an earlier landed request as funded", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const input = { requestId: "proof-owner-read-lost", brief: BRIEF, approved };
+  assert.equal((await fundMarketOnly(APP, input, Date.now() + 60_000)).state, "funded");
+  const agent = await api.getAgent(process.env.AGENT_ID!);
+  let reads = 0;
+  mock.method(api, "getAgent", async () => {
+    if (++reads === 2) throw new Error("owner evidence read unavailable");
+    return agent;
+  });
+  await assert.rejects(fundMarketOnly(APP, input, Date.now() + 60_000), /Funding context is unavailable/);
+  assert.equal(withdrawals.length, 1);
+  assert.equal(readOps().some(o => o.method === "x402"), false);
+});
+
+test("funding observation refuses a different reviewed policy before submitting", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const context = { ...fundingContextFixture(secretKey), reviewedPolicy: { revision: 999, digest: `sha256:${"0".repeat(64)}` } };
+  await assert.rejects(observedFunding(APP, { requestId: "proof-policy-pin", brief: BRIEF, approved }, Date.now() + 60_000, context), /reviewed policy/i);
+  assert.equal(withdrawals.length, 0);
+});
+
+test("funding observation refuses a different reviewed grant before submitting", async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const context = { ...fundingContextFixture(secretKey), reviewedGrant: { id: "another-grant", expiresAt: new Date(Date.now() + 60_000).toISOString() } };
+  await assert.rejects(observedFunding(APP, { requestId: "proof-grant-pin", brief: BRIEF, approved }, Date.now() + 60_000, context), /reviewed grant/i);
+  assert.equal(withdrawals.length, 0);
+});
+
+
+for (const changed of ["policy", "grant"] as const) test(`funding dispatch refuses a ${changed} change during asynchronous preflight`, async () => {
+  sim.advance(1n); sim.chain.accounts.clear(); sim.register(KEY); sim.fund(KEY, "0");
+  const approved = await quoteHire({ handle: "writer", brief: BRIEF });
+  const context = fundingContextFixture(secretKey);
+  const grant = (await api.listGrants(process.env.AGENT_ID!))[0]!;
+  let dispatchReading = false;
+  mock.method(api, "getTokens", async () => {
+    dispatchReading = true;
+    return timedPrices([{ asset_id: ASSETS.USDC, symbol: "USDC", decimals: 6, price: 1 }]);
+  });
+  mock.method(api, "getPolicy", async () => {
+    await Promise.resolve();
+    const view = policyView(marketPolicy(KEY));
+    return changed === "policy" && dispatchReading ? { ...view, revision: 2 } : view;
+  });
+  mock.method(api, "listGrants", async () => [changed === "grant" && dispatchReading ? { ...grant, grant_id: "substituted-grant" } : grant]);
+  const result = await observedFunding(APP, { requestId: `proof-dispatch-${changed}`, brief: BRIEF, approved }, Date.now() + 60_000, context);
+  assert.equal(result.state, "refused");
+  assert.equal(result.code, changed === "policy" ? "reviewed_policy_changed" : "reviewed_grant_changed");
+  assert.equal(withdrawals.length, 0);
+});

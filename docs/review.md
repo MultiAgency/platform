@@ -120,3 +120,8 @@ The frozen 0.5.6/0.5.7 and signed 0.5.8 readers reject the first version 3 journ
 their old key. No supported fresh-key recovery or automatic clearance exists yet; hashless or unavailable receipt
 evidence also needs reviewed recovery. This candidate is not ready for a market-agent rollout. See
 [market](market.md#rollback) and [operations](operations.md).
+
+
+## Controlled Market funding observation
+
+The local [funding observation](market-funding-proof.md) uses Market's bound withdrawal stages and final receipt checks without signing an x402 payment. Its mode persists in the journal and funds remain reserved. Offline coverage: `test/market-hire.test.ts` (replay, missing receipts, lost submission reply, isolation, direct-dispatch refusal and short delivery). It has no deployed or mainnet observation and no legacy recovery authorization. The operator CLI binds canonical state/settings paths before application imports; durable registry ownership and the provider wallet owner must agree before funding. Reviewed policy revision/digest and grant identity/expiry are checked again at dispatch. Regressions are in `test/market-funding-cli.test.ts` and `test/market-funding-review-repro.test.ts`.

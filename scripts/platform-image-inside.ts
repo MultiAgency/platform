@@ -3,7 +3,7 @@
 // built, not the repository: the packaged bytes, two boots of the real entrypoint and config, the platform smoke checks
 // against each boot, and that every state directory and file present before the boots is unchanged after them.
 import assert from "node:assert/strict";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,7 +12,7 @@ import { platformChecks } from "/app/src/smoke-platform.ts";
 const manifest = JSON.parse(readFileSync("/app/release-manifest.json", "utf8")) as { files: Record<string, string> };
 let hashed = 0;
 for (const [path, hash] of Object.entries(manifest.files)) {
-  if (!/^(src\/|web\/|deploy\/|package\.json$|pnpm-|tsconfig\.json$)/.test(path)) continue;
+  if (!/^(src\/|scripts\/|web\/|deploy\/|package\.json$|pnpm-|tsconfig\.json$)/.test(path)) continue;
   assert.equal(createHash("sha256").update(readFileSync(join("/app", path))).digest("hex"), hash, path);
   hashed++;
 }
@@ -37,6 +37,14 @@ const before = new Map<string, string>();
     else before.set(path, readFileSync(path, "utf8"));
   }
 })(state);
+
+// The shipped operator command must load from canonical state cwd, not depend on /app as cwd.
+const fundingUsage = spawnSync("/app/node_modules/.bin/tsx", ["/app/scripts/market-funding-proof.ts"], {
+  cwd: state, env: { PATH: process.env.PATH, HOME: "/tmp" }, encoding: "utf8", timeout: 15_000,
+});
+assert.notEqual(fundingUsage.status, 0);
+assert.match(fundingUsage.stderr, /Usage: tsx scripts\/market-funding-proof.ts/);
+assert.doesNotMatch(fundingUsage.stderr, /NEAR_INTENTS_AGENT_API_KEY is not set|ERR_MODULE_NOT_FOUND/);
 
 let child: ChildProcess | undefined;
 const stop = async () => {
