@@ -1279,3 +1279,7 @@ original durable reservation and payment-key settings (offline-tested in
 `test/market-creation-profile.test.ts`; see `docs/market-funding-proof.md`). It is not a deployed-provider
 observation or permanent restriction on later owner policy edits. Older servers can omit an unknown
 profile input; verify the exact prepared and applied policy before any grant or funding.
+
+### Incoming confidential credit coverage
+
+Recipient execution history does not establish complete incoming confidential funding. Receipt-backed incoming-credit records can account for external funding without modifying execution journals. Provider settlement status is preferred; an explicit operator attestation has weaker trust and remains labelled as such. Missing history and a balance shortfall are distinct, but either still holds Treasury proposals until resolved. Automatic incoming-credit discovery and independent custody proof remain unestablished. See [incoming credits](incoming-credits.md) for the record format, duplicate/overlap refusal and stopped-executor procedure; this capability is offline-tested, not a mainnet correction observation.

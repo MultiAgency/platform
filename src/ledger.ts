@@ -6,6 +6,7 @@ import { api } from "./api.js";
 import { FastnearFailure, decodeRead, fastnearPostEffect, indexedPages, runFastnear, transactionsEffect } from "./fastnear.js";
 import { rawBalance } from "./holdings.js";
 import { readOps } from "./ops.js";
+import { readIncomingCredits, additionalIncomingCredits } from "./incoming-credits.js";
 
 /**
  * The agent's books, from three sources that each hold part of the story:
@@ -220,10 +221,25 @@ const add = (book: Map<string, bigint>, asset: string | null, amount: string | n
   if (asset && amount) book.set(asset, (book.get(asset) ?? 0n) + sign * BigInt(amount));
 };
 
+/** Duplicate provider projections of one incoming settlement cannot credit it twice. */
+function executionCredits(rows: Row[]) {
+  const unique: Row[] = [];
+  for (const row of rows.filter(r => r.status === "SUCCESS" && (r.type === "shield" || r.type === "deposit" && r.confidential))) {
+    const same = unique.find(r => r.correlationId === row.correlationId || !!row.intentHash && r.intentHash === row.intentHash);
+    if (same) {
+      if (same.assetOut !== row.assetOut || same.amountOut !== row.amountOut || same.intentHash && row.intentHash && same.intentHash !== row.intentHash)
+        throw new Error("Conflicting provider incoming-credit evidence");
+    } else unique.push(row);
+  }
+  return unique;
+}
+
 /** What the agent's confidential balance should hold from the API's own executions alone. */
 function confidentialFlows(rows: Row[]) {
   const book = new Map<string, bigint>();
+  const incoming = new Set(executionCredits(rows));
   for (const r of rows.filter((r) => r.status === "SUCCESS")) {
+    if ((r.type === "shield" || r.type === "deposit" && r.confidential) && !incoming.has(r)) continue;
     if (r.type === "shield") add(book, r.assetOut, r.amountOut, 1n);
     else if (r.type === "unshield") add(book, r.assetIn, r.amountIn, -1n);
     else if (!r.confidential) continue;
@@ -242,7 +258,7 @@ type Reconciliation = {
   /** Public balance: the API's figure against the chain's transfers. Any drift is an error. */
   public: { api: string; chain: string; drift: string };
   /** Confidential balance: the API's figure against its recorded executions. */
-  confidential: { api: string; recorded: string; unattributed: string };
+  confidential: { api: string; recorded: string; unattributed: string; executionRecorded: string; incomingRecorded: string; coverage: "execution-history-and-receipts"; status: "matched" | "history-incomplete" | "balance-mismatch"; credits: { issuer: string; receiptId: string; evidence: "operator-receipt" | "provider-status" }[] };
 };
 
 /** Every asset the agent holds or any source saw it move, compared with recorded flows. */
@@ -260,6 +276,8 @@ export async function reconcileBooks(id = agentId(), signal?: AbortSignal): Prom
   for (const t of await publicTransfers(account, signal))
     if (t.asset_id.startsWith("nep245:intents.near:")) add(chain, t.asset_id.slice("nep245:intents.near:".length), t.amount, 1n);
   const recorded = confidentialFlows(rows);
+  const incoming = additionalIncomingCredits(readIncomingCredits(id), executionCredits(rows).map(r => ({ asset: r.assetOut, amount: r.amountOut, correlationId: r.correlationId, intentHash: r.intentHash })), account);
+  for (const [asset, amount] of incoming.totals) recorded.set(asset, (recorded.get(asset) ?? 0n) + amount);
   const assets = new Set([...open.balances, ...shielded.balances].map((b) => b.asset_id).concat([...chain.keys(), ...recorded.keys()]));
   return [...assets].sort().map((asset) => {
     const [pub, conf] = [rawBalance(open, asset), rawBalance(shielded, asset)];
@@ -268,7 +286,12 @@ export async function reconcileBooks(id = agentId(), signal?: AbortSignal): Prom
       asset,
       symbol: tokens.find((t) => t.asset_id === asset)?.symbol ?? asset,
       public: { api: pub.toString(), chain: onChain.toString(), drift: (pub - onChain).toString() },
-      confidential: { api: conf.toString(), recorded: expected.toString(), unattributed: (conf - expected).toString() },
+      confidential: { api: conf.toString(), recorded: expected.toString(), unattributed: (conf - expected).toString(),
+        executionRecorded: (expected - (incoming.totals.get(asset) ?? 0n)).toString(), incomingRecorded: (incoming.totals.get(asset) ?? 0n).toString(),
+        coverage: "execution-history-and-receipts",
+        status: conf === expected ? "matched" : conf > expected ? "history-incomplete" : "balance-mismatch",
+        credits: incoming.accepted.filter(c => c.asset === asset).map(c => ({ issuer: c.source.issuer, receiptId: c.source.receiptId, evidence: c.evidence })),
+      },
     };
   });
 }

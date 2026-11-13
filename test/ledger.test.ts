@@ -167,3 +167,28 @@ test("ledger cancellation aborts active receipt requests and leaves queued hashe
   await ready; controller.abort(); await rejected;
   assert.equal(calls, 4); assert.equal(aborted, 4);
 });
+
+test("reconciliation includes receipt-backed incoming funds and retains positive coverage gaps separately from shortfalls", async () => {
+  const { reconcileBooks } = await import("../src/ledger.js");
+  const { recordIncomingCredit } = await import("../src/incoming-credits.js");
+  const id = process.env.AGENT_ID!;
+  mock.method(api, "getHistory", async () => ({ data: [] }));
+  mock.method(api, "getAgent", async () => ({ wallet: { near_account_id: "wallet.near" } }));
+  mock.method(api, "getTokens", async () => [{ asset_id: "nep141:usdc", symbol: "USDC" }]);
+  let balance = "10000000";
+  mock.method(api, "getBalances", async (_id: string, query?: { source?: string }) => ({ balances: query?.source === "confidential" ? [{ asset_id: "nep141:usdc", balance_raw: balance }] : [] }));
+  mock.method(globalThis, "fetch", async () => Response.json({ transfers: [] }));
+  const before = (await reconcileBooks())[0]!;
+  assert.equal(before.confidential.status, "history-incomplete");
+  recordIncomingCredit({ agent: id, recipient: "wallet.near", asset: "nep141:usdc", amount: "10000000", settledAt: "2026-01-01T00:00:00Z", source: { issuer: "https://receipt.example", receiptId: "credit-1" }, recordedBy: "fixture operator", recordedAt: "2026-01-02T00:00:00Z", evidence: "operator-receipt" }, Buffer.from("synthetic funding receipt"));
+  const credited = (await reconcileBooks())[0]!;
+  assert.equal(credited.confidential.recorded, "10000000");
+  assert.equal(credited.confidential.incomingRecorded, "10000000");
+  assert.equal(credited.confidential.status, "matched");
+  assert.equal(credited.confidential.unattributed, "0");
+  assert.equal(credited.confidential.credits[0]?.evidence, "operator-receipt");
+  balance = "0";
+  const shortfall = (await reconcileBooks())[0]!;
+  assert.equal(shortfall.confidential.status, "balance-mismatch");
+  assert.equal(shortfall.confidential.unattributed, "-10000000");
+});

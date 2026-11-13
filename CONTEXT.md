@@ -552,3 +552,6 @@ An explicit wallet-owner creation choice for an uncreated hosted Market reservat
 initial withdrawal destination from that reservation's original payment key and uses the bounded test
 caps. It grants no execution authority and moves no funds; the later funding-only journal binding is
 separate. Offline-tested candidate; see docs/market-funding-proof.md.
+
+**Incoming credit**:
+Receipt-backed funds received by an agent outside its own execution history. Reconciliation may retain a provider-status-backed credit or an explicitly operator-attested funding receipt, with exact wallet/asset/amount binding and duplicate prevention. This is additive accounting evidence, not a payment, journal repair or owner signature. Positive residuals indicate incomplete incoming history; they do not establish missing funds. See docs/incoming-credits.md.

@@ -129,6 +129,8 @@ out of both.
 
 ## Not done yet
 
+- [Incoming confidential credits](docs/incoming-credits.md) have receipt-backed accounting and offline coverage. Automatic discovery of all incoming credits and a production correction remain unverified; operator attestations are explicitly weaker than provider settlement evidence.
+
 - The controlled [Market funding observation](docs/market-funding-proof.md) is a local owner-run tool with offline coverage; its deployed route and receipt recovery remain unverified. It cannot clear or reuse legacy funds.
 
 Each line is a gap; the linked page says how the rest is known. The
