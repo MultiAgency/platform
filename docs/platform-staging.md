@@ -60,6 +60,21 @@ disabled) and the state directory is retained; all 8 hosted agents started. Host
 Market agent's execution included (the owner's choice). Platform smoke passed every check. These establish package
 identity and public host behavior, not app acceptance or any money action.
 
+**Node 26 deployed by the owner, 2026-11-14 UTC.** Same application source as 0.6.0 (`f4729f4`) with only the runtime
+changed: commit `b025556` on branch `chore/node26` sets the image base to `node:26.13.1-slim` (pinned corepack 0.36.0,
+since Node 25 and later ship without it) and CI to Node 26.13.1 and 24.22.0; the SDK is unchanged. Release candidate
+`b945ffdd` passed every gate under Node 26.13.1 (offline 1,536 of 1,536, browser, E2E and challenges, the image booted
+twice). The owner uploaded its `platform` package as deployment `3944eef9-2712-40b5-8fa1-35e02d047b7c`, image
+`sha256:cdd4c134dd2eb9ca198b9e5fff36ba751a77c384c030aa0b46cd3bbc825e8af4` (Railway's `meta.imageDigest`; the build log's
+pre-push `containerimage.digest` was `sha256:1ded2bab…`). It was not stopped or backed up first: Railway stopped
+`c5c6e6bd` at 19:44:30Z and the new deployment mounted the volume in the same instant, so they did not overlap, but
+no backup precedes the swap; the newest is `dea15ac8`, which predates 0.6.0 and must not be restored over later
+records. Read-only verification: Node v26.13.1 x64 in the container, the release manifest equals the candidate's
+(SHA-256 `941a6953…`) and all 257 packaged runtime files match it, all 8 hosted agents started with no error logged,
+platform smoke passed at 19:45Z, and Treasury's live app answered its health route. Rollback is redeploying
+`c5c6e6bd` (Node 24.22.0). Two owner executions of a DAO-approved Treasury proposal, at 19:35Z and 19:40Z, were
+refused (HTTP 400) by `c5c6e6bd` before the swap; no plan was saved and nothing was claimed or sent.
+
 Steps 1–2 record initial provisioning. For an existing staging service, retain the original service, volume, variables
 and hosted records; do not create an empty replacement or repeat setup to recover an outage. Follow the preservation
 and owner-action review in [operations](operations.md#railway-infrastructure-as-code) before restarting executors.
