@@ -11,6 +11,8 @@ export const ownerCapabilities = {
   /** A safety control: stopping a running schedule stays reachable on every host that can run one. */
   "agent-schedule-stop-v1": { routes: [], procedures: ["autopilot/stop"] },
   "agent-funding-v1": { routes: [], procedures: ["deposit"] },
+  /** Deposit addresses asked for at most once under the caller's `requestId`, and their recorded outcome. */
+  "agent-funding-requests-v1": { routes: [], procedures: ["depositStatus"] },
   /** The owning DAO link, funding from it, shielding and sweep: any agent, not only Treasury strategy. */
   "owner-treasury-v1": { routes: [], procedures: ["treasury/get", "treasury/link", "treasury/unlink", "treasury/fund", "sweep"] },
   "owner-intents-v1": { routes: ["/gw/proposals", "/gw/interventions"], procedures: ["owner/prepare", "owner/submit", "owner/status", "owner/pending", "owner/actions"] },
@@ -33,7 +35,7 @@ export const ownerCapabilities = {
 } as const satisfies Record<string, { routes: readonly string[]; procedures: readonly string[] }>;
 export type OwnerCapability = keyof typeof ownerCapabilities;
 
-const neutral = ["gateway-session-v1", "agent-observe-v1", "agent-schedule-stop-v1", "agent-funding-v1", "owner-treasury-v1", "owner-intents-v1"] as const;
+const neutral = ["gateway-session-v1", "agent-observe-v1", "agent-schedule-stop-v1", "agent-funding-v1", "agent-funding-requests-v1", "owner-treasury-v1", "owner-intents-v1"] as const;
 /** What a host provides, from the areas of the agents assigned to it. `showcase`-only hosts get the neutral set. */
 export function providedCapabilities(areas: readonly Area[]): OwnerCapability[] {
   const names = Object.keys(ownerCapabilities) as OwnerCapability[];

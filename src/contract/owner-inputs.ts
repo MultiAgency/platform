@@ -3,7 +3,7 @@ import type { agreementCommand, compensationSend, paymentPreparation, reviewComm
 import type { proposalCreateInput, proposalRef, proposalSigned } from "./treasury-proposals.js";
 import type { limitOrderCreateInput, limitOrderQuoteInput, limitOrderRef, limitOrderSigned } from "./limit-orders.js";
 import type { marketApproveInput } from "./market.js";
-import type { depositInput, executePlanInput, marketHireInput, marketQuoteInput, marketStatusInput, ownerAction, ownerPrepareInput, ownerStatusInput, ownerSubmitInput, payoutRequestInput, payoutStatusInput } from "./inputs.js";
+import type { depositInput, depositStatusInput, executePlanInput, marketHireInput, marketQuoteInput, marketStatusInput, ownerAction, ownerPrepareInput, ownerStatusInput, ownerSubmitInput, payoutRequestInput, payoutStatusInput } from "./inputs.js";
 
 /**
  * Owner procedure inputs as the router accepts them (before server-side parsing). Procedures in the owner contract
@@ -27,6 +27,7 @@ export type OwnerInputs = {
   "strategy/get": undefined; "treasury/get": undefined; ledger: undefined; ledgerCsv: undefined; reconcileBooks: undefined; paymentHistory: undefined;
   paymentStatus: { correlationId: string; waitMs?: number }; invoices: undefined; "agreements/list": undefined;
   "owner/status": In<typeof ownerStatusInput>; "owner/pending": undefined; "owner/actions": undefined;
+  depositStatus: In<typeof depositStatusInput>;
   "compensation/list": undefined; "workOrders/list": undefined; "workOrders/get": { id: string }; "workOrders/status": { id: string; correlationId: string };
   // Mutations
   pay: { recipient: string; asset: string; amount: string; confidential: boolean; expectedPolicy: ReviewedPolicy };

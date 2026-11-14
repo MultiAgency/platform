@@ -270,7 +270,7 @@ may change the DAO's policy. Pass `memberVotes` from `access.canVote`.
 ## Request a payout once, and follow it
 
 To fund the agent first, `agentCalls.call("deposit")` (payout or treasury scope) answers a one-time address (with `memo`,
-`minAmount` and `expiresAt` when given) that credits USDC to the agent's confidential balance; send exactly there.
+`minAmount` and `expiresAt` when given) that credits USDC to the agent's confidential balance; send exactly there. Each such call allocates a new address. From 0.6.0, when `app.capabilities()` lists `deposit-requests-v1` (an older host ignores the `requestId` and allocates on every call), store your own `requestId` first and call `deposit` with `{ requestId }`: the address is asked for once, a repeat answers the same one, and `depositStatus` with `{ requestId }` reads it (`ready`, `unknown`, `refused`, `not_found`) without allocating. On `unknown` (a repeat answers 409 `deposit_request_unknown`), the answer was lost and no procedure recovers it yet: a new `requestId` is a new address, so keep the unknown request on record and never fund an address you did not read back.
 
 Write the `requestId` (1–64 of `[A-Za-z0-9_-]`) and the exact terms to your database before calling. The platform sends
 one request at most once per deployment, Organization, agent and `requestId`. Never send the same payout under a new `requestId` until

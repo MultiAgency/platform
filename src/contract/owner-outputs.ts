@@ -642,6 +642,13 @@ export const depositOutput = z.looseObject({
   minAmount: z.string().nullable(),
   expiresAt: z.string().nullable(),
 });
+/** deposit-requests.ts depositStatus: one deposit request's recorded outcome. */
+export const depositStatusOutput = z.union([
+  z.looseObject({ requestId: z.string(), state: z.literal("not_found") }),
+  z.looseObject({ requestId: z.string(), state: z.literal("unknown"), asset: z.string(), requestedAt: z.string() }),
+  z.looseObject({ requestId: z.string(), state: z.literal("refused"), asset: z.string(), requestedAt: z.string(), code: z.string() }),
+  z.looseObject({ requestId: z.string(), state: z.literal("ready"), asset: z.string(), requestedAt: z.string(), deposit: depositOutput }),
+]);
 /** rpc/observations.ts recover (recover.ts recover projection). */
 export const recoverOutput = z.array(z.looseObject({
   key: z.string(),
@@ -820,6 +827,7 @@ export const ownerOutputs = {
   "workOrders/status": workOrdersStatusOutput,
   "pay": payOutput,
   "deposit": depositOutput,
+  "depositStatus": depositStatusOutput,
   "recover": recoverOutput,
   "cancelPreparedInvoice": cancelPreparedInvoiceOutput,
   "inbox/dismiss": inboxDismissOutput,

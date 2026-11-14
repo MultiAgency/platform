@@ -195,7 +195,8 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   if (pathname === "/apps/v1/capabilities") {
     if (req.method !== "GET") { json(res, 405, { code: "invalid_request", error: "Use GET" }); return true; }
     const treasury = options.setupAreas?.includes("treasury") || selected.some(a => a.area === "treasury" && reachable(a, credential.deployment));
-    json(res, 200, { capabilities: treasury ? ["treasury-limit-orders-v1"] : [] }); return true;
+    // Every agent of this host answers `deposit` under a `requestId` and `depositStatus` (deposit-requests.ts).
+    json(res, 200, { capabilities: ["deposit-requests-v1", ...(treasury ? ["treasury-limit-orders-v1"] : [])] }); return true;
   }
   /** A DAO's agent for this app and Organization, with live DAO consents carrying the requested scope. Orders need both Treasury scopes. */
   const daoAgent = async (name: string, organization: string, scope: "treasury" | "treasury-orders" | "market" = "treasury") => {

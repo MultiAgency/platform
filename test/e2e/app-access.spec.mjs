@@ -169,6 +169,13 @@ test('an app requests a payout once under its requestId, follows it by requestId
     await ownerStep(agent, { type: 'policy_update', expectedPolicy: await reviewed(), changes: { destinations: [{ address: BUILDER, confidential: true }] } });
     const deposit = value(await agent.call('deposit'));
     expect(deposit.address, 'the app takes a deposit address to fund the agent').toBeTruthy();
+    // Under the app's own requestId the address is asked for once: a repeat answers the same one from the agent's record.
+    const before = stack.simulated.deposits.length;
+    const requested = value(await agent.call('deposit', { requestId: 'fund-1' }));
+    expect(value(await agent.call('deposit', { requestId: 'fund-1' })), 'a repeat answers the recorded address').toEqual(requested);
+    expect(stack.simulated.deposits.length - before, 'the provider was asked once for that requestId').toBe(1);
+    expect(value(await agent.call('depositStatus', { requestId: 'fund-1' }))).toMatchObject({ state: 'ready', deposit: { correlationId: requested.correlationId, address: requested.address } });
+    expect(value(await agent.call('depositStatus', { requestId: 'fund-2' })).state, 'a requestId never asked').toBe('not_found');
     stack.simulated.fund(created, 10_000_000n);
     steps.push("setup: the Organization's own payout agent, its grant and payee (owner signatures), a deposit address through the app, and funding (simulated)");
 

@@ -24,7 +24,7 @@ test("every admitted procedure belongs to some capability, so no release can use
 });
 
 test("hosts provide the neutral set plus their areas' capabilities", () => {
-  assert.deepEqual(providedCapabilities([]), ["gateway-session-v1", "agent-observe-v1", "agent-schedule-stop-v1", "agent-funding-v1", "owner-treasury-v1", "owner-intents-v1"]);
+  assert.deepEqual(providedCapabilities([]), ["gateway-session-v1", "agent-observe-v1", "agent-schedule-stop-v1", "agent-funding-v1", "agent-funding-requests-v1", "owner-treasury-v1", "owner-intents-v1"]);
   const treasury = providedCapabilities(["treasury"]);
   assert.ok(treasury.includes("treasury-plans-v1") && !treasury.some(c => c.startsWith("payables-")));
   assert.ok(treasury.includes("treasury-limit-orders-v1"));

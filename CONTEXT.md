@@ -218,6 +218,16 @@ An operation without a proven outcome that blocks new sends: any but a held payo
 invoice, which are open but can't be lost. While one exists, no new operation may be sent.
 _Avoid_: pending, stuck
 
+**Deposit request**:
+A deposit address an app or an owner asks for under its own `requestId` (`deposit` with `requestId`), stored by the
+caller before it asks. Its identity is derived from the agent, the caller (the gateway's actor) and the `requestId`, and
+is the provider's idempotency key. The executor records the request before asking the provider and the answer after, in
+`.ops/<agent>.deposit-requests.ndjson`, beside the journal. Asked again, it answers the recorded address and asks
+nothing; `depositStatus` reads the record (`ready`, `unknown`, `refused`, `not_found`). An answer that never arrived
+leaves the request `unknown`: no other address is asked for under that `requestId`, and nothing here recovers it. An
+allocation moves no funds, so an `unknown` one blocks no send. `deposit` without a `requestId` allocates a new address
+on every call and records nothing.
+
 **Payout request**:
 A payout an app (with `payout` consent) or an owner asks for under its own `requestId`, stored by the caller before it
 asks. The operation's identity is derived from the caller (the gateway's actor) and the `requestId`; the journal records

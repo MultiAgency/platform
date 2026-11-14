@@ -12,7 +12,7 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
-## 0.6.0 (2026-11-13)
+## 0.6.0 (2026-11-14)
 
 A minor version: it removes an owner procedure and its capability. Nothing an app reaches through `/apps/v1` is
 removed or narrowed, so an app server on `appClient` moves from 0.5.9 without code changes.
@@ -30,6 +30,22 @@ removed or narrowed, so an app server on `appClient` moves from 0.5.9 without co
   `treasury-orders`, `market`, `payout`) and that setup admits the Treasury, market and Payables areas a host permits.
   The package README and the treasury-app skill no longer say no production host serves `/apps/v1`: the production
   host has since 2026-11-07, on an older platform version, with no app workflow observed there.
+- **`deposit` takes the caller's own `requestId`, and `depositStatus` follows it** (`app.capabilities()` lists
+  `deposit-requests-v1`; `depositStatus` joins the `read`, `payout`, `market` and `treasury` scopes; owner capability
+  `agent-funding-requests-v1`). Write the
+  `requestId` (1–64 of `[A-Za-z0-9_-]`) to your database, then call `deposit` with it: the agent records the request
+  before asking the provider and the answer after, under an idempotency key derived from the agent, the app and the `requestId`.
+  Asked again it answers the same address and asks the provider nothing. `depositStatus({ requestId })` reads that
+  record and allocates nothing: `ready` (with the original `deposit`), `unknown`, `refused` (with the provider's `code`)
+  or `not_found`. When the provider's answer never arrives the request stays `unknown`: a repeat is refused with
+  `code: "deposit_request_unknown"`, no other address is asked for under that `requestId`, and nothing recovers the
+  original answer until the provider offers a lookup by original key (platform#81). The record says what this agent
+  asked and was answered; it does not say whether the address was funded. `deposit` without a `requestId` is
+  unchanged: each call allocates a new address and keeps no record, so call it once and store the answer. A host
+  older than this version ignores the `requestId` and allocates on every call: send one only when
+  `app.capabilities()` lists `deposit-requests-v1`. No procedure clears an `unknown` request.
+  Offline-tested (`test/deposit-requests.test.ts`); the provider's handling of a repeated key on `deposit` is
+  unverified and not relied on.
 - **`reconcileBooks` answers how each confidential balance is accounted** (#93): its `confidential` entry gains optional
   `executionRecorded`, `incomingRecorded`, `coverage`, `status` (`matched`, `history-incomplete`, `balance-mismatch`) and
   `credits` (issuer, receipt and evidence kind of each receipt-backed incoming credit). `history-incomplete` is a

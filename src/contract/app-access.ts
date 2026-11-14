@@ -10,26 +10,27 @@ import type { OwnerAction } from "./owner-inputs.js";
 /**
  * Reads the app may make with `read` consent. Workflow records (agreements, invoices, work orders) stay out.
  * `payouts/status` answers only the app's own requests (the agent keys each by `app:<deployment>:<organization>` and
- * its `requestId`), so an app whose `payout` consent ended can still follow what it asked for.
+ * its `requestId`), so an app whose `payout` consent ended can still follow what it asked for. `depositStatus` answers
+ * the app's own deposit requests the same way, from the agent's records, and allocates nothing.
  */
 export const APP_READS = ["instance", "account", "reconcileBooks", "overview", "policyHistory", "activity", "unresolved", "held", "ledger", "ledgerCsv",
-  "owner/actions", "owner/pending", "owner/status", "paymentHistory", "paymentStatus", "payouts/status"] as const;
+  "owner/actions", "owner/pending", "owner/status", "paymentHistory", "paymentStatus", "payouts/status", "depositStatus"] as const;
 /** Owner actions with `owner` consent: prepared here, completed only by the owner's own wallet signature at submit. */
 export const APP_OWNER = ["owner/prepare", "owner/submit", "owner/status", "owner/pending", "owner/actions"] as const;
 /**
  * Payout requests with `payout` consent: each sent at most once under the app's `requestId`, within the owner-signed
  * policy, and held for the owner's vote when the policy says so. `held` shows what waits for that vote. `deposit` gives a
  * one-time address that credits USDC, or wNEAR, to the agent's confidential balance, so the app can fund it; it moves
- * nothing out.
+ * nothing out. Under the app's `requestId` the address is asked for at most once, and `depositStatus` follows it.
  */
-export const APP_PAYOUT = ["payouts/request", "payouts/status", "held", "deposit"] as const;
+export const APP_PAYOUT = ["payouts/request", "payouts/status", "held", "deposit", "depositStatus"] as const;
 /**
  * Market hires with `market` consent (docs/market.md): a quote moves nothing; a hire pays one listed agent over x402 at
  * most once under the app's `requestId`, only while a fresh quote equals the terms the app asks for, from the agent's
  * payment key, within the owner-signed policy; `market/status` follows it; `market/account` shows the payment key and
  * the owner's one-time registration; `deposit` funds the agent. For a DAO, each hire is paid only after its vote.
  */
-export const APP_MARKET = ["market/quote", "market/hire", "market/status", "market/account", "deposit"] as const;
+export const APP_MARKET = ["market/quote", "market/hire", "market/status", "market/account", "deposit", "depositStatus"] as const;
 /**
  * Treasury with `treasury` consent (docs/enforcement.md, "Treasury proposals"): reads; strategy settings, which an
  * app's plans, a machine credential's plans and the autopilot use only under a grant binding their digest; autopilot on
@@ -40,7 +41,7 @@ export const APP_MARKET = ["market/quote", "market/hire", "market/status", "mark
  * the owner signs their exact terms.
  */
 export const APP_TREASURY = ["strategy/get", "autopilot/get", "autopilot/evidence", "autopilot/log", "treasury/get", "strategy/save",
-  "autopilot/enable", "autopilot/stop", "autopilot/tick", "sweep", "deposit", "treasury/link", "treasury/unlink",
+  "autopilot/enable", "autopilot/stop", "autopilot/tick", "sweep", "deposit", "depositStatus", "treasury/link", "treasury/unlink",
   "proposals/create", "proposals/get", "proposals/list", "proposals/approve",
   "proposals/reject", "proposals/withdraw", "proposals/execute"] as const;
 /**

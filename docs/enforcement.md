@@ -328,6 +328,13 @@ but not the idempotency key, so the only link to the recorded attempt would be m
 not do. `pnpm reconcile` does not clear it either. The refusal names such operations, says reconcile cannot resolve them
 and points here (`src/lock.ts`, `test/money-safety.test.ts`).
 
+A deposit address asked for under a caller's `requestId` is recorded before the provider is asked and its answer after
+(`.ops/<agent>.deposit-requests.ndjson`; offline-tested, `test/deposit-requests.test.ts`). A lost answer leaves that
+request `unknown` and is never asked again, so the original key is retained; binding it to the provider's operation
+still needs the provider's lookup by original key, which is not available (platform#81). A `deposit` without a
+`requestId`, and every allocation made before 0.6.0, keeps no key or answer on this host and cannot be bound from its
+records. The record does not show whether an address was funded or has expired.
+
 When the provider answers a claimed send with an error that doesn't prove a refusal, the executor keeps that answer as
 evidence (offline-tested, `test/submission-evidence.test.ts`): HTTP status, error codes, a shortened message with
 credential-like values removed, the provider's `requestId`, and any operation or correlation id the provider included

@@ -24,7 +24,7 @@ the chain reports removed; exits non-zero if any lookup went unanswered).
 
 | Request | Result |
 | --- | --- |
-| `GET /apps/v1/capabilities` (SDK 0.5.8; rollout pending) | `{ capabilities: [...] }`: app route groups this host advertises for the calling deployment. `treasury-limit-orders-v1` means the platform can serve the order API for a Treasury area; it grants no consent and says nothing about an active agent release or deployed provider support. Requires the service credential; headless `/gw/me` still answers 404. |
+| `GET /apps/v1/capabilities` (SDK 0.5.8; rollout pending) | `{ capabilities: [...] }`: app route groups this host advertises for the calling deployment. `treasury-limit-orders-v1` means the platform can serve the order API for a Treasury area; it grants no consent and says nothing about an active agent release or deployed provider support. `deposit-requests-v1` (0.6.0) means `deposit` honours a `requestId` and `depositStatus` answers; a host that doesn't list it allocates a new address on every `deposit` call. Requires the service credential; headless `/gw/me` still answers 404. |
 | `GET /apps/v1/agents/<agent>` | `{ agent, owner, agentId, created, host, deployment, signer }`: what the owner's consent must name (`signer` is `wallet` or `dao`; `agentId` null and `created` false before the agent exists) |
 | `POST /apps/v1/setup` with a signed setup text | `201 { agent, consent }`: reserves and starts this owner's hosted agent for the area, and a setup consent (below) |
 | `GET /apps/v1/agents?organization=<org>[&owner=][&area=]` | `{ agents: [{ agent, organization, owner, area }] }`: the hosted agents this deployment's setups reserved for that Organization on this host, from the registry; how an app whose setup reply was lost learns the name (below) |
@@ -97,8 +97,10 @@ id, refusal or failure code) is what `activity` and `paymentStatus` already show
 the provider's own flag on that operation (below). An app keeps
 following its requests with `read` after its `payout` consent ends (platform#53; `test/app-access.test.ts`). Owner scope: `owner` permits `owner/prepare`, `owner/submit`, `owner/status`,
 `owner/pending` and `owner/actions`, and nothing else (no reads beyond those). Payout scope: `payout` permits
-`payouts/request`, `payouts/status`, `held` and `deposit` (a one-time address crediting USDC to the agent's
-confidential balance, so the app can fund it; it moves nothing out): payout requests (CONTEXT.md, "Payout request"), each sent at most once
+`payouts/request`, `payouts/status`, `held`, `deposit` (a one-time address crediting USDC to the agent's
+confidential balance, so the app can fund it; it moves nothing out) and, from 0.6.0, `depositStatus` (CONTEXT.md, "Deposit request": with the
+app's `requestId`, `deposit` asks for the address at most once and `depositStatus` reads the recorded answer; an answer that never arrived stays
+`unknown` and is not asked again; offline-tested, `test/deposit-requests.test.ts`; `read`, `market` and `treasury` reach `depositStatus` too): payout requests (CONTEXT.md, "Payout request"), each sent at most once
 under the app's `requestId` and namespaced by the actor `app:<deployment>:<organization>`, judged as a payout
 (`authorize`, then the provider's policy) and refused before sending on an agent whose grant is for other work. The
 `held` read shows every held payout of the agent, not only this app's. With `owner_approval: false` an app with `payout` consent pays agreed payees

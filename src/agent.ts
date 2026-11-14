@@ -521,11 +521,11 @@ async function dispatchLimitOrderCancellation(lock: MoneyLock, proposalId: strin
  * A one-time address to fund the account from `originAsset`; incoming funds need no grant. Funds
  * land in the confidential balance, so nothing the agent holds sits in public view.
  */
-export async function depositAddress(originAsset: string) {
+export async function depositAddress(originAsset: string, idempotencyKey = createIdempotencyKey()) {
   const { correlation_id, details } = await api.deposit(
     agentId(),
     { origin_asset: originAsset, confidential: true },
-    { idempotencyKey: createIdempotencyKey() },
+    { idempotencyKey },
   );
   // Send funds only here (with the memo, if any); the correlation id is not an address.
   if (!details.deposit_address) throw new Error(`Deposit ${correlation_id} came back without an address`);

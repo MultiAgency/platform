@@ -2,7 +2,7 @@ import { ownerOutputs } from "../contract/owner-outputs.js";
 import { os } from "./base.js";
 
 type Read = "setup" | "instance" | "account" | "overview" | "policyHistory" | "activity" | "unresolved" | "held" | "inbox/list" | "autopilot/get" | "autopilot/evidence"
-  | "autopilot/log" | "strategy/get" | "treasury/get" | "ledger" | "ledgerCsv" | "reconcileBooks" | "paymentHistory" | "paymentStatus" | "payouts/status" | "invoices"
+  | "autopilot/log" | "strategy/get" | "treasury/get" | "ledger" | "ledgerCsv" | "reconcileBooks" | "paymentHistory" | "paymentStatus" | "payouts/status" | "depositStatus" | "invoices"
   | "agreements/list" | "owner/status" | "owner/pending" | "owner/actions" | "compensation/list" | "workOrders/list" | "workOrders/get" | "workOrders/status"
   | "proposals/get" | "proposals/list" | "market/quote" | "market/status" | "market/account"
   | "limitOrders/quote" | "limitOrders/get" | "limitOrders/list" | "limitOrders/refresh";

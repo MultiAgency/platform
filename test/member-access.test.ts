@@ -16,7 +16,7 @@ function paths(node: object, prefix = ""): string[] {
 }
 
 /** What every admitted member may read. */
-const READS = ["compensation/list", "instance", "account", "setup", "overview", "policyHistory", "treasury/get", "activity", "unresolved", "held", "payouts/status", "autopilot/get", "autopilot/evidence",
+const READS = ["compensation/list", "instance", "account", "setup", "overview", "policyHistory", "treasury/get", "activity", "unresolved", "held", "payouts/status", "depositStatus", "autopilot/get", "autopilot/evidence",
   "autopilot/log", "strategy/get", "inbox/list", "ledger", "ledgerCsv", "reconcileBooks", "owner/status", "owner/pending", "owner/actions", "paymentHistory", "agreements/list", "paymentStatus", "invoices",
   "workOrders/list", "workOrders/get", "workOrders/status", "proposals/get", "proposals/list",
   "market/quote", "market/status", "market/account", "limitOrders/quote", "limitOrders/get", "limitOrders/list", "limitOrders/refresh"];

@@ -27,7 +27,8 @@ import { os, owner } from "./base.js";
 import { readOutput } from "./read-output.js";
 import { payeeTerms } from "../payee-terms.js";
 import { payeeDisclosure } from "../contract/payee-policy.js";
-import { run, account, depositInput } from "../contract/inputs.js";
+import { run, account, depositInput, depositStatusInput } from "../contract/inputs.js";
+import { depositStatus, requestDeposit } from "../deposit-requests.js";
 import { unresolvedEvidence } from "../contract/owner-outputs.js";
 
 /** The agent's ops log, one row per action, newest first: the request as sent, the mandate (policy revision and digest) and plan it ran under, and how it settled or was refused. */
@@ -152,7 +153,11 @@ export const observationsRoutes = {
       digest: r.policy ? mandateDigest(r.policy) : null,
     }));
   }),
-  deposit: os.input(depositInput).handler(({ input }) => depositAddress(input?.asset ?? ASSETS.USDC)),
+  deposit: os.input(depositInput).handler(({ input, context }) => input?.requestId
+    ? requestDeposit(context.actor, { requestId: input.requestId, asset: input.asset ?? ASSETS.USDC })
+    : depositAddress(input?.asset ?? ASSETS.USDC)),
+  /** A deposit asked for under the caller's `requestId` (deposit-requests.ts): its recorded outcome, asking the provider nothing. */
+  depositStatus: os.use(readOutput("depositStatus")).input(depositStatusInput).handler(({ input, context }) => depositStatus(context.actor, input.requestId)),
   activity: owner.activity.use(readOutput("activity")).handler(() => activity()),
   /**
    * Money actions without a proven outcome: each blocks every new one until resolved. Those held for

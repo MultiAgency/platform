@@ -24,7 +24,7 @@ config twice, runs the platform smoke checks (`src/smoke-platform.ts`) against e
 directory and file present before the boots is unchanged after them. It needs Docker. Every release candidate runs it
 on the `platform` package it produced (its last gate); CI doesn't (no Docker in the job). First run 2026-11-08: passed
 (219 packaged files, 15 directories).
-plus each instance's settings file. `.ops/` also holds each executor's `<agent>.submission-evidence.ndjson` (provider answers to failed sends; evidence only, never read to decide a send). `.invoices/` includes its SQLite journals and the compensation store
+plus each instance's settings file. `.ops/` also holds each executor's `<agent>.submission-evidence.ndjson` (provider answers to failed sends; evidence only, never read to decide a send) and `<agent>.deposit-requests.ndjson` (deposit addresses asked for under a caller's `requestId` and the provider's answers; an additive record older builds never read, preserved with `.ops/`). `.invoices/` includes its SQLite journals and the compensation store
 (`<agent>.compensation.sqlite`); `.notify/` records which alerts were sent (losing it re-sends them); `.agent-connections/`
 holds agent connections and their access log (see [agent access](agent-access.md)); `.machine-auth/` holds Treasury
 machine credentials; `.app-access/` holds app service credentials (hashed), owner consents, revocation tombstones (`revoked/`,

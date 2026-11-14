@@ -32,6 +32,7 @@ export const READS = new Set([
   "paymentHistory",
   "paymentStatus",
   "payouts/status",
+  "depositStatus",
   "agreements/list",
   "invoices",
   "compensation/list",

@@ -145,8 +145,14 @@ export const marketQuoteInput = z.object({ handle: marketHandle, brief: marketBr
 /** A hire under the caller's own `requestId`, paid at most once, only while a fresh quote equals `approved`. */
 export const marketHireInput = z.object({ requestId: payoutRequestId, brief: marketBrief, approved: hireTerms });
 export const marketStatusInput = z.object({ requestId: payoutRequestId });
-/** A deposit address for the asset to fund (default USDC); wNEAR funds withdrawals that arrive as native NEAR. */
-export const depositInput = z.object({ asset: z.enum(["nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", "nep141:wrap.near"]).optional() }).optional();
+/**
+ * A deposit address for the asset to fund (default USDC); wNEAR funds withdrawals that arrive as native NEAR. Each call
+ * without a `requestId` allocates a new address. With the caller's own `requestId`, the address is asked for at most
+ * once: the request is recorded before it is sent, and `depositStatus` answers it by `requestId`.
+ */
+export const depositInput = z.object({ asset: z.enum(["nep141:17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1", "nep141:wrap.near"]).optional(),
+  requestId: payoutRequestId.optional() }).optional();
+export const depositStatusInput = z.object({ requestId: payoutRequestId });
 export const ownerSubmitInput = z.object({ correlationId: z.string(), signedData: z.record(z.string(), z.unknown()) });
 export const ownerStatusInput = z.object({ correlationId: z.string() });
 export const executePlanInput = z.object({ planId: z.uuid() });
