@@ -80,7 +80,7 @@ Native signing remains out of scope. See [limit orders](limit-orders.md) and
 ## Checking it yourself
 
 - `pnpm verify` runs the whole offline sequence: typecheck, offline tests, browser suites, the narrow E2E run and the
-  evidence drift check. CI runs it on Node 24 for every push to `main` and every pull request ([testing](testing.md)).
+  evidence drift check. CI runs it on Node 26.13.1 and Node 24.22.0 for every push to `main` and every pull request ([testing](testing.md)).
 - `evidence/inventory.ts` is the one requirement and evidence inventory; `pnpm evidence:check` rejects generated
   documents that drifted from it. The area pages present it: [Payables](facilitator.md), [Treasury](treasury.md).
 - `pnpm smoke` reads a host without signing in or moving anything.

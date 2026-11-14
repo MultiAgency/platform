@@ -14,7 +14,7 @@ set -euo pipefail
 for input in "$CROSSREPO_SDK_GIT" "$CROSSREPO_APP_ROOT" "$CROSSREPO_DEPENDENCY_SNAPSHOT"; do
   [[ "$input" == /* ]] || { echo 'Source and snapshot paths must be absolute' >&2; exit 1; }
 done
-node -e 'if (Number(process.versions.node.split(".")[0]) !== 24) throw new Error("Cross-repository release evidence requires Node 24")'
+node -e 'if (Number(process.versions.node.split(".")[0]) < 24) throw new Error("Cross-repository release evidence requires Node 24 or later")'
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 run_root="${CROSSREPO_ROOT:-$(mktemp -d /private/tmp/crossrepo-orders.XXXXXX)}"

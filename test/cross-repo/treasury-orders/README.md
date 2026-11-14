@@ -2,7 +2,7 @@
 
 This explicit offline gate starts the actual platform gateway and Treasury app server against the platform E2E's simulated provider, chain, owner key, and funds. It tests owner-signed policy and strategy grant, Treasury-only versus `treasury-orders` consent, exact order signature, placement, partial fill, fully filled but unpaid state, final payout, and lost placement/cancellation replies across app restarts. It does not show deployed provider support or move live funds.
 
-Run with Node 24, a frozen platform candidate snapshot, and an installed clean Treasury checkout at the signed consumer commit. The snapshot supplies the installed dependencies and built platform web; the runner compares its dependency fingerprint with the snapshot record. The app driver compares every installed SDK package file with the vendored tarball.
+Run with Node 26 (Node 24.22 or later is accepted; the run records its version), a frozen platform candidate snapshot, and an installed clean Treasury checkout at the signed consumer commit. The snapshot supplies the installed dependencies and built platform web; the runner compares its dependency fingerprint with the snapshot record. The app driver compares every installed SDK package file with the vendored tarball.
 
 ```bash
 CROSSREPO_SDK_GIT=/Users/jlwaugh/agencies/dao/sdk \

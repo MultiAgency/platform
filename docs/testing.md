@@ -4,7 +4,7 @@
 browser suites, the offline application E2E suites, then generated-evidence drift checks. It does not run live verification. Live checks
 remain explicit and owner-authorized; passing fixtures does not establish deployed behavior.
 
-GitHub Actions runs `pnpm verify` on Node 24 for every push to `main` and every pull request
+GitHub Actions runs `pnpm verify` on Node 26.13.1 and Node 24.22.0 for every push to `main` and every pull request
 (`.github/workflows/verify.yml`), with no secrets and actions pinned by commit. On failure it uploads
 `.test-artifacts/`. A CI pass is the narrow E2E run, not release-candidate evidence.
 

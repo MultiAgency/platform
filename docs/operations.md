@@ -188,7 +188,7 @@ one executor per agent, a consistent backup with stopped writers, and that no un
 is active. Review retained owner actions and persisted schedules: startup can follow passed DAO votes and submit
 their signatures even with schedules off. Do not overwrite records that progress during startup.
 
-**CLI 5.71.0 workflow.** Run configuration tools from the reviewed source checkout with Node 24 and its development
+**CLI 5.71.0 workflow.** Run configuration tools from the reviewed source checkout with Node 26 (24.22 or later supported) and its development
 dependencies, including pinned `railway` 3.16.0; the production image installs production dependencies only. The package's
 manifest identifies its IaC inputs, but Railway does not evaluate `.railway/` during an upload. The SDK's public contract
 is unchanged by this infrastructure change.

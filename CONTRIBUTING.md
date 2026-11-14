@@ -20,7 +20,7 @@ A bug fix starts from a failing test or recorded evidence.
 
 ## Checks
 
-Node 24.22+ and pnpm 12.15:
+Node 26 (24.22 or later supported) and pnpm 12.15:
 
 ```sh
 pnpm install --frozen-lockfile

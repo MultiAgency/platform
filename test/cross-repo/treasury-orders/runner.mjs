@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runAppJourney } from './app-driver.mjs';
 
-assert.equal(Number(process.versions.node.split('.')[0]), 24, 'Cross-repository release evidence requires Node 24');
+assert.ok(Number(process.versions.node.split('.')[0]) >= 24, 'Cross-repository release evidence requires Node 24 or later');
 const required = name => {
   const value = process.env[name];
   if (!value) throw new Error(`${name} must identify the exact offline test input`);
