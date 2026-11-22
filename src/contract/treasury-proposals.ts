@@ -117,3 +117,20 @@ export function proposalText(proposal: Terms, verdict: "approve" | "reject") {
     `Valid until ${proposal.expiresAt}. Proposal sha256 ${proposal.sha256}.`,
   ].join("\n");
 }
+
+/**
+ * Why `proposals/execute` refused before the claim, one entry per problem in the order the message gives them, on the
+ * `not_executable` refusal beside its `error` and `code`. `retry` says what happens next, without parsing text:
+ * `now` a race, trying again may pass at once; `later` may clear without the owner (prices, quotes, the provider);
+ * `owner` needs an owner action outside this proposal; `never` this proposal can't pass, so read it again or propose anew.
+ * A `cost_limit` carries both numbers, and is `never` once the limit, not the quote, binds.
+ */
+export const REFUSAL_CAUSES = ["strategy_changed", "plan_expired", "stopping", "provider_warning", "floor", "unpriced", "cost_limit", "balance",
+  "policy_not_in_force", "no_grant", "cash_floor", "outside_policy_assets", "policy_changed", "approval_mismatch", "record_changed", "claimed", "invalid_plan"] as const;
+export const refusalCause = z.looseObject({
+  cause: z.enum(REFUSAL_CAUSES),
+  retry: z.enum(["now", "later", "owner", "never"]),
+  worstCostBps: z.number().optional(),
+  maxCostBps: z.number().optional(),
+});
+export type RefusalCause = z.infer<typeof refusalCause>;

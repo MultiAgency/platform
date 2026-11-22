@@ -148,7 +148,15 @@ Result: the proposal, `state`:
 
 A refusal `not_executable` means the attempt was refused before anything was claimed (price below a signed floor, a
 provider warning, a short balance, no live treasury grant, the policy not in force): nothing was sent, the proposal
-stays `approved`, and asking again later is safe. `not_approved`: the owner hasn't approved it. Execution re-quotes
+stays `approved`, and asking again later is safe. The refusal carries `causes`, one per problem in the order the
+message gives them, each `{ cause, retry }`, so you can say what happens next without parsing the message. `retry` is `now`
+(a race: trying again may pass at once), `later` (may clear without the owner: prices, quotes, the provider), `owner` (needs
+an owner action outside this proposal) or `never` (this proposal can't pass: read it again, or propose anew). Causes:
+`strategy_changed` and `plan_expired` (`now`); `stopping`, `provider_warning`, `floor`, `unpriced` (`later`);
+`balance`, `policy_not_in_force`, `no_grant`, `cash_floor` (`owner`); `outside_policy_assets`, `policy_changed`,
+`approval_mismatch`, `record_changed`, `claimed`, `invalid_plan` (`never`); and `cost_limit`, which carries `worstCostBps`
+and `maxCostBps`, and is `never` once the limit rather than the quote binds (the quote's own margin is over it), else
+`later`. Older hosts send none: treat a missing `causes` as unknown. `not_approved`: the owner hasn't approved it. Execution re-quotes
 every swap and sends each with a floor at least the signed one.
 
 ## A DAO-owned treasury: the DAO approves by vote

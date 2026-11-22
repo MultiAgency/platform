@@ -12,6 +12,19 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
+## 0.6.1 (unreleased)
+
+An addition: a patch. Nothing an app calls changes; a refusal carries one more optional field.
+
+- **`proposals/execute` names why it refused.** A `not_executable` refusal now carries `causes` beside `error` and `code`:
+  one `{ cause, retry }` per problem, in the order the message gives them. `retry` is `now` (a race), `later` (may clear
+  without the owner), `owner` (needs an owner action outside the proposal) or `never` (the proposal can't pass: read it
+  again, or propose anew). A `cost_limit` also carries `worstCostBps` and `maxCostBps`, and is `never` once the limit,
+  not the quote, binds. The owner client's `refused` failure types it as `causes?: RefusalCause[]` (`REFUSAL_CAUSES`,
+  `refusalCause`); only causes it can read are passed on. A host older than this version sends none, and `code`,
+  `error` and the HTTP status are unchanged. The plan stream's `rejected` event adds the same optional `causes`.
+  Closes platform#97.
+
 ## 0.6.0 (2026-11-14)
 
 A minor version: it removes an owner procedure and its capability. Nothing an app reaches through `/apps/v1` is

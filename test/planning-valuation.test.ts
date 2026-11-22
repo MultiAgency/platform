@@ -291,7 +291,7 @@ test("a plan refused for valuation stays claimed after prices recover and is nev
     ? { ...token, price_updated_at: "2000-01-01T00:00:00Z", price_expires_at: "2000-01-02T00:00:00Z" } : token);
   assert.equal((await execute(plan)).at(-1)?.type, "rejected");
   prices = fresh;
-  assert.deepEqual(await execute(plan), [{ type: "rejected", problems: ["the plan was already executed"] }]);
+  assert.deepEqual(await execute(plan), [{ type: "rejected", problems: ["the plan was already executed"], causes: [{ cause: "claimed", retry: "never" }] }]);
   assert.deepEqual(sends, []);
   assert.equal(readOps().length, 1);
 });

@@ -7,6 +7,7 @@ import { agentId, executes } from "../env.js";
 import { liveGrant } from "../grants.js";
 import { mandateDigest } from "../mandate.js";
 import { signsText } from "../nep413.js";
+import { caused, CausedError, causesOf, type Cause, type Caused } from "../planning/causes.js";
 import { executePlan, type Observed, type PlanEvent } from "../planning/execution.js";
 import { quoteChosen, type ChosenSwap } from "../planning/external.js";
 import type { Plan } from "../planning/model.js";
@@ -32,7 +33,8 @@ import { claim, close, loadProposal, proposalIdOf, proposalIds, proposalState, p
  * runs twice.
  */
 
-const refused = (code: string, message: string) => new ORPCError("BAD_REQUEST", { message, data: { kind: "refused", code } });
+const refused = (code: string, message: string, causes?: Cause[]) =>
+  new ORPCError("BAD_REQUEST", { message, data: { kind: "refused", code, ...(causes?.length && { causes }) } });
 const ACTOR = /^app:([a-z0-9-]{1,32}):([A-Za-z0-9_-]{1,128})$/;
 
 /**
@@ -78,6 +80,9 @@ function bindingChange(record: ProposalRecord, live: { agentId: string; policyRe
   return heldChange(record, live) ?? (live.policyRevision !== record.policyRevision || live.policyDigest !== record.policyDigest
     ? `the policy changed (revision ${record.policyRevision} → ${live.policyRevision})` : null);
 }
+/** `bindingChange` as a problem before a claim: a changed policy is `policy_changed`, a changed strategy `strategy_changed`, another agent `invalid_plan`. */
+const bindingProblem = (changed: string): Caused =>
+  caused(changed.startsWith("the policy") ? "policy_changed" : changed.startsWith("the owner's strategy") ? "strategy_changed" : "invalid_plan", changed);
 const invalidate = (id: string, reason: string) => {
   close(id, { state: "invalidated", reason, at: new Date().toISOString() });
   return refused("invalidated", `This proposal no longer holds: ${reason}. Nothing was sent; propose again.`);
@@ -250,30 +255,34 @@ export async function executeProposal(context: CallContext, input: unknown, now 
   try {
     const { snapshot, actions, now: at } = await quoteChosen(record.legs);
     plan = savePlan(snapshot, "proposal", `Treasury proposal ${id}`, actions, at, id);
-  } catch (error) { if (error instanceof PublicError) throw refused("not_executable", `Not executed now: ${error.message}. Nothing was sent; the proposal stays approved.`); throw error; }
+  } catch (error) {
+    if (error instanceof PublicError)
+      throw refused("not_executable", `Not executed now: ${error.message}. Nothing was sent; the proposal stays approved.`, error instanceof CausedError ? causesOf(error.causes) : undefined);
+    throw error;
+  }
 
   /** The proposal's own checks, under the lock after the plan's, then its claim: only an approved, unexpired, unchanged proposal. */
-  const beforeClaim = async (planned: Plan, observed: Observed) => {
+  const beforeClaim = async (planned: Plan, observed: Observed): Promise<Caused[]> => {
     const fresh = loadProposal(id);
-    if (!fresh || fresh.sha256 !== sha256) return ["the proposal's record changed"];
+    if (!fresh || fresh.sha256 !== sha256) return [caused("record_changed", "the proposal's record changed")];
     const current = proposalState(fresh.record, now().getTime()).state;
-    if (current !== "approved") return [`the proposal is ${current}`];
+    if (current !== "approved") return [caused("claimed", `the proposal is ${current}`)];
     const signedApproval = readApproval(id);
     if (!signedApproval || signedApproval.message !== textOf(fresh.record, sha256, "approve") || signedApproval.signature !== approval.signature)
-      return ["the owner's approval doesn't match the proposal"];
+      return [caused("approval_mismatch", "the owner's approval doesn't match the proposal")];
     const changedNow = bindingChange(fresh.record, observed.snapshot);
-    if (changedNow) return [changedNow];
+    if (changedNow) return [bindingProblem(changedNow)];
     const unenforced = notInForce(observed.view);
-    if (unenforced) return [`the policy is not in force: ${unenforced}`];
+    if (unenforced) return [caused("policy_not_in_force", `the policy is not in force: ${unenforced}`)];
     const grant = liveGrant(await api.listGrants(agentId()), process.env.AGENT_GRANT_TOKEN);
-    if (!grant || !(grant.label === "treasury" || grant.label.startsWith("treasury:"))) return ["no live treasury grant is held for this agent"];
+    if (!grant || !(grant.label === "treasury" || grant.label.startsWith("treasury:"))) return [caused("no_grant", "no live treasury grant is held for this agent")];
     // Checked again as each swap is sent; checked here too, so a floor refusal leaves the proposal approved, not claimed.
     const cashFloor = loadStrategy().cashFloor;
     if (cashFloor && planBreaksCashFloor(cashFloor, planned.actions, observed.book, heldOutgoing()))
-      return ["its swaps would take the strategy's cash under its floor"];
+      return [caused("cash_floor", "its swaps would take the strategy's cash under its floor")];
     // A stop begun during the reads above claims nothing: the proposal stays approved for after the restart.
     assertNotStopping();
-    if (!claim(id, planned.id)) return ["the proposal was claimed or closed meanwhile"];
+    if (!claim(id, planned.id)) return [caused("claimed", "the proposal was claimed or closed meanwhile")];
     return [];
   };
   const events: PlanEvent[] = [];
@@ -287,9 +296,12 @@ export async function executeProposal(context: CallContext, input: unknown, now 
   finally { running.delete(id); }
   const final = readFinal(id);
   if (final?.state !== "claimed") {
-    const problems = events.flatMap(event => event.type === "rejected" ? event.problems : []);
+    const rejected = events.flatMap(event => event.type === "rejected" ? [event] : []);
+    const problems = rejected.flatMap(event => event.problems);
+    // Causes only when every rejected problem names one, so `causes` lines up with the sentences it comes with.
+    const causes = rejected.flatMap(event => event.causes ?? []);
     throw refused("not_executable", `Not executed now: ${problems.join("; ")}. Nothing was sent; ${final
-      ? `the proposal is ${final.state}` : "the proposal stays approved"}.`);
+      ? `the proposal is ${final.state}` : "the proposal stays approved"}.`, causes.length === problems.length ? causes : undefined);
   }
   return view(loadProposal(id)!);
 }

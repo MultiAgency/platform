@@ -6,10 +6,12 @@ import { blockingWarnings, executeLeg, quoteLeg, warnedReason } from "../treasur
 import type { Plan, PlannedAction } from "./model.js";
 import { loadPlan, claimPlan } from "./store.js";
 import { observe } from "./observation.js";
-import { checkPlan, feasibility } from "./checks.js";
+import { checkPlan, checkPlanCaused, feasibility, feasibilityCaused } from "./checks.js";
+import { caused, causesOf, textOf, type Cause, type Caused } from "./causes.js";
 
 export type PlanEvent =
-  | { type: "rejected"; problems: string[] }
+  /** `causes`: one per problem, in order, when the refusal came before the claim (`causes.ts`). */
+  | { type: "rejected"; problems: string[]; causes?: Cause[] }
   | {
       type: "action";
       index: number;
@@ -39,13 +41,19 @@ export type Observed = Awaited<ReturnType<typeof observe>>;
  * a plan made for a proposal runs only with it, and a plan made for none never runs as one.
  */
 export type ExecuteOptions = { autopilot?: boolean; onSubmitted?: Sending["onSubmitted"]; proposal?: string;
-  beforeClaim?: (plan: Plan, live: Observed) => Promise<string[]> };
+  beforeClaim?: (plan: Plan, live: Observed) => Promise<(string | Caused)[]> };
+
+/** A refusal before the claim: its sentences, and its causes when every problem has one. */
+const rejection = (problems: (string | Caused)[]): PlanEvent => {
+  const causes = causesOf(problems);
+  return { type: "rejected", problems: problems.map(textOf), ...(causes.length === problems.length && { causes }) };
+};
 
 /** Executes a saved plan exactly as previewed, under the money lock, or says why it can't. */
 export async function* executePlan(id: string, now = () => new Date(), { autopilot = false, onSubmitted, proposal, beforeClaim }: ExecuteOptions = {}): AsyncGenerator<PlanEvent> {
   const plan = loadPlan(id);
   if (plan.proposalId !== proposal) {
-    yield { type: "rejected", problems: [plan.proposalId ? "this plan executes an owner-approved proposal: execute the proposal" : "this plan is not the proposal's"] };
+    yield rejection([caused("invalid_plan", plan.proposalId ? "this plan executes an owner-approved proposal: execute the proposal" : "this plan is not the proposal's")]);
     return;
   }
   const lock = await acquireMoneyLock();
@@ -53,26 +61,26 @@ export async function* executePlan(id: string, now = () => new Date(), { autopil
     // Fresh state, read under the lock so nothing else can move it before we act.
     const observed = await observe();
     const { snapshot: live, book, assets } = observed;
-    const invalid = feasibility(plan.actions, live.balances);
-    if (invalid.length) { yield { type: "rejected", problems: invalid }; return; }
+    const invalid = feasibilityCaused(plan.actions, live.balances);
+    if (invalid.length) { yield rejection(invalid); return; }
     // Fresh quotes, under the lock: a leg the provider now warns about is rejected before the plan is claimed.
     const quotes: string[] = [], warned: string[] = [];
     for (const action of plan.actions)
       if (action.type === "swap") { const quote = await quoteLeg(legFor(book, action)); quotes.push(quote.amountOut); warned.push(...blockingWarnings(quote)); }
-    if (warned.length) { yield { type: "rejected", problems: [warnedReason(warned)] }; return; }
-    const problems = checkPlan(plan, { ...live, now: now(), quotes, assets });
+    if (warned.length) { yield rejection([caused("provider_warning", warnedReason(warned))]); return; }
+    const problems = checkPlanCaused(plan, { ...live, now: now(), quotes, assets });
     if (problems.length > 0) {
-      yield { type: "rejected", problems };
+      yield rejection(problems);
       return;
     }
     const owed = beforeClaim ? await beforeClaim(plan, observed) : [];
-    if (owed.length > 0) { yield { type: "rejected", problems: owed }; return; }
+    if (owed.length > 0) { yield rejection(owed); return; }
 
     // Claimed before the first action: a plan runs at most once, even if it stops partway. A server told to stop while
     // the checks above ran claims nothing, so a proposal it would execute stays approved.
     assertNotStopping();
     if (!claimPlan(id)) {
-      yield { type: "rejected", problems: ["the plan was already executed"] };
+      yield rejection([caused("claimed", "the plan was already executed")]);
       return;
     }
 
@@ -107,7 +115,7 @@ export async function* executePlan(id: string, now = () => new Date(), { autopil
     // `authorize` refuses a send whose plan no longer holds; the refusal is logged and the plan stops. A server told to
     // stop refuses the next send before its record: the plan stops there too, with what it sent already reported.
     if (!(error instanceof Stopping || (error instanceof LocalRefusal && PLAN_REFUSALS.has(error.code)))) throw error;
-    yield { type: "rejected", problems: [error.message] };
+    yield error instanceof Stopping ? rejection([caused("stopping", error.message)]) : { type: "rejected", problems: [error.message] };
   } finally {
     await lock.release();
   }
