@@ -19,7 +19,9 @@ State on 2026-11-08: staging's `gateway` runs on a partner portal key since 2026
 an existing agent read through treasury.dev, and two swaps were sent with it). Production's `gateway`
 (`api.multiagency.ai`) shares that key, staging's FastNEAR key and its session secret, production app credentials
 included (the user's decision, [platform production](platform-production.md)): rotating or retiring the key stops both
-hosts' agents at once. Production `dao`, `invoices` and the other prototype services were
+hosts' agents at once. Since 2026-11-25 production's `gateway` has its own partner-portal key, FastNEAR key and
+session secret (deployment `81e4cea7`, [platform production](platform-production.md)); staging's are unchanged.
+Production `dao`, `invoices` and the other prototype services were
 deleted on 2026-11-08, so their keys need only revoking, not replacing. Whether the old pre-portal staging key was
 revoked isn't recorded.
 

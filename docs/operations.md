@@ -148,7 +148,7 @@ without outcome evidence and investigate them; do not fabricate a result or dele
 **Staging and production applied by the owner, 2026-11-12 UTC.** `.railway/railway.ts` replaces this source tree's legacy
 `deploy/railway.gateway.json`. The platform package retains the authoring file and `.railway/tsconfig.json` in its
 manifest and carries no `railway.json` or `railway.toml`. Earlier deployed packages, including staging's 0.5.7 and
-production's 0.5.4, contain legacy files; whether a service selects them is a separate remote setting. On 2026-11-05 the
+production's 0.5.4 (replaced since), contain legacy files; whether a service selects them is a separate remote setting. On 2026-11-05 the
 Railway CLI warned that Config as Code files keep working only until 2026-12-01. Removing the source file or uploading
 a new package does not clear a remote Railway Config File setting that is still selected.
 

@@ -3,7 +3,8 @@
 Requested 2026-11-13. **Published 2026-11-14 UTC** from release candidate `c1a3ae61` on source `f4729f4` (tree
 identical to main `1a14a7d`, #95; tag `sdk-v0.6.0`). Every candidate gate passed under Node 24.22.3; the npm tarball
 equals the candidate's (SHA-256 `aa3d4325…`), the same bytes Treasury and Paperwork vendor. Staging runs its platform
-package since 2026-11-14 ([platform staging](platform-staging.md)); production does not. [Market qualification
+package since 2026-11-14 ([platform staging](platform-staging.md)); production since 2026-11-25 ([platform
+production](platform-production.md)). [Market qualification
 #74](https://github.com/MultiAgency/platform/issues/74) closed 2026-11-14 for its stated scope, the existing staging
 funding-only route; Market setup stays disabled and no hire is claimed. Paperwork accepted the pair (demo#14);
 Treasury accepted it in [MultiAgency/treasury#305](https://github.com/MultiAgency/treasury/pull/305), merged as

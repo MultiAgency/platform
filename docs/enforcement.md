@@ -261,8 +261,8 @@ skills and OpenAPI on 2026-10-28); before, it reported `"0.000000"` there (the p
 2026-10-27). The overview schema required a string, so the agent refused its own overview of a policy with an uncapped
 window (found on staging on 2026-10-28). The overview now reports an uncapped window's spend as `"0.000000"` again
 (`countedSpend`, `src/budget-window.ts`): nothing is counted against a cap that doesn't exist, and owner apps built on
-earlier SDKs keep reading it. Production runs the earlier build, so its overview of a policy with an uncapped window
-fails until it gets this one (not checked on production). `src/ops.ts` already treats `policy_denied` and `spend_budget_exceeded` (4xx) and `route_unavailable`,
+earlier SDKs keep reading it. Both hosts run builds with this fix (it is in 0.5.9 and 0.6.0); an overview of an uncapped window on a
+deployed host is not checked. `src/ops.ts` already treats `policy_denied` and `spend_budget_exceeded` (4xx) and `route_unavailable`,
 `quote_unavailable` and `spend_price_unavailable` (5xx) as proven refusals, each only at its listed status class. Per
 the SDK's CHANGELOG.md at 0.7.1 (docs, not observed): from 0.7.0, `policy_limit_exceeded`,
 `policy_action_limit_exceeded` and `policy_usage_unavailable` on a request that runs now, and `provider_refused`, send

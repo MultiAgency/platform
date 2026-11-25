@@ -23,9 +23,11 @@ owner's consent ([app access](docs/app-access.md), [integration path](docs/integ
 | **Treasury** | An agent rebalances toward the owner's target, quoting every swap, inside per-asset caps and a USD budget the owner signed; each proposal is approved by the owner's signature or the DAO's vote, or autopilot runs under a grant bound to the saved strategy | [docs/treasury.md](docs/treasury.md) |
 | **Payouts** | An app requests a payout once under its own id; under a policy that holds payments, the provider holds it for the owner's vote; it is paid confidentially, or withdrawn to an agreed NEAR account. Wallet owners only: a DAO's consent covers Treasury, not payouts | [docs/facilitator.md](docs/facilitator.md) |
 
-This repository is meant to be the one owner of the gateway, executor and money path, with apps (Treasury, Payables,
-Invoices, the MultiAgency dashboard) building on it only through `@multiagency/sdk`. Not yet: Payables still carries its own
-copy (see Not done yet).
+This repository is meant to be the one owner of the gateway, executor and money path, with apps (Treasury, Paperwork,
+Invoices, the MultiAgency dashboard) building on it only through `@multiagency/sdk`. No app carries its own copy: the
+two repositories that did, `MultiAgency/payables` and `MultiAgency/treasury-prototype`, were archived on 2026-11-16. Not
+all apps build on the published SDK yet: the dashboard doesn't call app access, and Invoices (`main`, last pushed
+2026-10-19) links the SDK from a local platform checkout instead of a published version.
 
 **Experimental**, outside the core loops: no compatibility promise, and offline-tested unless their page says otherwise.
 The [dashboard prototype](docs/prototype.md) (the `dao` and `invoices` source, whose hosted services were retired and whose packages are no longer
@@ -145,15 +147,13 @@ Each line is a gap; the linked page says how the rest is known. The
 [enforcement assessment](docs/enforcement.md#status) tracks the signed spending envelope.
 
 **Apps and the platform**
-- `MultiAgency/payables` and `MultiAgency/treasury-prototype` (not archived) still carry their own copies of the
-  gateway and money path, so a fix here doesn't reach them; Payables' frontend still imports from its copy. The
-  Treasury app (`MultiAgency/treasury`) is to replace the prototype and this platform's Treasury pages.
 - The owner session (`/a/<agent>/`, the `dao` package's owner app, `ownerClient` and `/gw/agents`)
   has had no production host since 2026-11-08; owner UIs move to app access (platform#14). It stays until the apps
-  replace it: Treasury's app-server pages (MultiAgency/treasury#138) and a Payables owner UI on `/apps/v1`, which doesn't
-  exist yet: as of 2026-11-08, `MultiAgency/payables` (last commit 2026-10-19) uses only the owner session, and no
-  branch of `MultiAgency/dashboard` calls app access, although staging holds its credential. Until then a wallet
-  owner of a Payables agent has no hosted owner UI, only the stop page with no app. Contributor intake (the payee pages
+  replace it: Treasury's app-server pages (MultiAgency/treasury#138) and a Payables owner UI on `/apps/v1`. Paperwork
+  (`MultiAgency/demo`) builds one, with local simulated acceptance against 0.6.0 (demo#14), not deployed;
+  `MultiAgency/payables`, which used only the owner session, was archived on 2026-11-16. As of 2026-11-25 no branch of
+  `MultiAgency/dashboard` calls app access, although staging holds its credential. Until a hosted Payables app exists, a
+  wallet owner of a Payables agent has no hosted owner UI, only the stop page with no app. Contributor intake (the payee pages
   and Invoices) has no hosted path either: the headless host doesn't serve it, and app access leaves agreements,
   invoices and work orders out by design, so a Payables app keeps those records itself.
 - A payee can read their own terms in the policy from the platform host under the owner's payee disclosure
@@ -163,9 +163,6 @@ Each line is a gap; the linked page says how the rest is known. The
 - A new prototype must reuse a fixed host `demo` value and agent area; owner-app `contract.json` is checked at runtime
   only on hosts served by the shared release server (offline-tested, not deployed). See the
   [integration path](docs/integration-path.md#gaps).
-- Payables' frontend (`97ddec7`, 2026-10-16) passes the source contract preflight only; its build isn't in the
-  real-stack E2E suite. See
-  [consumer compatibility](docs/shared-frontend-integration.md#consumer-source-contract-preflight).
 - App access (`/apps/v1`) runs in production on api.multiagency.ai since 2026-11-07, with no app credential issued yet
   ([platform production](docs/platform-production.md)). Mainnet-observed on staging: confidential USDC payouts (2026-10-28) and
   withdrawals of wNEAR or USDC to agreed NEAR accounts (2026-10-30), and DAO-owned agents (below) ([mainnet log](docs/mainnet-log.md)).
@@ -214,10 +211,10 @@ Each line is a gap; the linked page says how the rest is known. The
   bearer for at most 24 hours; owner connections aren't built. See
   [agent access](docs/agent-access.md#agent-connections-contractor-reports).
 - A provider failure while preparing an owner action reaches the caller as `unknown`; nothing was signed or sent, and
-  retrying prepares a new intent (seen on staging 2026-10-30). The deployed staging and production builds predate two
-  source changes after 2026-10-30 ([errors at the RPC boundary](docs/architecture.md#errors-at-the-rpc-boundary)): there
-  a vote the platform's own checks refuse answers `unknown`, not `refused` (`local_authorization_held`), and a failure
-  that reaches a caller as `unknown` isn't logged (`unclassified_error`).
+  retrying prepares a new intent (seen on staging 2026-10-30). Since then a vote the platform's own checks refuse answers
+  `refused` (`local_authorization_held`), and a failure that reaches a caller as `unknown` is logged
+  (`unclassified_error`); both are in the 0.6.0 builds both hosts run, offline-tested and not observed on a host
+  ([errors at the RPC boundary](docs/architecture.md#errors-at-the-rpc-boundary)).
 
 **Money path and recovery**
 - A send whose provider reply is lost blocks its executor's later sends, with no review procedure yet; nothing is sent
@@ -285,6 +282,11 @@ Each line is a gap; the linked page says how the rest is known. The
 **Treasury**
 - The autopilot (off by default) hasn't run unattended for days; with the dashboard retired, its warnings reach the owner
   only through an app that reads `autopilot/get` under a `treasury` consent, or the optional Telegram notices.
+- The unattended-run report can't be generated on the platform host. `pnpm run-report` signs in with the retired
+  dashboard's session and reads `/gw/interventions`, both absent on a headless host (404), and the gateway records
+  interventions only for machine-route calls, not app calls, so "no operator interventions" can't be established for an
+  app-run agent. The tick evidence itself is still written and readable through `/apps/v1` (`autopilot/evidence`,
+  `autopilot/log`) under a `treasury` consent ([unattended run](docs/unattended-run.md)). Found 2026-11-25.
 - The inline strategy workflow is offline- and browser-fixture-tested only. Stop prevents future ticks, but a tick
   already started can still submit; configuration coordination is single-host.
 - Sweep covers managed USDC, wNEAR and ETH only.

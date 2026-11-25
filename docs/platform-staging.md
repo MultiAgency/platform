@@ -118,9 +118,9 @@ and owner-action review in [operations](operations.md#railway-infrastructure-as-
 
 Production (`api.multiagency.ai`, set up 2026-11-07: [platform production](platform-production.md)) is the same
 package with `deploy/platform.json`, the image's default `DASHBOARD_FILE`: since 2026-11-08 the project's `gateway`
-service, synced into the production environment, with its own volume and domain. It shares staging's provider key,
-FastNEAR key and session secret, production app credentials included (a known shortcut, [platform
-production](platform-production.md)); rotating or revoking one rotates both.
+service, synced into the production environment, with its own volume and domain. It shared staging's provider key,
+FastNEAR key and session secret from 2026-11-08 until 2026-11-25, when it got its own ([platform
+production](platform-production.md)); rotating or revoking staging's no longer affects production.
 
 ## Staging evidence on a test agent (run 2026-10-28: [mainnet log](mainnet-log.md#app-access-on-platform-staging-2026-10-28-utc))
 

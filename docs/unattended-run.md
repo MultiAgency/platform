@@ -1,5 +1,12 @@
 # Unattended run: observing the treasury autopilot
 
+**Status, 2026-11-25:** this procedure was written for the retired `dao` host and its dashboard (retired 2026-11-08).
+On the headless platform host the evidence below is still written (on staging, in `/data/state/.evidence/`), but
+`/gw/interventions` and the dashboard session that `pnpm run-report` uses are absent, and app calls aren't recorded as
+interventions. Until the report reads the evidence over `/apps/v1` and the gateway records app-call interventions, a
+window on the platform can't be judged by this report. The only evidence on staging as of 2026-11-25 is one tick on
+2026-11-04; no unattended window has run (README, Not done yet).
+
 How a 24-hour observation of the scheduled autopilot is started, recorded and reported. It answers one
 question: does the scheduler run on its own without missed ticks, duplicate execution, actions outside its
 schedule, or manual recovery? It says nothing about custody guarantees or economic benefit
