@@ -3,7 +3,7 @@ import type { z } from "zod";
 import type { Area } from "./areas.js";
 import type { hireTerms } from "./inputs.js";
 import { retryAfterSeconds } from "./retry-after.js";
-import { APP_GATEWAY_CODES, appAgent, appCapabilities, appConsentList, appConsentNonce, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoHireFiled, appDaoHireState, appDaoOrderFiled, appDaoOrderState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appReservations, appRevoked, appSetupStored, type AppDaoAction, type AppGatewayCode, type AppOwnerAction, type AppProcedure } from "./app-access.js";
+import { APP_GATEWAY_CODES, appAgent, appCapabilities, appConsentList, appInterventions, appConsentNonce, appConsentStored, appDaoConsentFiled, appDaoConsentState, appDaoHireFiled, appDaoHireState, appDaoOrderFiled, appDaoOrderState, appDaoSetupFiled, appDaoSetupState, appDaoVoteFiled, appDaoVoteState, appReservations, appRevoked, appSetupStored, type AppDaoAction, type AppGatewayCode, type AppOwnerAction, type AppProcedure } from "./app-access.js";
 import type { appConsentSubmission } from "./app-consent.js";
 import { ownerClient, type OwnerCallOptions, type OwnerFailure, type OwnerOutput, type OwnerProcedure, type OwnerResult } from "./owner-client.js";
 import type { ownerStreams } from "./owner-outputs.js";
@@ -195,6 +195,12 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
         call<P extends Exclude<AppProcedure, AppStream>>(path: P, ...[input, options]: undefined extends AppInputs[P] ? [input?: AppInputs[P], options?: OwnerCallOptions] : [input: AppInputs[P], options?: OwnerCallOptions]): Promise<OwnerResult<OwnerOutput<P>>> {
           return (owner.call as (path: P, input?: unknown, options?: OwnerCallOptions) => Promise<OwnerResult<OwnerOutput<P>>>)(path, input, options);
         },
+        /**
+         * The gateway's record of calls that could act on this agent since `since` (an ISO time), with a `read` consent:
+         * how an unattended run is shown to have had no interventions. Hosts without `interventions-v1` answer `refused` 404.
+         */
+        interventions: (since: string, options?: AppRouteOptions) =>
+          route(`/o/${encodeURIComponent(organization)}/a/${encodeURIComponent(agent)}/interventions?since=${encodeURIComponent(since)}`, appInterventions, {}, options),
         /** A stream's events (`sweep`, and with `treasury-execute` `rebalance` and `executePlan`), as `ownerClient.stream` reads them. */
         stream<P extends AppStream>(path: P, input: AppInputs[P], options?: OwnerCallOptions): AsyncGenerator<OwnerOutput<P>, OwnerFailure | undefined> {
           return owner.stream(path, input as never, options);

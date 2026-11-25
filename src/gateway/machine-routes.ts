@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { BadRequest, readJson, sendJson as json } from "../http.js";
 import { appendSynced } from "../synced.js";
@@ -8,6 +7,7 @@ import type { AgentEntry } from "./config.js";
 import { MachineCredentials, MachineIssue, machineMayCall } from "./machine-auth.js";
 import { resolveMachineAccess, resolveMachineManagement } from "./machine-authority.js";
 import { isIntervention } from "./allowlist.js";
+import { recordIntervention } from "./interventions.js";
 import { forwardRpc } from "./rpc-proxy.js";
 
 const credentials = new MachineCredentials(".machine-auth");
@@ -39,9 +39,9 @@ export async function machineRoutes(req: IncomingMessage, res: ServerResponse, p
       json(res, 403, { error: "Access ended before forwarding" }); return true;
     }
     const entry = { at: new Date().toISOString(), account: credential.account, owner: agent.owner,
-      host, agent: agent.name, agentId: authority.agentId, path: call[2], machineCredentialId: credential.id };
+      host, agent: agent.name, agentId: authority.agentId, path: call[2]!, machineCredentialId: credential.id };
     appendSynced(join(".machine-auth", "access.jsonl"), entry);
-    if (isIntervention(call[2]!)) { mkdirSync(".evidence", { recursive: true }); appendSynced(join(".evidence", "interventions.jsonl"), entry); }
+    if (isIntervention(call[2]!)) recordIntervention(entry);
     forwardRpc(req, res, agent, call[2]!, undefined, body, `machine:${credential.id}`);
     return true;
   }

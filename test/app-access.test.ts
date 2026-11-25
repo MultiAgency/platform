@@ -213,16 +213,16 @@ test("authenticated app capability discovery names only available host route gro
   assert.equal((await call(port, path, "GET", staging, undefined, { cookie: "session=1" })).status, 403);
   assert.equal((await call(port, path, "POST", staging, {})).status, 405);
   const initial = await call(port, path, "GET", staging);
-  assert.deepEqual([initial.status, initial.body], [200, { capabilities: ["deposit-requests-v1"] }]);
+  assert.deepEqual([initial.status, initial.body], [200, { capabilities: ["deposit-requests-v1", "interventions-v1"] }]);
   const client = appClient({ base: `http://127.0.0.1:${port}`, credential: staging, fetch: httpFetch });
-  assert.deepEqual(await client.capabilities(), { ok: true, value: { capabilities: ["deposit-requests-v1"] } });
+  assert.deepEqual(await client.capabilities(), { ok: true, value: { capabilities: ["deposit-requests-v1", "interventions-v1"] } });
   state.setupAreas.push("treasury");
-  assert.deepEqual((await call(port, path, "GET", staging)).body, { capabilities: ["deposit-requests-v1", "treasury-limit-orders-v1"] });
-  assert.deepEqual(await client.capabilities(), { ok: true, value: { capabilities: ["deposit-requests-v1", "treasury-limit-orders-v1"] } });
+  assert.deepEqual((await call(port, path, "GET", staging)).body, { capabilities: ["deposit-requests-v1", "interventions-v1", "treasury-limit-orders-v1"] });
+  assert.deepEqual(await client.capabilities(), { ok: true, value: { capabilities: ["deposit-requests-v1", "interventions-v1", "treasury-limit-orders-v1"] } });
   state.setupAreas.length = 0;
   Object.assign(agent, { area: "treasury", deployment: "staging", organization: "org_1" });
-  assert.deepEqual((await call(port, path, "GET", staging)).body, { capabilities: ["deposit-requests-v1", "treasury-limit-orders-v1"] });
-  assert.deepEqual((await call(port, path, "GET", production)).body, { capabilities: ["deposit-requests-v1"] }, "another deployment sees no agent-derived capability");
+  assert.deepEqual((await call(port, path, "GET", staging)).body, { capabilities: ["deposit-requests-v1", "interventions-v1", "treasury-limit-orders-v1"] });
+  assert.deepEqual((await call(port, path, "GET", production)).body, { capabilities: ["deposit-requests-v1", "interventions-v1"] }, "another deployment sees no agent-derived capability");
   const malformed = appClient({ base: "https://platform.test", credential: staging, fetch: async () => Response.json({ capabilities: [1] }) });
   assert.deepEqual(await malformed.capabilities(), { ok: false, kind: "unavailable", httpStatus: 200 });
 });
@@ -1219,4 +1219,65 @@ test("after the owner's wallet stop for every agent, a setup is stored only with
   assert.equal(reserved, 0, "a stop for every agent refuses before anything is reserved");
   const fresh = await setup(await issue());
   assert.equal(fresh.status, 201, JSON.stringify(fresh.body));
+});
+
+const interventionLines = () => existsSync(join(".evidence", "interventions.jsonl"))
+  ? readFileSync(join(".evidence", "interventions.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
+
+test("an app's calls that could act on the agent are recorded as interventions before they are forwarded; reads and refusals aren't", async t => {
+  const { port, forwarded, staging, rpc, consent } = await routeHarness(t);
+  const ask = { json: { requestId: "r-1", asset: "nep141:usdc", delivery: "intents", recipient: "payee.near", amount: "1", expectedPolicy: { revision: 1, digest: `sha256:${"0".repeat(64)}` } } };
+  assert.equal((await consent({ scopes: ["read", "payout"] })).status, 201);
+  assert.equal((await call(port, rpc("org_1", "overview"), "POST", staging, {})).status, 200);
+  assert.equal((await call(port, rpc("org_1", "payouts/status"), "POST", staging, { json: { requestId: "r-1" } })).status, 200);
+  assert.deepEqual(interventionLines(), [], "reads are not interventions");
+  assert.equal((await call(port, rpc("org_1", "sweep"), "POST", staging, {})).status, 403);
+  assert.deepEqual(interventionLines(), [], "a refused call is not recorded");
+  assert.equal((await call(port, rpc("org_1", "payouts/request"), "POST", staging, ask)).status, 200);
+  const [entry, ...rest] = interventionLines();
+  assert.equal(rest.length, 0);
+  assert.deepEqual({ account: entry.account, agent: entry.agent, path: entry.path, host: entry.host, agentId: entry.agentId },
+    { account: "app:staging:org_1", agent: "payout", path: "payouts/request", host: HOST, agentId: "provider-id" });
+  assert.ok(entry.at <= new Date().toISOString() && entry.consent && entry.appCredentialId);
+
+  // A record that can't be written stops the call: nothing reaches the agent.
+  rmSync(".evidence", { recursive: true, force: true });
+  writeFileSync(".evidence", "not a directory");
+  const before = forwarded.length;
+  const refused = await call(port, rpc("org_1", "payouts/request"), "POST", staging, ask);
+  assert.equal(refused.status, 503);
+  assert.equal(forwarded.length, before, "nothing forwarded without its record");
+});
+
+test("an app reads the agent's intervention record with a read consent: only that agent's calls, without credentials, and the read isn't one", async t => {
+  const { port, staging, production, consent } = await routeHarness(t);
+  const path = (org: string, since = "2026-01-01T00:00:00Z", agent = "payout") => `/apps/v1/o/${org}/a/${agent}/interventions?since=${encodeURIComponent(since)}`;
+  mkdirSync(".evidence", { recursive: true });
+  writeFileSync(join(".evidence", "interventions.jsonl"), [
+    JSON.stringify({ at: "2025-12-31T00:00:00Z", account: "owner.near", agent: "payout", path: "pay" }),
+    JSON.stringify({ at: "2026-02-01T00:00:00Z", account: "operator.near", agent: "payout", path: "recover", machineCredentialId: "secret-id" }),
+    JSON.stringify({ at: "2026-02-02T00:00:00Z", account: "owner.near", agent: "treasury", path: "sweep" }),
+    "{torn",
+  ].join("\n") + "\n");
+
+  assert.equal((await call(port, path("org_1"))).status, 401, "needs the credential");
+  assert.deepEqual(denial(await call(port, path("org_1"), "GET", staging)), [403, "no_consent", "agent"], "needs a live consent");
+  assert.equal((await consent({ scopes: ["payout"] })).status, 201);
+  assert.deepEqual(denial(await call(port, path("org_1"), "GET", staging)), [403, "scope", "procedure"], "a payout consent doesn't read it");
+  assert.equal((await consent({ organization: "org_2", scopes: ["read"] })).status, 201);
+  assert.equal((await call(port, path("org_2"), "POST", staging, {})).status, 405);
+  assert.equal((await call(port, path("org_2", "not a time"), "GET", staging)).status, 400);
+  assert.equal((await call(port, path("org_2"), "GET", staging, undefined, { origin: "https://app.test" })).status, 403, "never from a browser");
+  assert.equal((await call(port, path("org_2"), "GET", production)).status, 403, "another deployment");
+  assert.equal((await call(port, path("org_3"), "GET", staging)).status, 403, "another Organization");
+
+  const answer = await call(port, path("org_2"), "GET", staging);
+  assert.equal(answer.status, 200);
+  assert.deepEqual(answer.body, { calls: [{ at: "2026-02-01T00:00:00Z", account: "operator.near", agent: "payout", path: "recover" }], corrupt: [4] },
+    "this agent's calls since the time, nothing but time, caller, agent and procedure, and the unreadable line counted");
+  const client = appClient({ base: `http://127.0.0.1:${port}`, credential: staging, fetch: httpFetch });
+  assert.deepEqual(await client.agent("org_2", "payout").interventions("2026-01-01T00:00:00Z"), { ok: true, value: answer.body });
+  assert.equal(readFileSync(join(".evidence", "interventions.jsonl"), "utf8").trim().split("\n").length, 4, "reading the record adds nothing to it");
+  const log = accessLogText().trim().split("\n").map(line => JSON.parse(line)).filter(line => line.event === "call");
+  assert.ok(log.length >= 1 && log.every(line => line.path === "interventions" && line.organization === "org_2"), "each read is in the access log");
 });

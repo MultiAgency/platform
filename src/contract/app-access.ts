@@ -123,6 +123,15 @@ export const daoScopesCover = (scopes: readonly AppScope[], path: string) =>
 /** `GET /apps/v1/agents/<agent>`: what the owner's consent must name. */
 export const appAgent = z.looseObject({ agent: z.string(), owner: z.string(), agentId: z.string().nullable(), created: z.boolean(),
   host: z.string(), deployment: z.string(), signer: AppSigner.optional() });
+/**
+ * `GET /apps/v1/o/<organization>/a/<agent>/interventions?since=`: the gateway's record of calls that could act on this
+ * agent (from its owner, a machine credential or an app), with a `read` consent; `corrupt` numbers lines that don't parse,
+ * which may have been calls. Calls made on the host directly aren't in it. Hosts listing `interventions-v1` serve it.
+ */
+export const appInterventions = z.object({
+  calls: z.array(z.object({ at: z.string(), account: z.string(), agent: z.string(), path: z.string() })),
+  corrupt: z.array(z.number().int()),
+});
 /** `GET /apps/v1/capabilities`: app routes this host can serve, before consent or provider checks. */
 export const appCapabilities = z.looseObject({ capabilities: z.array(z.string()) });
 /** A stored consent as the platform shows it: never its message, nonce or signature. Times are epoch milliseconds. */

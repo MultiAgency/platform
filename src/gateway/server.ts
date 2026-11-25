@@ -16,17 +16,16 @@ import { forwardRpc } from "./rpc-proxy.js";
 import { forwardInvoice } from "./invoice-proxy.js";
 import { spawn } from "node:child_process";
 import { Supervisor, workerArguments } from "./supervisor.js";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, request } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isIntervention, mayCall } from "./allowlist.js";
+import { readInterventions, recordIntervention } from "./interventions.js";
 import { BadRequest, crossSite, readJson, SECURITY_HEADERS, sendFailure, sendJson as json, serveStatic } from "../http.js";
 import { chainKeyLookup, challengeAnswer, clientAddress, hourlyLimit, parseSignIn, sessions, verifySignIn } from "../signin.js";
 import { type AgentEntry, childEnv, hostOf, loadConfig } from "./config.js";
 import { recentSignProposals } from "./proposals.js";
 import { ownerOf, resolveAccess, resolveAgentAccess } from "./roles.js";
-import { appendSynced } from "../synced.js";
 import { HostedAgents, authorizeSetup, boundPorts, hostedEnvironment, selfServiceRequest, type HostedAgent, type OrganizationScope, type SetupRequest } from "./hosted-agents.js";
 import { AgentNotListening, agentOrigin, childReported, childStopped } from "./agent-origin.js";
 
@@ -59,22 +58,6 @@ const SECRET = process.env.SESSION_SECRET ?? "";
 if (SECRET.length < 32) throw new Error("Set SESSION_SECRET to a random value of at least 32 characters before starting the gateway");
 const payeeHost = Object.entries(config.hosts ?? {}).find(([, site]) => site.demo === "invoices")?.[0];
 const session = sessions({ cookie: "dao_session", secret: SECRET, secure: true });
-
-const INTERVENTIONS = join(".evidence", "interventions.jsonl");
-/**
- * Recorded interventions since `since`, oldest first, and the line numbers that don't parse. An
- * unreadable line may have been a call, so it is counted, not skipped: the report can't claim none.
- */
-function interventions(since: string) {
-  const calls: { at: string; account: string; agent: string; path: string }[] = [];
-  const corrupt: number[] = [];
-  const text = existsSync(INTERVENTIONS) ? readFileSync(INTERVENTIONS, "utf8") : "";
-  for (const [index, line] of text.split("\n").entries()) {
-    if (!line.trim()) continue;
-    try { calls.push(JSON.parse(line)); } catch { corrupt.push(index + 1); }
-  }
-  return { calls: calls.filter((i) => i.at >= since), corrupt };
-}
 
 /** The signed-in account and what it may do with each agent it may see, or null. */
 async function viewer(req: IncomingMessage, auth = session, selected = agents) {
@@ -246,7 +229,7 @@ const server = createServer(async (req, res) => {
       const me = await viewer(req, auth, selected);
       const operated = new Set(Object.entries(me?.access ?? {}).filter(([, a]) => a.canExecute || a.canManage).map(([agent]) => agent));
       if (!operated.size) return json(res, me ? 403 : 401, { error: "Execution or management permission required", access: me ? "procedure" : "session" });
-      const { calls, corrupt } = interventions(url.searchParams.get("since") ?? "");
+      const { calls, corrupt } = readInterventions(url.searchParams.get("since") ?? "");
       // An unreadable line can't be attributed to an agent, so every eligible viewer is told it exists.
       return json(res, 200, { calls: calls.filter((c) => operated.has(c.agent)), corrupt });
     }
@@ -266,8 +249,7 @@ const server = createServer(async (req, res) => {
       // Preserve which calls count as interventions: recorded before they run, or not run.
       if (isIntervention(call[2]!)) {
         try {
-          mkdirSync(".evidence", { recursive: true });
-          appendSynced(INTERVENTIONS, { at: new Date().toISOString(), account, agent: agent.name, path: call[2] });
+          recordIntervention({ at: new Date().toISOString(), account, agent: agent.name, path: call[2]! });
         } catch {
           return json(res, 503, { error: "The action could not be recorded, so it was not run" });
         }
