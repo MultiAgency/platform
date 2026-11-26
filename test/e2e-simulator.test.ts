@@ -171,3 +171,11 @@ test("the stack's controls sign an app's NEP-413 text as a payee too, never the 
   await assert.rejects(controls.signPayee({ account: OWNER, message, recipient, nonce }), /not one of the stack's payees/);
   await assert.rejects(controls.signPayee({ account: PAYEE, message: "Sign in to localhost:1", recipient, nonce }), /sign-in text/);
 });
+
+test("an owner-created agent that only withdraws, with approval off, takes a payout grant, as the provider did on mainnet (2026-11-26)", async t => {
+  const sim = await simulator(t);
+  const withdrawOnly = { ...payoutPolicy(true), actions: ["withdraw"], owner_approval: false,
+    destinations: { mode: "only", list: [{ action: "withdraw", chain: "near", address: PAYEE, memo: null }] } };
+  const { agent } = await payoutAgent(sim, withdrawOnly);
+  assert.ok(agent, "the payout grant was accepted");
+});
