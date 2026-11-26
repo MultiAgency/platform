@@ -20,6 +20,7 @@ import { strategyGrantProblems } from "../src/planning/strategy-grant.js";
 import { ASSETS, treasuryPolicy } from "../src/policy.js";
 import { approveProposal, createProposal, executeProposal, getProposal, listProposals, rejectProposal, withdrawProposal } from "../src/proposals/service.js";
 import { claim, close, readFinal } from "../src/proposals/store.js";
+import { costLimit } from "../src/planning/causes.js";
 import { PublicError } from "../src/public-error.js";
 import { moveOnce } from "../src/synced.js";
 import { resumeSendingForTests, stopSending } from "../src/lock.js";
@@ -36,7 +37,7 @@ const usdc = ASSETS.USDC, wnear = ASSETS.wNEAR;
 /** The listed tokens; by default $1 with 0 decimals. A quote follows their prices, times `rate` percent: a market move. */
 let tokens: Array<{ symbol: string; asset_id: string; decimals: number; price: number }>;
 let book: Record<string, { public: bigint; confidential: bigint }>;
-let revision: number, rate: number, warnings: string[], sends: string[], status: () => Promise<{ correlation_id: string; status: string }> | never;
+let revision: number, rate: number, minPercent: number, warnings: string[], sends: string[], status: () => Promise<{ correlation_id: string; status: string }> | never;
 let label: string | undefined;
 
 freshDirectory("proposals");
@@ -44,7 +45,7 @@ beforeEach(() => {
   process.env.AGENT_GRANT_TOKEN = "ngt_test";
   book = Object.fromEntries(Object.values(ASSETS).map(asset => [asset, { public: 0n, confidential: 100n }]));
   tokens = wholeTokens();
-  revision = 1; rate = 100; warnings = []; sends = []; label = undefined;
+  revision = 1; rate = 100; minPercent = 100; warnings = []; sends = []; label = undefined;
   offline();
   const authority = authorityFixture("treasury");
   mock.method(api, "getAgent", authority.getAgent);
@@ -60,7 +61,7 @@ beforeEach(() => {
   mock.method(api, "forGrant", () => ({
     swap: async (_id: string, request: { dry?: boolean; origin_asset: string; destination_asset: string; amount: string }) => {
       const out = String(BigInt(quoteAt(tokens, request).amount_out) * BigInt(rate) / 100n);
-      if (request.dry) return { quote: { amount_out: out, min_amount_out: out }, warnings: warnings.map(code => ({ code, detail: "d" })) };
+      if (request.dry) return { quote: { amount_out: out, min_amount_out: String(BigInt(out) * BigInt(minPercent) / 100n) }, warnings: warnings.map(code => ({ code, detail: "d" })) };
       sends.push("swap");
       book[request.origin_asset]!.confidential -= BigInt(request.amount);
       book[request.destination_asset]!.confidential += BigInt(out);
@@ -82,6 +83,8 @@ const inAnHour = () => new Date(Date.now() + 3_600_000).toISOString();
 const propose = (requestId = "r1", over: object = {}) =>
   createProposal(app, { requestId, legs: [{ from: usdc, to: wnear, amount: "15" }], expiresAt: inAnHour(), ...over });
 const approve = async (proposal: ProposalView) => approveProposal(app, { id: proposal.id, signed: await sign(proposalText(proposal, "approve")) });
+/** The `causes` a `not_executable` refusal carries, in order. */
+const causesOf = (error: unknown) => (error as ORPCError<string, { causes?: unknown[] }>).data.causes;
 const refusedWith = (code: string) => (error: unknown) => error instanceof ORPCError && (error.data as { code?: string })?.code === code;
 
 test("a proposal stores the quoted terms and moves nothing; the same request answers it, other terms are refused", async () => {
@@ -604,4 +607,49 @@ test("two proposals created at once can't both pass the open-proposal limit", as
   assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
   assert.ok(results.some(r => r.status === "rejected" && refusedWith("too_many_proposals")(r.reason)));
   assert.equal(listProposals(app).proposals.filter(p => ["proposed", "approved"].includes(p.state)).length, MAX_OPEN_PROPOSALS);
+});
+
+test("a refusal before the claim names its cause and what to do next", async () => {
+  saveStrategy({ ...loadStrategy(), maxCostBps: 1_000 });
+  const proposal = await propose();
+  await approve(proposal);
+  // Below the signed floor: a price move, which may clear without the owner.
+  rate = 90;
+  await assert.rejects(executeProposal(app, { id: proposal.id }), (error: unknown) => {
+    assert.deepEqual(causesOf(error), [{ cause: "floor", retry: "later" }]); return true; });
+  // A provider warning: also `later`.
+  warnings = ["high_fee"]; rate = 100;
+  await assert.rejects(executeProposal(app, { id: proposal.id }), (error: unknown) => {
+    assert.deepEqual(causesOf(error), [{ cause: "provider_warning", retry: "later" }]); return true; });
+  warnings = [];
+  // No live grant: the owner has to act.
+  mock.method(api, "listGrants", async () => []);
+  await assert.rejects(executeProposal(app, { id: proposal.id }), (error: unknown) => {
+    assert.deepEqual(causesOf(error), [{ cause: "no_grant", retry: "owner" }]); return true; });
+  assert.equal(getProposal(app, { id: proposal.id }).state, "approved");
+  assert.deepEqual(sends, []);
+});
+
+test("a cost limit no quote can meet is `never`; one a better quote may meet is `later`", async () => {
+  // The quote's margin (worst case minus expected cost) is nil: a better quote may come.
+  assert.deepEqual(costLimit(100, 100, 50, "t").cause, { cause: "cost_limit", retry: "later", worstCostBps: 100, maxCostBps: 50 });
+  assert.equal(costLimit(10, 97, 50, "t").cause.retry, "never");
+  assert.equal(costLimit(Number.NaN, Number.NaN, 50, "t").cause.retry, "later");
+  saveStrategy({ ...loadStrategy(), maxCostBps: 50 });
+  const proposal = await propose();
+  await approve(proposal);
+  // The quote's minimum received sits 3% under it: the margin alone is over the limit, so no quote will meet it.
+  minPercent = 97;
+  await assert.rejects(executeProposal(app, { id: proposal.id }), (error: unknown) => {
+    const [only, ...rest] = causesOf(error) as Array<{ cause: string; retry: string; maxCostBps: number }>;
+    assert.equal(rest.length, 0); assert.deepEqual([only?.cause, only?.retry, only?.maxCostBps], ["cost_limit", "never", 50]); return true; });
+  assert.deepEqual(sends, []);
+});
+
+test("a cash floor refuses with the cause the owner can act on", async () => {
+  floorAt90();
+  const proposal = await propose("causes-floor");
+  await approve(proposal);
+  await assert.rejects(executeProposal(app, { id: proposal.id }), (error: unknown) => {
+    assert.deepEqual(causesOf(error), [{ cause: "cash_floor", retry: "owner" }]); return true; });
 });

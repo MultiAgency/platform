@@ -189,7 +189,7 @@ test("a failed execution-marker directory sync sends nothing and leaves the plan
   };
   await assert.rejects(execute(), /directory sync failed/);
   assert.deepEqual(sends, []);
-  assert.deepEqual(await execute(), [{ type: "rejected", problems: ["the plan was already executed"] }]);
+  assert.deepEqual(await execute(), [{ type: "rejected", problems: ["the plan was already executed"], causes: [{ cause: "claimed", retry: "never" }] }]);
   assert.deepEqual(sends, []);
 });
 

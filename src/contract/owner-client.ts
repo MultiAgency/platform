@@ -1,10 +1,11 @@
 import { createORPCClient, ORPCError, RPCLink } from "./orpc-client.js";
 import { retryAfterSeconds } from "./retry-after.js";
-import type { z } from "zod";
+import { z } from "zod";
 import { ownerOutputs, ownerStreams } from "./owner-outputs.js";
 import type { OwnerInputs } from "./owner-inputs.js";
 import { gatewayDenialCode, gatewayDenialScope, type GatewayDenialScope } from "./gateway.js";
 import { READS } from "./permissions.js";
+import { refusalCause, type RefusalCause } from "./treasury-proposals.js";
 
 export type OwnerProcedure = keyof typeof ownerOutputs & keyof OwnerInputs;
 type Stream = (typeof ownerStreams)[number];
@@ -37,7 +38,7 @@ export type OwnerFailure =
   | { ok: false; kind: "session"; status: 401; error: string; source?: DenialSource; scope?: GatewayDenialScope; code?: string }
   | { ok: false; kind: "forbidden"; status: 403; error: string; source?: DenialSource; scope?: GatewayDenialScope; code?: string }
   | { ok: false; kind: "unresolved" | "busy"; error: string }
-  | { ok: false; kind: "refused"; error: string; code?: string; status?: number; rpcCode?: string }
+  | { ok: false; kind: "refused"; error: string; code?: string; status?: number; rpcCode?: string; causes?: RefusalCause[] }
   | { ok: false; kind: "provider"; error: string; code?: string; details: RefusalDetails }
   | { ok: false; kind: "rate_limited"; status: 429; error: string; retryAfterSeconds?: number }
   | { ok: false; kind: "unavailable"; httpStatus?: number }
@@ -115,11 +116,14 @@ export function ownerClient({ base = "", fetch: send = globalThis.fetch }: { bas
     if (!isRpcError(error)) return lost;
     if (error.code === "UNAUTHORIZED") return { ok: false, kind: "session", status: 401, error: error.message, source: "agent" };
     if (error.code === "FORBIDDEN") return { ok: false, kind: "forbidden", status: 403, error: error.message, source: "agent" };
-    const data = (error.data ?? {}) as { kind?: unknown; code?: unknown; availableAt?: unknown; budgetRemainingUsd?: unknown };
+    const data = (error.data ?? {}) as { kind?: unknown; code?: unknown; causes?: unknown; availableAt?: unknown; budgetRemainingUsd?: unknown };
     const code = typeof data.code === "string" ? data.code : undefined;
     if (data.kind === "unresolved" || data.kind === "busy") return { ok: false, kind: data.kind, error: error.message };
     const refusal = { ...(status !== undefined && { status }), rpcCode: error.code };
-    if (data.kind === "refused") return { ok: false, kind: "refused", error: error.message, ...(code && { code }), ...refusal };
+    // Only causes this client can read are passed on, so an app never branches on an unchecked value.
+    const parsedCauses = z.array(refusalCause).safeParse(data.causes);
+    const causes = parsedCauses.success && parsedCauses.data.length ? { causes: parsedCauses.data } : {};
+    if (data.kind === "refused") return { ok: false, kind: "refused", error: error.message, ...(code && { code }), ...refusal, ...causes };
     if (data.kind === "provider") return { ok: false, kind: "provider", error: error.message, ...(code && { code }), details: {
       ...(typeof data.availableAt === "string" && { availableAt: data.availableAt }),
       ...(typeof data.budgetRemainingUsd === "string" && { budgetRemainingUsd: data.budgetRemainingUsd }) } };
