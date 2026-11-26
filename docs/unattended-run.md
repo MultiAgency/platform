@@ -96,7 +96,8 @@ deployment's service credential (`tap_…`) to a 0600 file, never pasted anywher
     PLATFORM_URL=https://api.dev.multiagency.ai APP_CREDENTIAL_FILE=<file> ORGANIZATION=<organization> AGENT=<agent> \
     SINCE=<window start> UNTIL=<window end> OUT=<report.md> pnpm run-report
 
-The prototype dashboard, retired as a host on 2026-11-08 and still runnable from source, takes `DASHBOARD_URL` and a
+`SINCE` and `UNTIL` are ISO 8601 with `Z` or an offset; the report refuses any other form, since it compares times
+in UTC. The prototype dashboard, retired as a host on 2026-11-08 and still runnable from source, takes `DASHBOARD_URL` and a
 signed-in `dao_session` cookie in `REPORT_COOKIE_FILE` instead.
 
 ## Success

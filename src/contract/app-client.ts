@@ -196,7 +196,8 @@ export function appClient({ base, credential, fetch: send = globalThis.fetch }: 
           return (owner.call as (path: P, input?: unknown, options?: OwnerCallOptions) => Promise<OwnerResult<OwnerOutput<P>>>)(path, input, options);
         },
         /**
-         * The gateway's record of calls that could act on this agent since `since` (an ISO time), with a `read` consent:
+         * The gateway's record of calls that could act on this agent since `since` (ISO 8601 with `Z` or an offset; anything
+         * else is refused), with a `read` consent:
          * how an unattended run is shown to have had no interventions. Hosts without `interventions-v1` answer `refused` 404.
          */
         interventions: (since: string, options?: AppRouteOptions) =>

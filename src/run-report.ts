@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { appClient } from "./contract/app-client.js";
 import type { Tick } from "./evidence.js";
+import { utcTime } from "./gateway/interventions.js";
 import { hostedRpc, required } from "./remote.js";
 import type { Row } from "./ledger.js";
 import { type Intervention, unattendedReport } from "./report.js";
@@ -21,8 +22,14 @@ import { type Intervention, unattendedReport } from "./report.js";
  * It reports operation only: days of ticks say nothing about atomic budgets, strict caps or savings.
  */
 
-const SINCE = required("SINCE");
-const UNTIL = process.env.UNTIL ?? new Date().toISOString();
+/** The report compares times as UTC ISO text, so a bound in any other form would misplace ticks, rows and calls. */
+const bound = (name: string, value: string) => {
+  const time = utcTime(value);
+  if (time === null) throw new Error(`Set ${name} as ISO 8601 with its zone, for example 2026-12-08T00:00:00Z`);
+  return time;
+};
+const SINCE = bound("SINCE", required("SINCE"));
+const UNTIL = bound("UNTIL", process.env.UNTIL ?? new Date().toISOString());
 type Records = { evidence: { ticks: Tick[]; corrupt: number[] }; ledger: Row[]; interventions: { calls: Intervention[]; corrupt: number[] } };
 
 /** Every read must answer: a report built on a missing record would claim more than was checked. */

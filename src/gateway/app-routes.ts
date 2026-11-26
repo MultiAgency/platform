@@ -12,7 +12,7 @@ import type { AgentEntry } from "./config.js";
 import { daoMarketMayAsk, daoPayoutMayAsk, daoScopesCover } from "../contract/app-access.js";
 import { ownerPrepareOutput } from "../contract/owner-outputs.js";
 import { isIntervention, mayCall } from "./allowlist.js";
-import { readInterventions, recordIntervention } from "./interventions.js";
+import { readInterventions, recordIntervention, utcTime } from "./interventions.js";
 import { accessLog, consentKeyHolds, AppConsents, AppCredentials, appMayCall, DEFAULT_REQUESTS_PER_HOUR, appMayPrepare, appMayPrepareForDao, proposalSignatureProblem, setupConsent, submittedCorrelation, UNBORN, verifyConsent, verifySetup, type ConsentRecord } from "./app-access.js";
 import { AppConfirms } from "./app-confirm.js";
 import { createORPCClient } from "@orpc/client";
@@ -778,7 +778,7 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   const [, organization, name] = call as unknown as [string, string, string];
   const path = call[3] ?? "interventions";
   const since = url.searchParams.get("since") ?? "";
-  if (gatewayRead && (since === "" || Number.isNaN(Date.parse(since)))) { json(res, 400, { code: "invalid_request", error: "Name the time to read from: ?since=<ISO time>" }); return true; }
+  if (gatewayRead && utcTime(since) === null) { json(res, 400, { code: "invalid_request", error: "Name the time to read from as ISO 8601 with its zone: ?since=2026-12-01T00:00:00Z" }); return true; }
   const agent = selected.find(a => a.name === name && reachable(a, credential.deployment, organization));
   const live = agent ? consents.live({ deployment: credential.deployment, host, organization, agent: name }).filter(c => c.owner === agent.owner) : [];
   // The scope check below would refuse this too; refusing here spares the ownership lookup's provider and chain reads.
@@ -843,18 +843,18 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     !consents.live({ deployment: credential.deployment, host, organization, agent: name }).some(c => c.id === consent.id)) {
     json(res, 403, { code: "access_ended", access: "agent", error: "Access ended before forwarding" }); return true;
   }
+  // Recorded before it runs, as on the owner's and machine routes, or not run; then the access log names the call.
+  if (!gatewayRead && isIntervention(path)) {
+    try {
+      recordIntervention({ at: new Date().toISOString(), account: `app:${credential.deployment}:${organization}`, agent: name, path,
+        owner: agent.owner, agentId: authority.agentId, host: host.toLowerCase(), consent: consent.id, appCredentialId: credential.id });
+    } catch { json(res, 503, { error: "The call could not be recorded, so it was not forwarded." }); return true; }
+  }
   appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
     event: "call", consent: consent.id, organization, owner: agent.owner, agent: name, agentId: authority.agentId, path });
   if (gatewayRead) {
     const { calls, corrupt } = readInterventions(since);
     json(res, 200, { calls: calls.filter(c => c.agent === name), corrupt }); return true;
-  }
-  // Recorded before it runs, as on the owner's and machine routes, or not run.
-  if (isIntervention(path)) {
-    try {
-      recordIntervention({ at: new Date().toISOString(), account: `app:${credential.deployment}:${organization}`, agent: name, path,
-        owner: agent.owner, agentId: authority.agentId, host: host.toLowerCase(), consent: consent.id, appCredentialId: credential.id });
-    } catch { json(res, 503, { error: "The call could not be recorded, so it was not forwarded." }); return true; }
   }
   // A readable (NEP-413) intent goes to the app: its text is one the owner's wallet can show. A NEP-366 intent is held here for the
   // owner to sign on the platform's confirm page; the app gets the link, not the bytes. Anything else isn't released.

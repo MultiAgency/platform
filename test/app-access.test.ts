@@ -1273,11 +1273,38 @@ test("an app reads the agent's intervention record with a read consent: only tha
 
   const answer = await call(port, path("org_2"), "GET", staging);
   assert.equal(answer.status, 200);
-  assert.deepEqual(answer.body, { calls: [{ at: "2026-02-01T00:00:00Z", account: "operator.near", agent: "payout", path: "recover" }], corrupt: [4] },
+  assert.deepEqual(answer.body, { calls: [{ at: "2026-02-01T00:00:00.000Z", account: "operator.near", agent: "payout", path: "recover" }], corrupt: [4] },
     "this agent's calls since the time, nothing but time, caller, agent and procedure, and the unreadable line counted");
   const client = appClient({ base: `http://127.0.0.1:${port}`, credential: staging, fetch: httpFetch });
   assert.deepEqual(await client.agent("org_2", "payout").interventions("2026-01-01T00:00:00Z"), { ok: true, value: answer.body });
   assert.equal(readFileSync(join(".evidence", "interventions.jsonl"), "utf8").trim().split("\n").length, 4, "reading the record adds nothing to it");
   const log = accessLogText().trim().split("\n").map(line => JSON.parse(line)).filter(line => line.event === "call");
   assert.ok(log.length >= 1 && log.every(line => line.path === "interventions" && line.organization === "org_2"), "each read is in the access log");
+});
+
+test("the intervention read takes only an ISO time with its zone, compares in UTC, and counts a line it can't attribute as unreadable", async t => {
+  const { port, staging, consent } = await routeHarness(t);
+  mkdirSync(".evidence", { recursive: true });
+  writeFileSync(join(".evidence", "interventions.jsonl"), [
+    JSON.stringify({ at: "2026-01-31T20:00:00.000Z", account: "owner.near", agent: "payout", path: "pay" }),
+    JSON.stringify({ at: 1, account: "owner.near", agent: "payout", path: "pay" }),
+    "null",
+  ].join("\n") + "\n");
+  assert.equal((await consent({ scopes: ["read"] })).status, 201);
+  const read = (since: string) => call(port, `/apps/v1/o/org_1/a/payout/interventions?since=${encodeURIComponent(since)}`, "GET", staging);
+  // 2026-02-01T00:00+05:00 is 2026-01-31T19:00Z: the call at 20:00Z is after it, though its text sorts before.
+  const offset = await read("2026-02-01T00:00:00+05:00");
+  assert.equal(offset.status, 200);
+  assert.deepEqual(offset.body, { calls: [{ at: "2026-01-31T20:00:00.000Z", account: "owner.near", agent: "payout", path: "pay" }], corrupt: [2, 3] });
+  for (const since of ["Jan 31, 2026", "2026-01-31", "2026-01-31T19:00:00"])
+    assert.equal((await read(since)).status, 400, `${since}: a time without its zone is refused, never read in some local time`);
+});
+
+test("an app call whose intervention can't be recorded leaves no call in the access log", async t => {
+  const { port, staging, rpc, consent } = await routeHarness(t);
+  assert.equal((await consent({ scopes: ["payout"] })).status, 201);
+  writeFileSync(".evidence", "not a directory");
+  const ask = { json: { requestId: "r-1", asset: "nep141:usdc", delivery: "intents", recipient: "payee.near", amount: "1", expectedPolicy: { revision: 1, digest: `sha256:${"0".repeat(64)}` } } };
+  assert.equal((await call(port, rpc("org_1", "payouts/request"), "POST", staging, ask)).status, 503);
+  assert.deepEqual(accessLogText().trim().split("\n").map(line => JSON.parse(line).event), ["consent"]);
 });

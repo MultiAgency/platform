@@ -18,7 +18,7 @@ A patch: additions only. An app server on `appClient` moves from 0.6.0 without c
 
 - **`appClient(...).agent(organization, agent).interventions(since)`** reads the gateway's record of calls that could
   act on the agent since `since` (`{ calls, corrupt }`, each call only its time, caller, agent and procedure), with a
-  `read` consent. Hosts listing the new `interventions-v1` capability serve it; older ones answer `refused` 404. It is
+  `read` consent. `since` is ISO 8601 with `Z` or an offset; anything else is refused. Hosts listing the new `interventions-v1` capability serve it; older ones answer `refused` 404. It is
   how an unattended Treasury run is shown to have had no interventions ([unattended run](unattended-run.md)).
 
 Platform only:
