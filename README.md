@@ -205,8 +205,9 @@ Each line is a gap; the linked page says how the rest is known. The
 - A wallet owner's own stop (no app; `/confirm/wallet/stop`) ends app consents and turns autopilot off for one agent or
   all of the wallet's, offline- and browser-tested with a stand-in wallet, not deployed; signing with a real wallet is untested. It
   doesn't revoke the grant. From 0.5.5 it may also freeze the agents, the owner's wallet signing the provider's freeze
-  intent on the page within its 600 s window; no freeze, from this page or any other, is recorded on mainnet, and
-  unfreezing still needs an app or the owner session ([app access](docs/app-access.md)).
+  intent on the page within its 600 s window; this page's freeze isn't recorded on mainnet (an app's freeze and unfreeze
+  through the confirm page are, 2026-11-26), and unfreezing still needs an app or the owner session
+  ([app access](docs/app-access.md)).
 - Agent connections exist only for a contractor's own reports (offline- and stack-tested, not deployed); a token is a
   bearer for at most 24 hours; owner connections aren't built. See
   [agent access](docs/agent-access.md#agent-connections-contractor-reports).

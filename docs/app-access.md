@@ -329,8 +329,9 @@ wallet owns.
   this change reads them, and refuses a stop text with `"freeze":true` as not canonical.
   - **What it stops:** a frozen policy isn't in force, so `authorize` refuses every send (`notInForce`, offline-tested),
     and per OutLayer source the keystore re-checks the freeze on every signature (shared-tee-helpers@f75a74e, deployed
-    version not established, [enforcement](enforcement.md#spending-limits-under-concurrency)). No freeze is recorded in the
-    [mainnet log](mainnet-log.md). Unlike the stop alone, an app the owner consents to later can't send under the grant
+    version not established, [enforcement](enforcement.md#spending-limits-under-concurrency)). This page's freeze isn't
+    recorded in the [mainnet log](mainnet-log.md); an app's freeze and unfreeze through the confirm page are
+    ([2026-11-26](mainnet-log.md#the-dashboards-wallet-owned-path-on-platform-staging-2026-11-26-utc)). Unlike the stop alone, an app the owner consents to later can't send under the grant
     until the owner unfreezes.
   - **Window:** the provider's freeze intent is signable for 600 s (provider docs, [enforcement](enforcement.md#dao-owners-through-apps-offline--and-stack-tested)
     Limits); the page shows its expiry. A freeze signed after it is refused by the agent; the owner sends the same
@@ -360,8 +361,8 @@ wallet owns.
   (`test/wallet-stop.test.ts`: only the owner's full-access key gets one prepared, only `agent_freeze` is asked of each
   agent's own `owner/prepare`, a reply that isn't the owner's `freeze_wallet` is withheld, a wrong key, an unfreeze or
   another agent's bytes are refused before `owner/submit`, and the owner's signature reaches `owner/submit` and
-  `owner/status` unchanged). Neither this page's freeze nor any freeze is recorded in the [mainnet log](mainnet-log.md).
-  Signing with a real wallet is untested. Not deployed.
+  `owner/status` unchanged). This page's freeze isn't recorded in the [mainnet log](mainnet-log.md); an app's freeze and
+  unfreeze through the confirm page are (2026-11-26). Signing this page with a real wallet is untested. Not deployed.
 
 **A payee's own terms, with no app** (`src/gateway/payee-policy.ts`, platform#51): a payee reads the part of the
 agent's policy that concerns them straight from the platform host, so an app (Covenant's contractor Verify page, say)
@@ -547,7 +548,10 @@ edit reached the app only as a confirm link and was signed by the simulated wall
 browser, and an owner's vote on a held payout was relayed by the app. Mainnet-observed on platform staging through the
 platform's own stand-in app: the `read`, `owner` and `payout` scopes on a test agent
 ([2026-10-28](mainnet-log.md#app-access-on-platform-staging-2026-10-28-utc)) and payout withdrawals
-([2026-10-30](mainnet-log.md#payout-withdrawals-on-platform-staging-2026-10-30-utc)). `treasury` and
+([2026-10-30](mainnet-log.md#payout-withdrawals-on-platform-staging-2026-10-30-utc)). The MultiAgency dashboard, the
+first product app, ran the wallet-owned path on platform staging with a real wallet: setup, creation, a policy edit,
+freeze and unfreeze on the confirm page, a payout grant signed in the app, consent, reads and disconnect, with no
+funds moved ([2026-11-26](mainnet-log.md#the-dashboards-wallet-owned-path-on-platform-staging-2026-11-26-utc)). `treasury` and
 `treasury-execute` are mainnet-observed on platform staging: a DAO-owned Treasury agent
 ([2026-11-04](mainnet-log.md#a-dao-owned-treasury-agent-through-an-app-on-platform-staging-2026-11-04-utc),
 [2026-11-05](mainnet-log.md#a-dao-funds-its-agent-and-approves-a-swap-through-an-app-on-platform-staging-2026-11-05-utc))

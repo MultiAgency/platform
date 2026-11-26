@@ -396,3 +396,57 @@ permission to pay a hire. No x402 payment or hire was submitted, no reservation 
 accounting remains unresolved. This is evidence for this isolated route and deployment, not general Market
 execution readiness. Original operation identities, transaction hashes, exact amounts, policy/grant details,
 source-cost accounting and raw final receipt/chain responses remain in the private release record.
+
+## The dashboard's wallet-owned path on platform staging, 2026-11-26 (UTC)
+
+The first run of a product app, not the platform's stand-in, through app access on mainnet: the MultiAgency dashboard
+(`MultiAgency/dashboard` staging `3c9ac05`, with D1 to D4 merged as #105, #106, #111 and #112) run locally with
+deployment `multiagency-dashboard`'s staging credential, against platform staging at api.dev.multiagency.ai, which
+served the 0.6.0 build (the confirm page's assets matched it on 2026-11-26). The owner was a real wallet; no funds
+moved. Reported by the dashboard session from the user's run; agent, Organization, account and provider identities and
+the policy's caps and budget are in the private release record.
+
+| Check | Result |
+|---|---|
+| Setup with a platform-issued nonce | The setup text, signed with no callback URL, was accepted and the Organization's hosted Payables agent reserved |
+| Creation on the confirm page | `agent_create` came back as a confirm link (NEP-366). The page showed the deployment, Organization, agent, the setup's owner key and the payout template policy, and refused to sign while another account was connected. The owner signed the link text and then the action there; the agent was created |
+| What the wallet showed for the link text | The whole text verbatim, the requesting site api.dev.multiagency.ai and the signing account. Which wallet is not recorded |
+| Consent and reads | A consent (`owner`, `read`, 90 days) was stored, and every D2 read answered: overview, unresolved, held, activity, ledger, policy history, owner actions |
+| A payout grant signed in the app | `grant_issue` (label `payout`, 90 days) came back NEP-413 and was signed in the dashboard; the provider's message named the label, an expiry 90 days after issue, the owner key and the provider's recipient. `SUCCESS` |
+| A policy edit on the confirm page | `policy_update` (assets, a per-transaction cap, a monthly budget, approval off, no payee yet) came back as a confirm link; the page showed each changed field before and after, with actions going from transfer to none as there is no payee. Revision 2 applied, `SUCCESS` |
+| Freeze and unfreeze | `agent_freeze` and `agent_unfreeze`, each signed on the confirm page, each `SUCCESS`. The first freeze through an app and the confirm page; a freeze by DAO vote from the retired dashboard is in the historical record (proposals #9 to #12, undated) |
+| Disconnect | The dashboard revoked its consents |
+
+Not checked here: the provider's and chain's own records of each action (read through the dashboard, not the provider);
+any payout (none was requested); whether a payout grant is accepted on an agent that only withdraws with approval off
+(the simulated provider refuses it), and whether a second withdrawal payee is a readable NEP-413 edit or goes to the
+confirm page. The reserved agent holds one of the deployment's 16 Organization slots on staging.
+
+## The dashboard's first real payout on platform staging, 2026-11-26 (UTC)
+
+A second run the same day: the MultiAgency dashboard (staging `0e1b983`, adding funding, owner approval and
+held-payout votes, #121, and USDC Organizations, #122) run locally with deployment `multiagency-dashboard`'s staging
+credential, against platform staging at api.dev.multiagency.ai on the 0.6.0 build, with the same wallet-owned agent as
+the first run. Owner and builder were two accounts the user controls. Reported by the dashboard session from the user's
+run; account names, amounts, IDs and transaction hashes are in the private release record.
+
+| Check | Result |
+|---|---|
+| Reconnecting finds the agent | The dashboard's earlier record was gone, so setup ran again for the same Organization and owner; the platform answered the existing agent, with no new creation. A consent (`owner`, `payout`, `read`, 90 days) was stored |
+| A payout grant outlives a disconnect | The first run's payout grant was still live: disconnecting ended the consent, not the provider grant, as documented |
+| Rules for USDC payouts held for the owner | A policy edit (USDC, a per-payout cap, approval on, no payee) on the confirm page, `SUCCESS` |
+| The first confidential-transfer payee | Came back as a confirm link, not readable text: the same edit turned the transfer action on (actions none → transfer). `SUCCESS` |
+| Funding through `deposit` | A one-time USDC address under the dashboard's own request ID. It was a fresh implicit account not registered on the USDC contract; it had to be registered before the transfer reached it. The funds then showed in the agent's holdings |
+| A payout request held for the owner | Filed from an approved work order under a request ID derived from it and written before the call; it read `held`, and the dashboard showed payee, amount, delivery and the work order's terms beside the vote |
+| The owner's vote | The platform offered both its confirm page (payee, amount, confidential transfer, the held payout's ID, and no payout of the same terms in 24 hours) and the readable vote text; the owner signed the readable text (recipient `outlayer.near`, naming neither payee nor amount) |
+| Settlement | `held` → vote → `processing` → paid by confidential transfer; no unknown or unresolved state. The builder confirmed the USDC in their near.com confidential balance |
+| A payout grant on an agent that only withdraws, with approval off | After revoking the grant and switching the rules to wNEAR withdrawal with approval off, a new `payout` grant was accepted (`SUCCESS`). The local simulated provider refuses it (it treats such an agent as a market agent): a gap in the simulator, not the platform |
+
+Surprises: the owner reports the wallet signed the readable vote text with no prompt, while the consent and grant in the
+same session did prompt; the wallet isn't identified and it wasn't reproduced. Staging reads answered `unavailable`
+three times in about 40 minutes (overview, unresolved, owner actions), each recovering on the next read; the cause
+isn't established.
+
+Not checked here: a second payee of an action the agent already has (readable or confirm page), a withdrawal payee on
+its own (that edit also changed asset, cap and approval), a rejected vote end to end, a wNEAR withdrawal payout, and
+DAO-owned agents.

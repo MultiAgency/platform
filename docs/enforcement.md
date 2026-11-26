@@ -1123,7 +1123,8 @@ Limits:
   to the agent's `owner/submit`, where the provider verifies it. Only the signed stop authorizes it, and the page hands
   out only a NEP-366 intent calling `freeze_wallet` (or a NEP-413 text) for the owner's account. The freeze intent is
   signable for 600 s (Limits above); unfreezing isn't offered there. Offline- and browser-tested with a stand-in
-  wallet; no freeze is recorded on mainnet ([app access](app-access.md)).
+  wallet; this page's freeze is not recorded on mainnet, while an app's freeze and unfreeze through the confirm page
+  are (2026-11-26, [mainnet log](mainnet-log.md#the-dashboards-wallet-owned-path-on-platform-staging-2026-11-26-utc)).
   It ends the consents stored by its cutoff, and after it a consent or setup for those agents is stored only if the
   platform issued its NEP-413 nonce after the cutoff ([app access](app-access.md)), so one the owner signed before the
   stop and an app sends later is refused. Apps that pick their own nonces keep working until the owner's first stop;
