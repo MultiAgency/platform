@@ -282,11 +282,11 @@ Each line is a gap; the linked page says how the rest is known. The
 **Treasury**
 - The autopilot (off by default) hasn't run unattended for days; with the dashboard retired, its warnings reach the owner
   only through an app that reads `autopilot/get` under a `treasury` consent, or the optional Telegram notices.
-- The unattended-run report can't be generated on the platform host. `pnpm run-report` signs in with the retired
-  dashboard's session and reads `/gw/interventions`, both absent on a headless host (404), and the gateway records
-  interventions only for machine-route calls, not app calls, so "no operator interventions" can't be established for an
-  app-run agent. The tick evidence itself is still written and readable through `/apps/v1` (`autopilot/evidence`,
-  `autopilot/log`) under a `treasury` consent ([unattended run](docs/unattended-run.md)). Found 2026-11-25.
+- The unattended-run report can't yet be generated on a deployed platform host: hosts on 0.6.0 record no app call as an
+  intervention, so "no operator interventions" can't be established for an app-run agent (found 2026-11-25). The 0.6.1
+  source records them, serves an agent's record over app access (`interventions-v1`) and lets `pnpm run-report` read a
+  run as an app deployment; offline-tested, not released or deployed. The record still leaves out calls made on the host
+  directly, owner signatures submitted on the confirm page and DAO vote relays ([unattended run](docs/unattended-run.md)).
 - The inline strategy workflow is offline- and browser-fixture-tested only. Stop prevents future ticks, but a tick
   already started can still submit; configuration coordination is single-host.
 - Sweep covers managed USDC, wNEAR and ETH only.

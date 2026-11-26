@@ -12,6 +12,22 @@ reclassifies a case a client used to report under another kind. An entry that ca
 looser than the TypeScript convention, which counts a new result kind as breaking. Entries name what changed for apps;
 platform-only fixes are listed separately.
 
+## 0.6.1
+
+A patch: additions only. An app server on `appClient` moves from 0.6.0 without code changes.
+
+- **`appClient(...).agent(organization, agent).interventions(since)`** reads the gateway's record of calls that could
+  act on the agent since `since` (`{ calls, corrupt }`, each call only its time, caller, agent and procedure), with a
+  `read` consent. `since` is ISO 8601 with `Z` or an offset; anything else is refused. Hosts listing the new `interventions-v1` capability serve it; older ones answer `refused` 404. It is
+  how an unattended Treasury run is shown to have had no interventions ([unattended run](unattended-run.md)).
+
+Platform only:
+- The gateway records an app's calls that could act on an agent (the same `isIntervention` rule as the owner's and
+  machine routes) in `.evidence/interventions.jsonl` before forwarding them; a call whose record can't be written isn't
+  forwarded (503). Reads aren't recorded.
+- `pnpm run-report` reads a run from a platform host as an app deployment (`PLATFORM_URL`, `APP_CREDENTIAL_FILE`,
+  `ORGANIZATION`, `AGENT`), beside the prototype dashboard mode.
+
 ## 0.6.0 (2026-11-14)
 
 A minor version: it removes an owner procedure and its capability. Nothing an app reaches through `/apps/v1` is

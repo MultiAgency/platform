@@ -9,7 +9,7 @@ metadata:
   purpose: 'Treasury proposals through an app: propose by requestId, the owner signs the exact terms, execute once, recover by state.'
   type: core
   library: '@multiagency/sdk'
-  library_version: '0.6.0'
+  library_version: '0.6.1'
 requires:
   - getting-started
   - app-server
@@ -37,6 +37,9 @@ Four consent scopes, each named in the text the owner signs:
   never calls `recover`.
 - `treasury`:
   - Treasury reads: `strategy/get`, `autopilot/get`, `autopilot/evidence`, `autopilot/log`, `treasury/get`.
+  - With `read` too, `app.agent(organization, agent).interventions(since)` (hosts listing `interventions-v1`, 0.6.1): the gateway's record of
+    calls that could act on the agent, from its owner, a machine credential or an app. It is how an unattended autopilot
+    run is shown to have had none; `corrupt` lines count against that, since they may have been calls.
   - Strategy settings (`strategy/save`), which act only once the owner signs a grant binding them.
   - Autopilot on and off (`autopilot/enable`, `autopilot/stop`), and "Run now" (`autopilot/tick`), which swaps only
     under the owner's grant for the saved strategy and within its per-run ceiling.

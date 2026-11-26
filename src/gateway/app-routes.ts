@@ -11,7 +11,8 @@ import { appendSynced } from "../synced.js";
 import type { AgentEntry } from "./config.js";
 import { daoMarketMayAsk, daoPayoutMayAsk, daoScopesCover } from "../contract/app-access.js";
 import { ownerPrepareOutput } from "../contract/owner-outputs.js";
-import { mayCall } from "./allowlist.js";
+import { isIntervention, mayCall } from "./allowlist.js";
+import { readInterventions, recordIntervention, utcTime } from "./interventions.js";
 import { accessLog, consentKeyHolds, AppConsents, AppCredentials, appMayCall, DEFAULT_REQUESTS_PER_HOUR, appMayPrepare, appMayPrepareForDao, proposalSignatureProblem, setupConsent, submittedCorrelation, UNBORN, verifyConsent, verifySetup, type ConsentRecord } from "./app-access.js";
 import { AppConfirms } from "./app-confirm.js";
 import { createORPCClient } from "@orpc/client";
@@ -195,8 +196,9 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
   if (pathname === "/apps/v1/capabilities") {
     if (req.method !== "GET") { json(res, 405, { code: "invalid_request", error: "Use GET" }); return true; }
     const treasury = options.setupAreas?.includes("treasury") || selected.some(a => a.area === "treasury" && reachable(a, credential.deployment));
-    // Every agent of this host answers `deposit` under a `requestId` and `depositStatus` (deposit-requests.ts).
-    json(res, 200, { capabilities: ["deposit-requests-v1", ...(treasury ? ["treasury-limit-orders-v1"] : [])] }); return true;
+    // Every agent of this host answers `deposit` under a `requestId` and `depositStatus` (deposit-requests.ts), and this
+    // gateway records app calls as interventions and answers an agent's record under a `read` consent.
+    json(res, 200, { capabilities: ["deposit-requests-v1", "interventions-v1", ...(treasury ? ["treasury-limit-orders-v1"] : [])] }); return true;
   }
   /** A DAO's agent for this app and Organization, with live DAO consents carrying the requested scope. Orders need both Treasury scopes. */
   const daoAgent = async (name: string, organization: string, scope: "treasury" | "treasury-orders" | "market" = "treasury") => {
@@ -768,15 +770,20 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     return true;
   }
 
-  const call = pathname.match(/^\/apps\/v1\/o\/([A-Za-z0-9_-]{1,128})\/a\/([a-z0-9-]{1,32})\/rpc\/([A-Za-z][A-Za-z0-9]*(?:\/[A-Za-z][A-Za-z0-9]*)*)$/);
+  const call = pathname.match(/^\/apps\/v1\/o\/([A-Za-z0-9_-]{1,128})\/a\/([a-z0-9-]{1,32})\/(?:rpc\/([A-Za-z][A-Za-z0-9]*(?:\/[A-Za-z][A-Za-z0-9]*)*)|(interventions))$/);
   if (!call) { json(res, 404, { code: "not_found", error: "Not found" }); return true; }
-  if (req.method !== "POST") { json(res, 405, { code: "invalid_request", error: "Use POST" }); return true; }
-  const [, organization, name, path] = call as unknown as [string, string, string, string];
+  // The gateway's own intervention record for this agent: a read the gateway answers itself, under the same checks.
+  const gatewayRead = call[4] !== undefined;
+  if (req.method !== (gatewayRead ? "GET" : "POST")) { json(res, 405, { code: "invalid_request", error: gatewayRead ? "Use GET" : "Use POST" }); return true; }
+  const [, organization, name] = call as unknown as [string, string, string];
+  const path = call[3] ?? "interventions";
+  const since = url.searchParams.get("since") ?? "";
+  if (gatewayRead && utcTime(since) === null) { json(res, 400, { code: "invalid_request", error: "Name the time to read from as ISO 8601 with its zone: ?since=2026-12-01T00:00:00Z" }); return true; }
   const agent = selected.find(a => a.name === name && reachable(a, credential.deployment, organization));
   const live = agent ? consents.live({ deployment: credential.deployment, host, organization, agent: name }).filter(c => c.owner === agent.owner) : [];
   // The scope check below would refuse this too; refusing here spares the ownership lookup's provider and chain reads.
   if (!agent || !live.length) { json(res, 403, { code: "no_consent", access: "agent", error: "No live owner consent covers this Organization and agent" }); return true; }
-  const input = await readJson(req);
+  const input = gatewayRead ? undefined : await readJson(req);
   // A DAO's consents answer to the DAO's derived account now, re-read on every call; a wallet's to the wallet's.
   const byDao = live.some(c => c.signer === "dao");
   // Through an app, an owner's wallet signs only what it can read or what the platform built entirely; a DAO votes only on
@@ -802,7 +809,7 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     (c.agentId === UNBORN && authority.agentId !== null && FOLLOW_CREATION.has(path)));
   // A DAO's treasury consent also covers preparing the owner actions it votes on (checked above); its market consent, a
   // market agent's own grant, its revocation, freeze, unfreeze and cap edits (`daoMarketMayAsk`, #67).
-  const covers = (c: ConsentRecord) => byDao
+  const covers = (c: ConsentRecord) => gatewayRead ? c.scopes.includes("read") : byDao
     ? (mayCall(authority.access, path) && (daoScopesCover(c.scopes, path) || (c.agentId === UNBORN && FOLLOW_CREATION.has(path))) && path !== "owner/prepare")
       || (prepared !== undefined && (c.agentId === UNBORN ? prepared.type === "agent_create" && (prepared.role ?? "treasury") === (agent.area === "payables" ? "payout" : agent.area) : prepared.type !== "agent_create"
         && ((c.scopes.includes("treasury") && prepared.type !== "approval_vote" && !(prepared.type === "grant_issue" && prepared.label === "payout")) || (agent.area === "payables" && c.scopes.includes("payout") && daoPayoutMayAsk(prepared)) || (agent.area === "market" && c.scopes.includes("market") && daoMarketMayAsk(prepared)))))
@@ -836,8 +843,19 @@ async function route(req: IncomingMessage, res: ServerResponse, pathname: string
     !consents.live({ deployment: credential.deployment, host, organization, agent: name }).some(c => c.id === consent.id)) {
     json(res, 403, { code: "access_ended", access: "agent", error: "Access ended before forwarding" }); return true;
   }
+  // Recorded before it runs, as on the owner's and machine routes, or not run; then the access log names the call.
+  if (!gatewayRead && isIntervention(path)) {
+    try {
+      recordIntervention({ at: new Date().toISOString(), account: `app:${credential.deployment}:${organization}`, agent: name, path,
+        owner: agent.owner, agentId: authority.agentId, host: host.toLowerCase(), consent: consent.id, appCredentialId: credential.id });
+    } catch { json(res, 503, { error: "The call could not be recorded, so it was not forwarded." }); return true; }
+  }
   appendSynced(accessLog(ROOT), { at: new Date().toISOString(), deployment: credential.deployment, credential: credential.id,
     event: "call", consent: consent.id, organization, owner: agent.owner, agent: name, agentId: authority.agentId, path });
+  if (gatewayRead) {
+    const { calls, corrupt } = readInterventions(since);
+    json(res, 200, { calls: calls.filter(c => c.agent === name), corrupt }); return true;
+  }
   // A readable (NEP-413) intent goes to the app: its text is one the owner's wallet can show. A NEP-366 intent is held here for the
   // owner to sign on the platform's confirm page; the app gets the link, not the bytes. Anything else isn't released.
   const release = prepared && ((reply: unknown) => {
